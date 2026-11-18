@@ -151,7 +151,7 @@ import {
   withholdingSummary,
 } from './accounting.js';
 import { importTallyXml } from './tally.js';
-import { xlsxToCsv } from './xlsx.js';
+import { buildXlsx, xlsxToCsv } from './xlsx.js';
 
 const WORKSPACE_KEY = 'zledgercraft.workspace.v1';
 let state = loadState();
@@ -1458,6 +1458,7 @@ function reportToolbarHtml() {
     <span class="muted">${esc(title)} · ${esc(reportPeriodLabel())}</span>
     <div class="toolbar-actions">
       <button class="btn small ghost" type="button" data-action="print-report">Print</button>
+      <button class="btn small ghost" type="button" data-action="export-xlsx">Export Excel</button>
       <button class="btn small ghost" type="button" data-action="export-csv">Export CSV</button>
     </div>
   </div>`;
@@ -7346,9 +7347,9 @@ function downloadJsonFile(filename, payload) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function exportReportCsv() {
+function reportExportData() {
   const active = company();
-  if (!active) return;
+  if (!active) return null;
   const title = REPORT_TITLES[view.screen] ?? 'Report';
   const rows = [
     [title],
@@ -7357,6 +7358,18 @@ function exportReportCsv() {
     ['Generated', dateLabel(todayIso())],
     [],
   ];
+  const kpis = [...document.querySelectorAll('.mis-kpis .mis-kpi')];
+  if (kpis.length) {
+    rows.push(['MIS summary'], ['Metric', 'Value', 'Note']);
+    for (const kpi of kpis) {
+      rows.push([
+        kpi.querySelector('span')?.textContent.trim() ?? '',
+        kpi.querySelector('strong')?.textContent.trim() ?? '',
+        kpi.querySelector('small')?.textContent.trim() ?? '',
+      ]);
+    }
+    rows.push([]);
+  }
   for (const section of document.querySelectorAll('main section.panel')) {
     const heading = section.querySelector('.panel-head h2')?.textContent.trim();
     const tables = [...section.querySelectorAll('table')].filter(
@@ -7376,6 +7389,13 @@ function exportReportCsv() {
     }
   }
   while (rows.length && rows[rows.length - 1].length === 0) rows.pop();
+  return { title, rows };
+}
+
+function exportReportCsv() {
+  const report = reportExportData();
+  if (!report) return;
+  const { title, rows } = report;
   const csv = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
   const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -7387,6 +7407,25 @@ function exportReportCsv() {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   setFlash(`Exported ${title} as CSV.`);
+  render();
+}
+
+function exportReportXlsx() {
+  const report = reportExportData();
+  if (!report) return;
+  const { title, rows } = report;
+  const blob = new Blob([buildXlsx([{ name: title, rows }])], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `ZledgerCraft-${title.replace(/[^a-z0-9]+/gi, '-')}-${todayIso()}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setFlash(`Exported ${title} as Excel.`);
   render();
 }
 
@@ -8174,6 +8213,9 @@ async function handleClick(event) {
     }
     case 'print-report':
       window.print();
+      break;
+    case 'export-xlsx':
+      exportReportXlsx();
       break;
     case 'export-csv':
       exportReportCsv();

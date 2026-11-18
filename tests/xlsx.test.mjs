@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { deflateRawSync } from 'node:zlib';
-import { parseXlsxWorkbook, pickSheet, rowsToCsv, xlsxToCsv } from '../src/xlsx.js';
+import { buildXlsx, parseXlsxWorkbook, pickSheet, rowsToCsv, xlsxToCsv } from '../src/xlsx.js';
 
 function u16(value) {
   const buffer = Buffer.alloc(2);
@@ -154,6 +154,27 @@ test('XLSX rows are quoted safely for the CSV importer', () => {
     ]),
     'Name,Narration\n"Rent, Shop","Line one\nLine ""two"""',
   );
+});
+
+test('XLSX writer builds a readable workbook with numbers and escaped text', async () => {
+  const bytes = buildXlsx([
+    {
+      name: 'MIS: 2026/27',
+      rows: [
+        ['Net sales', 1000],
+        ['Rent & rates', 'Line <one>'],
+        [],
+      ],
+    },
+    { name: 'MIS: 2026/27', rows: [['Second sheet']] },
+  ]);
+  assert.ok(bytes instanceof Uint8Array);
+  assert.ok(bytes.length > 100);
+
+  const workbook = await parseXlsxWorkbook(bytes);
+  assert.deepEqual(workbook.sheets.map((sheet) => sheet.name), ['MIS  2026 27', 'MIS  2026 27 (2)']);
+  assert.deepEqual(workbook.sheets[0].rows[0], ['Net sales', '1000']);
+  assert.deepEqual(workbook.sheets[0].rows[1], ['Rent & rates', 'Line <one>']);
 });
 
 test('XLSX rejects files that are not zipped workbooks', async () => {

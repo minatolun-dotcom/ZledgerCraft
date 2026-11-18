@@ -38,7 +38,7 @@ Working now:
   consumes components and brings finished goods in at component cost.
 - Multi-FY selector, close/reopen, automatic next year and cumulative
   carry-forward.
-- Print/CSV, JSON backup/restore with snapshots, dashboard KPIs and keyboard-first
+- Print/CSV/Excel, JSON backup/restore with snapshots, dashboard KPIs and keyboard-first
   navigation.
 - Append-only local audit trail for companies, masters, vouchers, users,
   financial years and data restores, with actor attribution, search, company
@@ -117,12 +117,12 @@ Working now:
   net profit, working capital and closing stock; top-five customer and supplier
   concentration tables; a stock position with closing value, top items by value
   and items with no issues during the year; working capital; top expense heads;
-  plus Print/CSV from the Statistics screen.
-- Verification: 168/168 engine tests (12 GST, 12 TDS/TCS, 10 payroll, 5
-  compliance, 18 inventory, 11 Tally import, 4 XLSX); all 26 browser suites,
+  plus Print/CSV/Excel from the Statistics screen.
+- Verification: 170/170 engine tests (12 GST, 12 TDS/TCS, 10 payroll, 5
+  compliance, 18 inventory, 11 Tally import, 5 XLSX); all 26 browser suites,
   including the godown/batch/transfer/order/manufacturing suite (18 checks), the
   workspace conflict suite (8 checks) and the expanded import suite, exit
-  successfully with no page errors; single-file build 762.3 kB.
+  successfully with no page errors; single-file build 771.1 kB.
 
 Why it is not production-ready: data lives in one browser's local storage, the
 audit trail is app-level rather than tamper-proof, profiles are not
@@ -315,10 +315,14 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - Added MIS summary cards for net sales, net purchases, net profit, working
   capital and closing stock at the top of Statistics (build 762.3 kB; all 169
   engine tests pass).
+- Added dependency-free Excel export to every report screen. The workbook uses
+  inline strings and stored ZIP entries, includes the MIS summary cards and all
+  visible report tables, and was round-trip tested through the app's XLSX reader
+  (build 771.1 kB; all 170 engine tests pass).
 - **Stage 4 item 4 remains partial:** local charting, MIS summary, party
-  concentration, stock position, working capital and expense concentration are
-  present; scheduled email/Excel delivery and forecast reports remain (KL-29,
-  KL-30). Scheduled delivery needs a backend or mail service.
+  concentration, stock position, working capital, expense concentration and
+  Excel export are present; scheduled email delivery and forecast reports remain
+  (KL-29, KL-30). Scheduled delivery needs a backend or mail service.
 
 ### 2026-11-18 — Local-only static release
 

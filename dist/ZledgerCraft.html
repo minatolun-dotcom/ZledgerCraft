@@ -10814,6 +10814,191 @@ function rowsToCsv(rows) {
     .join('\n');
 }
 
+function xmlEscape(value) {
+  return String(value)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function columnName(index) {
+  let value = index + 1;
+  let name = '';
+  while (value > 0) {
+    value -= 1;
+    name = String.fromCharCode(65 + (value % 26)) + name;
+    value = Math.floor(value / 26);
+  }
+  return name;
+}
+
+function sheetXml(rows) {
+  const body = (rows ?? [])
+    .map((row, rowIndex) => {
+      const cells = row
+        .map((value, columnIndex) => {
+          if (value === null || value === undefined || value === '') return '';
+          const ref = `${columnName(columnIndex)}${rowIndex + 1}`;
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            return `<c r="${ref}"><v>${value}</v></c>`;
+          }
+          const text = String(value).slice(0, 32767);
+          return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(text)}</t></is></c>`;
+        })
+        .join('');
+      return `<row r="${rowIndex + 1}">${cells}</row>`;
+    })
+    .join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
+}
+
+function sheetName(name, index, used) {
+  let base = String(name ?? '').replace(/[\\/?*\[\]:]/g, ' ').trim().slice(0, 31) || `Sheet${index + 1}`;
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate.toLowerCase())) {
+    const tail = ` (${suffix})`;
+    candidate = `${base.slice(0, 31 - tail.length)}${tail}`;
+    suffix += 1;
+  }
+  used.add(candidate.toLowerCase());
+  return candidate;
+}
+
+let crcTable = null;
+function crc32(bytes) {
+  if (!crcTable) {
+    crcTable = new Uint32Array(256);
+    for (let index = 0; index < 256; index += 1) {
+      let value = index;
+      for (let bit = 0; bit < 8; bit += 1) {
+        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+      }
+      crcTable[index] = value >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function concatBytes(parts) {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const output = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.length;
+  }
+  return output;
+}
+
+function zipStore(entries) {
+  const encoder = new TextEncoder();
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const locals = [];
+  const central = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const name = encoder.encode(entry.name);
+    const data = typeof entry.data === 'string' ? encoder.encode(entry.data) : entry.data;
+    const crc = crc32(data);
+    const local = new Uint8Array(30 + name.length + data.length);
+    const localView = new DataView(local.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0x0800, true);
+    localView.setUint16(10, dosTime, true);
+    localView.setUint16(12, dosDate, true);
+    localView.setUint32(14, crc, true);
+    localView.setUint32(18, data.length, true);
+    localView.setUint32(22, data.length, true);
+    localView.setUint16(26, name.length, true);
+    local.set(name, 30);
+    local.set(data, 30 + name.length);
+    locals.push(local);
+
+    const directory = new Uint8Array(46 + name.length);
+    const directoryView = new DataView(directory.buffer);
+    directoryView.setUint32(0, 0x02014b50, true);
+    directoryView.setUint16(4, 20, true);
+    directoryView.setUint16(6, 20, true);
+    directoryView.setUint16(8, 0x0800, true);
+    directoryView.setUint16(12, dosTime, true);
+    directoryView.setUint16(14, dosDate, true);
+    directoryView.setUint32(16, crc, true);
+    directoryView.setUint32(20, data.length, true);
+    directoryView.setUint32(24, data.length, true);
+    directoryView.setUint16(28, name.length, true);
+    directoryView.setUint32(42, offset, true);
+    directory.set(name, 46);
+    central.push(directory);
+    offset += local.length;
+  }
+  const directorySize = central.reduce((sum, part) => sum + part.length, 0);
+  const end = new Uint8Array(22);
+  const endView = new DataView(end.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(8, entries.length, true);
+  endView.setUint16(10, entries.length, true);
+  endView.setUint32(12, directorySize, true);
+  endView.setUint32(16, offset, true);
+  return concatBytes([...locals, ...central, end]);
+}
+
+/**
+ * Builds a small dependency-free .xlsx workbook from `[{ name, rows }]`.
+ * Values become numbers when numeric and inline strings otherwise; no styles,
+ * formulas, charts or merged cells are written.
+ */
+function buildXlsx(sheets) {
+  const source = Array.isArray(sheets) && sheets.length ? sheets : [{ name: 'Sheet1', rows: [] }];
+  const used = new Set();
+  const named = source.map((sheet, index) => ({
+    name: sheetName(sheet.name, index, used),
+    rows: Array.isArray(sheet.rows) ? sheet.rows : [],
+  }));
+  const worksheetOverrides = named
+    .map(
+      (_, index) =>
+        `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+    )
+    .join('');
+  const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${named
+    .map((sheet, index) => `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`)
+    .join('')}</sheets></workbook>`;
+  const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${named
+    .map(
+      (_, index) =>
+        `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`,
+    )
+    .join('')}</Relationships>`;
+  const entries = [
+    {
+      name: '[Content_Types].xml',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${worksheetOverrides}</Types>`,
+    },
+    {
+      name: '_rels/.rels',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    },
+    { name: 'xl/workbook.xml', data: workbook },
+    { name: 'xl/_rels/workbook.xml.rels', data: workbookRels },
+    ...named.map((sheet, index) => ({ name: `xl/worksheets/sheet${index + 1}.xml`, data: sheetXml(sheet.rows) })),
+  ];
+  return zipStore(entries);
+}
+
 /** Read an .xlsx file into reviewed CSV text for one of the existing importers. */
 async function xlsxToCsv(buffer, preferredName) {
   const workbook = await parseXlsxWorkbook(buffer);
@@ -12137,6 +12322,7 @@ function reportToolbarHtml() {
     <span class="muted">${esc(title)} · ${esc(reportPeriodLabel())}</span>
     <div class="toolbar-actions">
       <button class="btn small ghost" type="button" data-action="print-report">Print</button>
+      <button class="btn small ghost" type="button" data-action="export-xlsx">Export Excel</button>
       <button class="btn small ghost" type="button" data-action="export-csv">Export CSV</button>
     </div>
   </div>`;
@@ -18025,9 +18211,9 @@ function downloadJsonFile(filename, payload) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function exportReportCsv() {
+function reportExportData() {
   const active = company();
-  if (!active) return;
+  if (!active) return null;
   const title = REPORT_TITLES[view.screen] ?? 'Report';
   const rows = [
     [title],
@@ -18036,6 +18222,18 @@ function exportReportCsv() {
     ['Generated', dateLabel(todayIso())],
     [],
   ];
+  const kpis = [...document.querySelectorAll('.mis-kpis .mis-kpi')];
+  if (kpis.length) {
+    rows.push(['MIS summary'], ['Metric', 'Value', 'Note']);
+    for (const kpi of kpis) {
+      rows.push([
+        kpi.querySelector('span')?.textContent.trim() ?? '',
+        kpi.querySelector('strong')?.textContent.trim() ?? '',
+        kpi.querySelector('small')?.textContent.trim() ?? '',
+      ]);
+    }
+    rows.push([]);
+  }
   for (const section of document.querySelectorAll('main section.panel')) {
     const heading = section.querySelector('.panel-head h2')?.textContent.trim();
     const tables = [...section.querySelectorAll('table')].filter(
@@ -18055,6 +18253,13 @@ function exportReportCsv() {
     }
   }
   while (rows.length && rows[rows.length - 1].length === 0) rows.pop();
+  return { title, rows };
+}
+
+function exportReportCsv() {
+  const report = reportExportData();
+  if (!report) return;
+  const { title, rows } = report;
   const csv = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
   const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -18066,6 +18271,25 @@ function exportReportCsv() {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   setFlash(`Exported ${title} as CSV.`);
+  render();
+}
+
+function exportReportXlsx() {
+  const report = reportExportData();
+  if (!report) return;
+  const { title, rows } = report;
+  const blob = new Blob([buildXlsx([{ name: title, rows }])], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `ZledgerCraft-${title.replace(/[^a-z0-9]+/gi, '-')}-${todayIso()}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setFlash(`Exported ${title} as Excel.`);
   render();
 }
 
@@ -18853,6 +19077,9 @@ async function handleClick(event) {
     }
     case 'print-report':
       window.print();
+      break;
+    case 'export-xlsx':
+      exportReportXlsx();
       break;
     case 'export-csv':
       exportReportCsv();

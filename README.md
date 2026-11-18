@@ -129,7 +129,7 @@ storage because GitHub Pages cannot run the optional Node/SQLite server.
   voucher. One run is allowed per month and the run stores the amounts and
   voucher lines as a snapshot.
 - Printable payslips for a run with company, employee, earnings, deductions and
-  net pay, and a salary register by month, employee and pay head with Print/CSV.
+  net pay, and a salary register by month, employee and pay head with Print/CSV/Excel.
   PF, ESI and professional tax are manually entered deductions with reporting
   tags; no return, challan or certificate is produced.
 
@@ -236,10 +236,10 @@ storage because GitHub Pages cannot run the optional Node/SQLite server.
 - Group Summary with group vouchers drill-down.
 - Cash Flow (receipts and payments grouped by ledger group) and Ratio Analysis
   (current, quick, debt/equity, gross and net margin, return on assets).
-- Statistics: a monthly MIS chart of sales and purchases with returns, net sales/purchases, receipts, payments and net cash, plus summary cards, top-five customer and supplier concentration tables, a stock position with top items by value and items with no issues, working capital, top expense heads, voucher counts/values by type and ledger counts by group. Print/CSV cover the statistics screen.
+- Statistics: a monthly MIS chart of sales and purchases with returns, net sales/purchases, receipts, payments and net cash, plus summary cards, top-five customer and supplier concentration tables, a stock position with top items by value and items with no issues, working capital, top expense heads, voucher counts/values by type and ledger counts by group. Print, CSV and Excel cover the statistics screen.
 - Audit trail: append-only history of company, master, voucher, user,
   financial-year and restore actions, including who made the change, filterable
-  by company or text. Print/CSV are available. The
+  by company or text. Print, CSV and Excel are available. The
   log is carried in backups; restoring preserves current history and adds a
   restore event. It is append-only in the app, but not tamper-proof against
   direct edits to browser storage.
@@ -247,7 +247,7 @@ storage because GitHub Pages cannot run the optional Node/SQLite server.
   expenses, gross and net profit, assets, liabilities, cash, bank, receivables,
   payables and voucher counts. P&L is scoped per year; balance-sheet figures are
   cumulative at each year end.
-- Every report has Print and CSV export, with a company/period header on the
+- Every report has Print, CSV and Excel export, with a company/period header on the
   printed page.
 - The gateway doubles as a dashboard: cash, bank, net P&L, this month's sales,
   receivables, payables and out-of-stock items, all clickable.
@@ -367,7 +367,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | Bill-wise entry and allocation | Covered — bill refs, due dates, explicit/FIFO settlements, ageing, bill-wise register and party statement with bill detail; no bill-wise opening allocation or bill interest |
 | User roles, TallyVault, edit log, cloud sync | Partial — local owner/accountant/viewer profiles, append-only audit trail, optional same-machine SQLite workspace with revision conflict detection; no authenticated users, vault encryption, automatic merge or cloud sync |
 | Tally XML and Excel import | Partial — Tally XML account groups, ledgers, stock groups, stock items with opening stock, balanced vouchers and matching voucher stock lines import; batch names/expiry attach to locally batch-tracked items; Excel `.xlsx` ledgers and vouchers load into the reviewed CSV path; custom Tally groups need a standard parent and units must pre-exist; skipped stock lines do not roll back the voucher; no batch masters, bill allocations, cost centres, GST/TDS detail, voucher numbers, APIs or webhooks |
-| Custom printing layouts | Print view and CSV export; no layout designer |
+| Custom printing layouts | Print view plus CSV and Excel export; no layout designer |
 
 Semantic notes: sub-period P&L excludes ledger opening balances (they belong to
 the year, not the slice); receivables ageing settles the oldest invoice first

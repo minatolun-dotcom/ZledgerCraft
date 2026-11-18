@@ -281,6 +281,18 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 ## Progress log
 
+### 2026-11-18 — Local-only static release
+
+- Published the standalone `app/` contents as the public
+  `minatolun-dotcom/ZledgerCraft` repository and enabled GitHub Pages at
+  `https://minatolun-dotcom.github.io/ZledgerCraft/`.
+- Added `.nojekyll` so the ES modules are served directly. The Pages build uses
+  browser storage; the optional Node/SQLite server remains local-only.
+- Verified the live Pages app creates a company, persists it across reload and
+  loads without page errors or failed requests.
+- Cloud authentication/sync and scheduled delivery are explicitly deferred; they
+  require an external account and are not part of the free local-only release.
+
 ### 2026-11-18 — Stage 4: Tally stock lines and batches
 
 - Added Tally voucher inventory parsing: stock item, quantity (including unit

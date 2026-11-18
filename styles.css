@@ -1816,6 +1816,40 @@ kbd {
 }
 
 /* --- Monthly MIS --- */
+.mis-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.7rem;
+  margin: 0 0 1rem;
+}
+
+.mis-kpi {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.8rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.mis-kpi span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mis-kpi strong {
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.mis-kpi small {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
 .mis-chart {
   margin: 0.15rem 0 1rem;
 }

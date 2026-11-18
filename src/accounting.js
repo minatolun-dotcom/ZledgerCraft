@@ -2620,6 +2620,7 @@ export function statistics(company) {
     voucherCounts,
     stock,
     workingCapital,
+    netProfit: pnl?.netProfit ?? 0,
     expenseTotal,
     topExpenses,
     topCustomers: topParties(['Sales', 'CreditNote'], 'sundryDebtors'),

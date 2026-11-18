@@ -522,6 +522,7 @@ test('statistics count vouchers, ledgers and groups', () => {
   assert.equal(stats.workingCapital.bank, 1400);
   assert.equal(stats.workingCapital.stock, 0);
   assert.equal(stats.workingCapital.net, 2100);
+  assert.equal(stats.netProfit, 300);
 });
 
 test('backup export and restore round-trip through validation', () => {

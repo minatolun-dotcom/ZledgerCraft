@@ -3579,6 +3579,13 @@ function statisticsScreen() {
   </table>`;
 
   return `
+    <div class="mis-kpis" aria-label="MIS summary">
+      <div class="mis-kpi"><span>Net sales</span><strong>${money(netSales)}</strong><small>After returns</small></div>
+      <div class="mis-kpi"><span>Net purchases</span><strong>${money(netPurchases)}</strong><small>After returns</small></div>
+      <div class="mis-kpi"><span>Net profit</span><strong class="${stats.netProfit < 0 ? 'neg' : ''}">${money(stats.netProfit)}</strong><small>Current financial year</small></div>
+      <div class="mis-kpi"><span>Working capital</span><strong class="${stats.workingCapital.net < 0 ? 'neg' : ''}">${money(stats.workingCapital.net)}</strong><small>Year-end</small></div>
+      ${stats.stock ? `<div class="mis-kpi"><span>Closing stock</span><strong>${money(stats.stock.closingValue)}</strong><small>At year end</small></div>` : ''}
+    </div>
     ${panel(
       'Monthly MIS',
       `<div class="mis-chart" role="img" aria-label="Monthly sales and purchases">

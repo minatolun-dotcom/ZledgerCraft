@@ -3569,6 +3569,14 @@ function statisticsScreen() {
           .join('')
       : `<tr><td colspan="4" class="muted">${esc(emptyLabel)}</td></tr>`}</tbody>
   </table>`;
+  const expenseTable = (rows) => `<table class="data-table compact">
+    <thead><tr><th>Expense head</th><th>Group</th><th class="num">Amount</th><th class="num">Share</th></tr></thead>
+    <tbody>${rows
+      .map(
+        (row) => `<tr><td>${esc(row.name)}</td><td>${esc(row.groupName)}</td><td class="num">${money(row.amount)}</td><td class="num">${row.share.toFixed(1)}%</td></tr>`,
+      )
+      .join('')}</tbody>
+  </table>`;
 
   return `
     ${panel(
@@ -3601,6 +3609,13 @@ function statisticsScreen() {
             <div><h3>No issues this year</h3>${stockTable(stats.stock.idleItems, 'Every stocked item had an outward movement this year.')}</div>
           </div>`,
           'Closing quantities and values use the weighted-average cost at the financial year end. “No issues” means no stock left the item during the year; it is a review flag, not proof of obsolescence.',
+        )
+      : ''}
+    ${stats.topExpenses.length
+      ? panel(
+          'Expense concentration',
+          `<p class="muted">Total expenses <strong>${money(stats.expenseTotal)}</strong> across the year.</p>${expenseTable(stats.topExpenses)}`,
+          'Top five expense ledgers by net amount for the financial year. Purchases are included; credit balances and zero-value heads are excluded.',
         )
       : ''}
     ${panel(

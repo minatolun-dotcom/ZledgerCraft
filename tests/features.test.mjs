@@ -511,6 +511,11 @@ test('statistics count vouchers, ledgers and groups', () => {
   assert.equal(stats.topCustomers[0].share, 100);
   assert.equal(stats.topSuppliers[0].name, 'Gupta Supplies');
   assert.equal(stats.topSuppliers[0].amount, 400);
+  assert.equal(stats.expenseTotal, 600);
+  assert.equal(stats.topExpenses[0].name, 'Purchases');
+  assert.equal(stats.topExpenses[0].amount, 400);
+  assert.equal(stats.topExpenses[0].share, 66.67);
+  assert.equal(stats.topExpenses[1].name, 'Rent');
 });
 
 test('backup export and restore round-trip through validation', () => {

@@ -2576,10 +2576,29 @@ export function statistics(company) {
     };
   }
 
+  const pnl = (company.vouchers ?? []).length ? profitAndLoss(company) : null;
+  const expenseRows = pnl
+    ? [...pnl.direct.expenseSections, ...pnl.indirect.expenseSections].flatMap((section) => section.rows)
+    : [];
+  const expenseTotal = round2(expenseRows.reduce((sum, row) => sum + Math.max(0, row.amount), 0));
+  const topExpenses = expenseRows
+    .filter((row) => row.amount > 0)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5)
+    .map((row) => ({
+      ledgerId: row.ledgerId,
+      name: row.name,
+      groupName: row.groupName,
+      amount: row.amount,
+      share: expenseTotal > 0 ? round2((row.amount / expenseTotal) * 100) : 0,
+    }));
+
   const sorted = vouchersSorted(company);
   return {
     voucherCounts,
     stock,
+    expenseTotal,
+    topExpenses,
     topCustomers: topParties(['Sales', 'CreditNote'], 'sundryDebtors'),
     topSuppliers: topParties(['Purchase', 'DebitNote'], 'sundryCreditors'),
     voucherTotal: company.vouchers.length,

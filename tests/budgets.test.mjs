@@ -1,0 +1,277 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  addBudget,
+  addGroup,
+  addLedger,
+  addVoucher,
+  createCompany,
+  deleteBudget,
+  deleteGroup,
+  deleteLedger,
+  exportState,
+  findLedgerByName,
+  importState,
+  normalizeBudgets,
+} from '../src/store.js';
+import { budgetVsActual } from '../src/accounting.js';
+
+function budgetFixture() {
+  const company = createCompany('Budget Co', '2026-04-01').company;
+  const bank = findLedgerByName(company, 'Bank');
+  const sales = findLedgerByName(company, 'Sales');
+  const rent = addLedger(company, {
+    name: 'Rent',
+    groupId: company.groups.find((group) => group.key === 'indirectExpenses').id,
+    opening: 0,
+  }).ledger;
+  const salaries = addLedger(company, {
+    name: 'Salaries',
+    groupId: company.groups.find((group) => group.key === 'indirectExpenses').id,
+    opening: 0,
+  }).ledger;
+  const customer = addLedger(company, {
+    name: 'Acme Customer',
+    groupId: company.groups.find((group) => group.key === 'sundryDebtors').id,
+    opening: 0,
+  }).ledger;
+  return { company, bank, sales, rent, salaries, customer };
+}
+
+function expense(company, bank, ledger, amount, date) {
+  return addVoucher(company, {
+    type: 'Payment',
+    date,
+    lines: [
+      { ledgerId: ledger.id, side: 'Dr', amount },
+      { ledgerId: bank.id, side: 'Cr', amount },
+    ],
+  });
+}
+
+function yearId(company) {
+  return company.years[0].id;
+}
+
+test('budgets validate targets, years, amounts and duplicates', () => {
+  const { company, rent } = budgetFixture();
+  assert.deepEqual(company.budgets, []);
+  const budget = addBudget(company, {
+    name: 'Rent plan',
+    targetType: 'ledger',
+    targetId: rent.id,
+    yearId: yearId(company),
+    amount: 1000,
+  });
+  assert.equal(budget.ok, true, budget.error);
+  assert.equal(company.budgets.length, 1);
+  assert.equal(company.budgets[0].name, 'Rent plan');
+
+  const duplicateTarget = addBudget(company, {
+    name: 'Rent plan 2',
+    targetType: 'ledger',
+    targetId: rent.id,
+    yearId: yearId(company),
+    amount: 500,
+  });
+  assert.equal(duplicateTarget.ok, false);
+  assert.match(duplicateTarget.error, /already exists/i);
+
+  const duplicateName = addBudget(company, {
+    name: 'rent plan',
+    targetType: 'ledger',
+    targetId: findLedgerByName(company, 'Bank').id,
+    yearId: yearId(company),
+    amount: 500,
+  });
+  assert.equal(duplicateName.ok, false);
+  assert.match(duplicateName.error, /already exists/i);
+
+  const badTarget = addBudget(company, {
+    name: 'Missing',
+    targetType: 'ledger',
+    targetId: 'missing',
+    yearId: yearId(company),
+    amount: 10,
+  });
+  assert.equal(badTarget.ok, false);
+  assert.match(badTarget.error, /target not found/i);
+
+  const badAmount = addBudget(company, {
+    name: 'Negative',
+    targetType: 'ledger',
+    targetId: findLedgerByName(company, 'Rent').id,
+    yearId: yearId(company),
+    amount: -1,
+  });
+  assert.equal(badAmount.ok, false);
+  assert.match(badAmount.error, /zero or more/i);
+});
+
+test('budget vs actual measures expense movement up to the as-on date', () => {
+  const { company, bank, rent } = budgetFixture();
+  expense(company, bank, rent, 600, '2026-04-10');
+  expense(company, bank, rent, 200, '2026-05-10');
+  const added = addBudget(company, {
+    name: 'Rent plan',
+    targetType: 'ledger',
+    targetId: rent.id,
+    yearId: yearId(company),
+    amount: 1000,
+  });
+  assert.equal(added.ok, true, added.error);
+
+  const april = budgetVsActual(company, { yearId: yearId(company), asOn: '2026-04-30' });
+  assert.equal(april.count, 1);
+  assert.equal(april.rows[0].actual, 600);
+  assert.equal(april.rows[0].variance, 400);
+  assert.equal(april.rows[0].usedPercent, 60);
+  assert.equal(april.rows[0].over, false);
+
+  const may = budgetVsActual(company, { yearId: yearId(company), asOn: '2026-05-31' });
+  assert.equal(may.rows[0].actual, 800);
+  assert.equal(may.rows[0].variance, 200);
+  assert.equal(may.totalBudget, 1000);
+  assert.equal(may.totalActual, 800);
+});
+
+test('group budgets include child ledgers and income uses the credit side', () => {
+  const { company, bank, rent, salaries, sales, customer } = budgetFixture();
+  expense(company, bank, rent, 400, '2026-04-05');
+  expense(company, bank, salaries, 300, '2026-04-06');
+  addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-07',
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 3000 },
+      { ledgerId: sales.id, side: 'Cr', amount: 3000 },
+    ],
+  });
+  const expenseGroup = company.groups.find((group) => group.key === 'indirectExpenses');
+  const salesGroup = company.groups.find((group) => group.key === 'sales');
+  assert.equal(
+    addBudget(company, {
+      name: 'Overheads',
+      targetType: 'group',
+      targetId: expenseGroup.id,
+      yearId: yearId(company),
+      amount: 1000,
+    }).ok,
+    true,
+  );
+  assert.equal(
+    addBudget(company, {
+      name: 'Sales plan',
+      targetType: 'group',
+      targetId: salesGroup.id,
+      yearId: yearId(company),
+      amount: 5000,
+    }).ok,
+    true,
+  );
+
+  const report = budgetVsActual(company, { yearId: yearId(company), asOn: '2026-04-30' });
+  const overheads = report.rows.find((row) => row.name === 'Overheads');
+  const salesPlan = report.rows.find((row) => row.name === 'Sales plan');
+  assert.equal(overheads.actual, 700);
+  assert.equal(overheads.over, false);
+  assert.equal(salesPlan.actual, 3000);
+  assert.equal(salesPlan.variance, 2000);
+  assert.equal(salesPlan.over, false);
+  assert.equal(report.totalActual, 3700);
+});
+
+test('over-budget rows are flagged and budgets can be deleted', () => {
+  const { company, bank, rent } = budgetFixture();
+  expense(company, bank, rent, 1200, '2026-04-10');
+  const added = addBudget(company, {
+    name: 'Rent plan',
+    targetType: 'ledger',
+    targetId: rent.id,
+    yearId: yearId(company),
+    amount: 1000,
+  });
+  const report = budgetVsActual(company, { yearId: yearId(company), asOn: '2026-04-30' });
+  assert.equal(report.rows[0].actual, 1200);
+  assert.equal(report.rows[0].variance, -200);
+  assert.equal(report.rows[0].over, true);
+  assert.equal(report.overCount, 1);
+
+  const removed = deleteBudget(company, added.budget.id);
+  assert.equal(removed.ok, true, removed.error);
+  assert.equal(company.budgets.length, 0);
+});
+
+test('budgets survive backup and reject missing targets on restore', () => {
+  const { company, rent } = budgetFixture();
+  addBudget(company, {
+    name: 'Rent plan',
+    targetType: 'ledger',
+    targetId: rent.id,
+    yearId: yearId(company),
+    amount: 1000,
+  });
+  const exported = exportState({ version: 1, activeCompanyId: company.id, companies: [company] });
+  const restored = importState(exported);
+  assert.equal(restored.ok, true, restored.error);
+  assert.equal(restored.state.companies[0].budgets[0].name, 'Rent plan');
+  assert.equal(budgetVsActual(restored.state.companies[0], { asOn: '2026-04-30' }).count, 1);
+
+  company.budgets[0].targetId = 'missing-ledger';
+  const broken = importState(exportState({ version: 1, activeCompanyId: company.id, companies: [company] }));
+  assert.equal(broken.ok, false);
+  assert.match(broken.error, /missing ledger/i);
+});
+
+test('budgeted ledgers and groups cannot be deleted', () => {
+  const { company, rent } = budgetFixture();
+  addBudget(company, {
+    name: 'Rent plan',
+    targetType: 'ledger',
+    targetId: rent.id,
+    yearId: yearId(company),
+    amount: 1000,
+  });
+  const ledgerDelete = deleteLedger(company, rent.id);
+  assert.equal(ledgerDelete.ok, false);
+  assert.match(ledgerDelete.error, /used by 1 budget/i);
+
+  const parent = company.groups.find((group) => group.key === 'indirectExpenses');
+  const custom = addGroup(company, { name: 'Marketing', parentId: parent.id }).group;
+  assert.equal(
+    addBudget(company, {
+      name: 'Marketing plan',
+      targetType: 'group',
+      targetId: custom.id,
+      yearId: yearId(company),
+      amount: 2000,
+    }).ok,
+    true,
+  );
+  const groupDelete = deleteGroup(company, custom.id);
+  assert.equal(groupDelete.ok, false);
+  assert.match(groupDelete.error, /used by 1 budget/i);
+});
+
+test('normalization keeps valid budgets and drops duplicates or orphans', () => {
+  const { company, rent, salaries } = budgetFixture();
+  addBudget(company, {
+    name: 'Rent plan',
+    targetType: 'ledger',
+    targetId: rent.id,
+    yearId: yearId(company),
+    amount: 1000,
+  });
+  addBudget(company, {
+    name: 'Salary plan',
+    targetType: 'ledger',
+    targetId: salaries.id,
+    yearId: yearId(company),
+    amount: 500,
+  });
+  company.budgets[1].targetId = 'missing';
+  company.budgets.push({ ...company.budgets[0], id: 'duplicate' });
+  normalizeBudgets(company);
+  assert.equal(company.budgets.length, 1);
+  assert.equal(company.budgets[0].name, 'Rent plan');
+});

@@ -1,0 +1,315 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  addEmployee,
+  addPayHead,
+  createCompany,
+  deleteEmployee,
+  deletePayHead,
+  deletePayrollRun,
+  emptyState,
+  exportState,
+  findLedgerByName,
+  importState,
+  payrollLedgers,
+  runPayroll,
+  savePayrollSettings,
+  updateEmployee,
+} from '../src/store.js';
+import { payrollSummary, trialBalance } from '../src/accounting.js';
+
+function fixture() {
+  const company = createCompany('Payroll Co', '2026-04-01').company;
+  const setup = savePayrollSettings(company, { enabled: true });
+  assert.equal(setup.ok, true, setup.error);
+  return { company, setup };
+}
+
+function head(company, name) {
+  return company.payroll.payHeads.find((entry) => entry.name === name);
+}
+
+function employee(company, name, amounts, extra = {}) {
+  const pay = Object.entries(amounts).map(([headName, amount]) => ({
+    payHeadId: head(company, headName).id,
+    amount,
+  }));
+  const result = addEmployee(company, { name, ...extra, pay });
+  assert.equal(result.ok, true, result.error);
+  return result.employee;
+}
+
+function standardEmployee(company, name = 'Asha Menon', extra = {}) {
+  return employee(
+    company,
+    name,
+    { 'Basic Salary': 30000, 'House Rent Allowance': 10000, 'Provident Fund (Employee)': 4200, 'Professional Tax': 200 },
+    extra,
+  );
+}
+
+test('payroll setup creates salary ledgers and seeds pay heads', () => {
+  const company = createCompany('Setup Co', '2026-04-01').company;
+  assert.equal(company.payroll.enabled, false);
+  assert.deepEqual(company.payroll.employees, []);
+
+  const result = savePayrollSettings(company, { enabled: true });
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.created, [
+    'Salaries',
+    'Salary Payable',
+    'Provident Fund Payable',
+    'ESI Payable',
+    'Professional Tax Payable',
+  ]);
+  assert.equal(company.payroll.enabled, true);
+  assert.equal(company.payroll.payHeads.length, 6);
+  assert.equal(head(company, 'Basic Salary').kind, 'Earning');
+  assert.equal(head(company, 'Provident Fund (Employee)').statutory, 'PF');
+
+  const ledgers = payrollLedgers(company);
+  assert.equal(ledgers.salaries.name, 'Salaries');
+  assert.equal(ledgers.payable.name, 'Salary Payable');
+  assert.equal(company.groups.find((group) => group.id === ledgers.salaries.groupId).key, 'indirectExpenses');
+  assert.equal(company.groups.find((group) => group.id === ledgers.payable.groupId).key, 'currentLiabilities');
+  for (const payHead of company.payroll.payHeads) {
+    assert.equal(company.ledgers.some((ledger) => ledger.id === payHead.ledgerId), true, payHead.name);
+  }
+
+  const again = savePayrollSettings(company, { enabled: true });
+  assert.equal(again.ok, true, again.error);
+  assert.deepEqual(again.created, []);
+  assert.equal(company.payroll.payHeads.length, 6);
+  assert.equal(company.ledgers.filter((ledger) => ledger.name === 'Salaries').length, 1);
+});
+
+test('pay heads validate their ledger and cannot be deleted while assigned', () => {
+  const { company } = fixture();
+  const salaries = payrollLedgers(company).salaries;
+  const added = addPayHead(company, { name: 'Vehicle Allowance', kind: 'Earning', ledgerId: salaries.id });
+  assert.equal(added.ok, true, added.error);
+  assert.equal(head(company, 'Vehicle Allowance').kind, 'Earning');
+
+  assert.equal(addPayHead(company, { name: 'Vehicle Allowance', kind: 'Earning', ledgerId: salaries.id }).ok, false);
+  assert.equal(addPayHead(company, { name: 'Bad kind', kind: 'Employer', ledgerId: salaries.id }).ok, false);
+  assert.equal(addPayHead(company, { name: 'No ledger', kind: 'Deduction', ledgerId: 'missing' }).ok, false);
+
+  standardEmployee(company);
+  const basic = head(company, 'Basic Salary');
+  const blocked = deletePayHead(company, basic.id);
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /used by 1 employee/);
+  assert.equal(deletePayHead(company, added.payHead.id).ok, true);
+  assert.equal(company.payroll.payHeads.some((entry) => entry.name === 'Vehicle Allowance'), false);
+});
+
+test('employees need a name, a valid PAN and at least one earning', () => {
+  const { company } = fixture();
+  standardEmployee(company, 'Asha Menon');
+  assert.equal(
+    addEmployee(company, { name: 'Asha Menon', pay: [{ payHeadId: head(company, 'Basic Salary').id, amount: 1000 }] }).ok,
+    false,
+  );
+  assert.equal(
+    addEmployee(company, { name: 'Bad PAN', pan: 'BADPAN', pay: [{ payHeadId: head(company, 'Basic Salary').id, amount: 1000 }] }).ok,
+    false,
+  );
+  const noEarning = addEmployee(company, {
+    name: 'Only PF',
+    pay: [{ payHeadId: head(company, 'Provident Fund (Employee)').id, amount: 500 }],
+  });
+  assert.equal(noEarning.ok, false);
+  assert.match(noEarning.error, /earning/);
+
+  const updated = updateEmployee(company, company.payroll.employees[0].id, {
+    name: 'Asha M',
+    pan: 'ABCDE1234F',
+    active: false,
+    pay: [{ payHeadId: head(company, 'Basic Salary').id, amount: 20000 }],
+  });
+  assert.equal(updated.ok, true, updated.error);
+  assert.equal(updated.employee.active, false);
+  assert.equal(updated.employee.pan, 'ABCDE1234F');
+  assert.equal(company.payroll.employees[0].name, 'Asha M');
+});
+
+test('a payroll run posts a balanced journal and stores the run snapshot', () => {
+  const { company } = fixture();
+  standardEmployee(company);
+  const result = runPayroll(company, { month: '2026-04' });
+  assert.equal(result.ok, true, result.error);
+  const { run, voucher } = result;
+
+  assert.equal(run.month, '2026-04');
+  assert.equal(run.date, '2026-04-30');
+  assert.equal(run.totals.employees, 1);
+  assert.equal(run.totals.gross, 40000);
+  assert.equal(run.totals.deductions, 4400);
+  assert.equal(run.totals.net, 35600);
+  assert.equal(run.rows[0].name, 'Asha Menon');
+  assert.equal(run.rows[0].earnings.length, 2);
+  assert.equal(run.rows[0].deductions.length, 2);
+  assert.equal(run.rows[0].deductions.find((line) => line.statutory === 'PF').amount, 4200);
+  assert.equal(voucher.type, 'Journal');
+  assert.equal(voucher.payrollRunId, run.id);
+  assert.equal(voucher.narration, 'Payroll for 2026-04');
+  assert.equal(run.voucherId, voucher.id);
+  assert.equal(voucher.lines.length, 4);
+  assert.equal(voucher.total, 40000);
+
+  const byName = (name) => voucher.lines.find((line) => line.ledgerId === findLedgerByName(company, name).id);
+  assert.equal(byName('Salaries').side, 'Dr');
+  assert.equal(byName('Salaries').amount, 40000);
+  assert.equal(byName('Provident Fund Payable').side, 'Cr');
+  assert.equal(byName('Provident Fund Payable').amount, 4200);
+  assert.equal(byName('Professional Tax Payable').amount, 200);
+  assert.equal(byName('Salary Payable').amount, 35600);
+
+  const balances = trialBalance(company);
+  assert.equal(balances.balanced, true);
+  assert.equal(balances.debitTotal, 40000);
+  assert.equal(balances.creditTotal, 40000);
+
+  const summary = payrollSummary(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(summary.count, 1);
+  assert.equal(summary.totals.gross, 40000);
+  assert.equal(summary.totals.deductions, 4400);
+  assert.equal(summary.totals.net, 35600);
+  assert.equal(summary.payHeads.length, 4);
+  assert.equal(summary.statutory.find((row) => row.tag === 'PF').amount, 4200);
+  assert.equal(summary.employees[0].name, 'Asha Menon');
+  assert.equal(summary.runs[0].voucherNo, voucher.no);
+});
+
+test('one payroll run per month and only inside an open financial year', () => {
+  const { company } = fixture();
+  standardEmployee(company);
+  assert.equal(runPayroll(company, { month: '2026-04' }).ok, true);
+  const twice = runPayroll(company, { month: '2026-04' });
+  assert.equal(twice.ok, false);
+  assert.match(twice.error, /already been run/);
+
+  assert.equal(runPayroll(company, { month: '2026-13' }).ok, false);
+  assert.equal(runPayroll(company, { month: '2026-05', date: '2026-04-30' }).ok, false);
+  assert.equal(runPayroll(company, { month: '2026-08' }).ok, true);
+  assert.equal(company.payroll.runs.length, 2);
+  assert.equal(company.vouchers.filter((voucher) => voucher.type === 'Journal').length, 2);
+});
+
+test('inactive employees are skipped and deductions cannot exceed earnings', () => {
+  const { company } = fixture();
+  standardEmployee(company);
+  const inactive = standardEmployee(company, 'Rohan Das');
+  updateEmployee(company, inactive.id, {
+    name: 'Rohan Das',
+    active: false,
+    pay: [{ payHeadId: head(company, 'Basic Salary').id, amount: 10000 }],
+  });
+
+  const result = runPayroll(company, { month: '2026-04' });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.run.rows.length, 1);
+
+  company.payroll.employees.push({
+    id: 'emp_over',
+    name: 'Over Deducted',
+    active: true,
+    pay: [
+      { payHeadId: head(company, 'Basic Salary').id, amount: 1000 },
+      { payHeadId: head(company, 'Provident Fund (Employee)').id, amount: 2000 },
+    ],
+  });
+  const over = runPayroll(company, { month: '2026-05' });
+  assert.equal(over.ok, false);
+  assert.match(over.error, /deductions exceed earnings/);
+});
+
+test('a second month updates the register and keeps older snapshots intact', () => {
+  const { company } = fixture();
+  const asha = standardEmployee(company);
+  assert.equal(runPayroll(company, { month: '2026-04' }).ok, true);
+
+  updateEmployee(company, asha.id, {
+    name: asha.name,
+    pay: [
+      { payHeadId: head(company, 'Basic Salary').id, amount: 35000 },
+      { payHeadId: head(company, 'Provident Fund (Employee)').id, amount: 4200 },
+    ],
+  });
+  const second = runPayroll(company, { month: '2026-05' });
+  assert.equal(second.ok, true, second.error);
+  assert.equal(second.run.totals.gross, 35000);
+
+  const first = company.payroll.runs.find((run) => run.month === '2026-04');
+  assert.equal(first.rows[0].gross, 40000);
+  assert.equal(first.totals.net, 35600);
+
+  const report = payrollSummary(company, { from: '2026-04-01', to: '2026-06-30' });
+  assert.equal(report.count, 2);
+  assert.equal(report.totals.gross, 75000);
+  assert.equal(report.totals.deductions, 8600);
+  assert.equal(report.totals.net, 66400);
+  assert.equal(report.statutory.find((row) => row.tag === 'PF').amount, 8400);
+  const ashaRow = report.employees.find((row) => row.employeeId === asha.id);
+  assert.equal(ashaRow.months, 2);
+  assert.equal(ashaRow.gross, 75000);
+  assert.equal(report.payHeads.find((row) => row.name === 'Basic Salary').count, 2);
+});
+
+test('runs can be deleted with their voucher, and employees with history cannot', () => {
+  const { company } = fixture();
+  const asha = standardEmployee(company);
+  const run = runPayroll(company, { month: '2026-04' }).run;
+  const voucherId = run.voucherId;
+
+  const blocked = deleteEmployee(company, asha.id);
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /Deactivate/);
+
+  const deleted = deletePayrollRun(company, run.id);
+  assert.equal(deleted.ok, true, deleted.error);
+  assert.equal(company.payroll.runs.length, 0);
+  assert.equal(company.vouchers.some((voucher) => voucher.id === voucherId), false);
+  assert.equal(deleteEmployee(company, asha.id).ok, true);
+});
+
+test('payroll settings, employees and runs survive a backup round trip', () => {
+  const { company } = fixture();
+  standardEmployee(company, 'Asha Menon', { pan: 'ABCDE1234F', dateOfJoining: '2025-06-01' });
+  const run = runPayroll(company, { month: '2026-04' }).run;
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  const copy = restored.state.companies[0];
+
+  assert.equal(copy.payroll.enabled, true);
+  assert.equal(copy.payroll.payHeads.length, 6);
+  assert.equal(copy.payroll.employees[0].name, 'Asha Menon');
+  assert.equal(copy.payroll.employees[0].pan, 'ABCDE1234F');
+  assert.equal(copy.payroll.runs.length, 1);
+  assert.equal(copy.payroll.runs[0].totals.net, 35600);
+  assert.equal(copy.payroll.runs[0].voucherId, run.voucherId);
+  assert.equal(copy.vouchers.find((voucher) => voucher.id === run.voucherId).narration, 'Payroll for 2026-04');
+  assert.equal(payrollLedgers(copy).payable.name, 'Salary Payable');
+
+  const report = payrollSummary(copy, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(report.totals.net, 35600);
+  assert.equal(report.rows[0].employee, 'Asha Menon');
+});
+
+test('backup validation rejects a payroll run with inconsistent totals', () => {
+  const { company } = fixture();
+  standardEmployee(company);
+  runPayroll(company, { month: '2026-04' });
+  company.payroll.runs[0].totals.net = 1000;
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, false);
+  assert.match(restored.error, /inconsistent totals/);
+});

@@ -1763,6 +1763,91 @@ kbd {
   color: var(--muted);
   font-size: 0.78rem;
 }
+/* --- Monthly MIS --- */
+.mis-chart {
+  margin: 0.15rem 0 1rem;
+}
+
+.mis-legend {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-bottom: 0.35rem;
+}
+
+.mis-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.mis-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.mis-dot.sales,
+.mis-bar.sales {
+  background: var(--blue);
+}
+
+.mis-dot.purchases,
+.mis-bar.purchases {
+  background: var(--accent);
+}
+
+.mis-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.4rem;
+  align-items: end;
+  min-height: 150px;
+  padding: 0.6rem 0.3rem 0;
+  border-bottom: 1px solid var(--line);
+  background: repeating-linear-gradient(
+    to top,
+    transparent 0,
+    transparent 36px,
+    var(--line-soft) 36px,
+    var(--line-soft) 37px
+  );
+}
+
+.mis-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.mis-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  height: 120px;
+  width: 100%;
+}
+
+.mis-bar {
+  display: block;
+  width: min(11px, 38%);
+  border-radius: 3px 3px 0 0;
+  min-height: 0;
+}
+
+.mis-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
 @media print {
   .print-head {
     padding: 0 0.5rem;

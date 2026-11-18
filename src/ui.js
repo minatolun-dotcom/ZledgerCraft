@@ -3500,8 +3500,70 @@ function yearComparisonScreen() {
 function statisticsScreen() {
   if (!company()) return emptyCompanyScreen('Statistics');
   const stats = statistics(company());
+  const months = stats.monthly ?? [];
+  const maxTrend = Math.max(1, ...months.flatMap((row) => [row.sales, row.purchases]));
+  const total = months.reduce(
+    (sum, row) => ({
+      sales: round2(sum.sales + row.sales),
+      purchases: round2(sum.purchases + row.purchases),
+      creditNotes: round2(sum.creditNotes + row.creditNotes),
+      debitNotes: round2(sum.debitNotes + row.debitNotes),
+      receipts: round2(sum.receipts + row.receipts),
+      payments: round2(sum.payments + row.payments),
+    }),
+    { sales: 0, purchases: 0, creditNotes: 0, debitNotes: 0, receipts: 0, payments: 0 },
+  );
+  const trend = months
+    .map((row) => {
+      const month = dateLabel(`${row.month}-01`).slice(3, 6);
+      const height = (value) =>
+        value > 0 ? `${Math.max(2, (value / maxTrend) * 100).toFixed(1)}%` : '0';
+      return `<div class="mis-col">
+        <div class="mis-bars">
+          <span class="mis-bar sales" style="height:${height(row.sales)}" title="${esc(month)} sales ${esc(money(row.sales))}"></span>
+          <span class="mis-bar purchases" style="height:${height(row.purchases)}" title="${esc(month)} purchases ${esc(money(row.purchases))}"></span>
+        </div>
+        <span class="mis-label">${esc(month)}</span>
+      </div>`;
+    })
+    .join('');
+  const misRows = months
+    .map((row) => {
+      const netSales = round2(row.sales - row.creditNotes);
+      const netPurchases = round2(row.purchases - row.debitNotes);
+      const netCash = round2(row.receipts - row.payments);
+      return `<tr>
+        <td>${esc(dateLabel(`${row.month}-01`).slice(3))}</td>
+        <td class="num">${money(row.sales)}</td>
+        <td class="num">${money(row.creditNotes)}</td>
+        <td class="num">${money(netSales)}</td>
+        <td class="num">${money(row.purchases)}</td>
+        <td class="num">${money(row.debitNotes)}</td>
+        <td class="num">${money(netPurchases)}</td>
+        <td class="num">${money(row.receipts)}</td>
+        <td class="num">${money(row.payments)}</td>
+        <td class="num">${money(netCash)}</td>
+      </tr>`;
+    })
+    .join('');
+  const netSales = round2(total.sales - total.creditNotes);
+  const netPurchases = round2(total.purchases - total.debitNotes);
+  const netCash = round2(total.receipts - total.payments);
 
   return `
+    ${panel(
+      'Monthly MIS',
+      `<div class="mis-chart" role="img" aria-label="Monthly sales and purchases">
+        <div class="mis-legend"><span><i class="mis-dot sales"></i>Sales</span><span><i class="mis-dot purchases"></i>Purchases</span></div>
+        <div class="mis-grid">${trend}</div>
+      </div>
+      <div class="table-scroll"><table class="data-table compact">
+        <thead><tr><th>Month</th><th class="num">Sales</th><th class="num">Returns</th><th class="num">Net sales</th><th class="num">Purchases</th><th class="num">Purchase returns</th><th class="num">Net purchases</th><th class="num">Receipts</th><th class="num">Payments</th><th class="num">Net cash</th></tr></thead>
+        <tbody>${misRows}</tbody>
+        <tfoot><tr><td>Financial year</td><td class="num">${money(total.sales)}</td><td class="num">${money(total.creditNotes)}</td><td class="num">${money(netSales)}</td><td class="num">${money(total.purchases)}</td><td class="num">${money(total.debitNotes)}</td><td class="num">${money(netPurchases)}</td><td class="num">${money(total.receipts)}</td><td class="num">${money(total.payments)}</td><td class="num">${money(netCash)}</td></tr></tfoot>
+      </table></div>`,
+      'Net sales and purchases deduct credit/debit notes. Net cash is receipts minus payments. Journal and contra vouchers are excluded from the trend.',
+    )}
     ${panel(
       `Voucher statistics <span class="count">${stats.voucherTotal}</span>`,
       `<table class="data-table compact">

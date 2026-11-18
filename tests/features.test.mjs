@@ -494,6 +494,18 @@ test('statistics count vouchers, ledgers and groups', () => {
   assert.equal(stats.firstDate, '2026-04-05');
   assert.equal(stats.lastDate, '2026-06-01');
   assert.equal(stats.groups.find((group) => group.name === 'Sundry Debtors').ledgers, 1);
+  assert.equal(stats.monthly.length, 12);
+  const april = stats.monthly.find((row) => row.month === '2026-04');
+  assert.deepEqual(
+    { sales: april.sales, purchases: april.purchases, receipts: april.receipts, payments: april.payments },
+    { sales: 1000, purchases: 400, receipts: 600, payments: 0 },
+  );
+  const may = stats.monthly.find((row) => row.month === '2026-05');
+  assert.equal(may.creditNotes, 100);
+  assert.equal(may.payments, 200);
+  const june = stats.monthly.find((row) => row.month === '2026-06');
+  assert.equal(june.sales, 0);
+  assert.equal(june.payments, 0);
 });
 
 test('backup export and restore round-trip through validation', () => {

@@ -2472,7 +2472,26 @@ export function payrollSummary(company, { from, to } = {}) {
   };
 }
 
-/** Statistics: counts of vouchers by type and ledgers by group. */
+function financialYearMonths(start, end) {
+  const months = [];
+  let year = Number(String(start).slice(0, 4));
+  let month = Number(String(start).slice(5, 7));
+  const last = String(end).slice(0, 7);
+  if (!year || !month) return months;
+  while (months.length < 48) {
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    if (key > last) break;
+    months.push(key);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return months;
+}
+
+/** Statistics: voucher/master counts plus monthly MIS movements. */
 export function statistics(company) {
   const voucherCounts = Object.keys(VOUCHER_TYPES).map((type) => {
     const items = company.vouchers.filter((voucher) => voucher.type === type);
@@ -2484,6 +2503,28 @@ export function statistics(company) {
     };
   });
 
+  const monthly = financialYearMonths(company.fyStart, company.fyEnd).map((month) => ({
+    month,
+    sales: 0,
+    purchases: 0,
+    creditNotes: 0,
+    debitNotes: 0,
+    receipts: 0,
+    payments: 0,
+  }));
+  const byMonth = new Map(monthly.map((row) => [row.month, row]));
+  for (const voucher of company.vouchers) {
+    if (voucher.date < company.fyStart || voucher.date > company.fyEnd) continue;
+    const row = byMonth.get(voucher.date.slice(0, 7));
+    if (!row) continue;
+    if (voucher.type === 'Sales') row.sales = round2(row.sales + voucher.total);
+    else if (voucher.type === 'Purchase') row.purchases = round2(row.purchases + voucher.total);
+    else if (voucher.type === 'CreditNote') row.creditNotes = round2(row.creditNotes + voucher.total);
+    else if (voucher.type === 'DebitNote') row.debitNotes = round2(row.debitNotes + voucher.total);
+    else if (voucher.type === 'Receipt') row.receipts = round2(row.receipts + voucher.total);
+    else if (voucher.type === 'Payment') row.payments = round2(row.payments + voucher.total);
+  }
+
   const sorted = vouchersSorted(company);
   return {
     voucherCounts,
@@ -2493,6 +2534,7 @@ export function statistics(company) {
     customGroupCount: company.groups.filter((group) => group.custom).length,
     firstDate: sorted[sorted.length - 1]?.date ?? null,
     lastDate: sorted[0]?.date ?? null,
+    monthly,
     groups: company.groups.map((group) => ({
       id: group.id,
       name: group.name,

@@ -111,11 +111,14 @@ Working now:
   GSTR-3B, TDS/TCS deducted/paid/outstanding, the ₹1 crore and ₹10 crore audit
   thresholds, and a ten-clause Form 3CD-style checklist with Ready/Review/Manual
   status plus Print/CSV.
+- Local monthly MIS: a dependency-free sales/purchase bar chart for the financial
+  year, with sales/purchase returns, net sales and purchases, receipts, payments,
+  net cash and a year-to-date row, plus Print/CSV from the Statistics screen.
 - Verification: 168/168 engine tests (12 GST, 12 TDS/TCS, 10 payroll, 5
   compliance, 18 inventory, 11 Tally import, 4 XLSX); all 26 browser suites,
   including the godown/batch/transfer/order/manufacturing suite (18 checks), the
   workspace conflict suite (8 checks) and the expanded import suite, exit
-  successfully with no page errors; single-file build 745.6 kB.
+  successfully with no page errors; single-file build 752.0 kB.
 
 Why it is not production-ready: data lives in one browser's local storage, the
 audit trail is app-level rather than tamper-proof, profiles are not
@@ -277,9 +280,23 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [x] Inventory: godowns, batches, BOM/manufacturing, orders, transfers — 2026-11-18 (batch/expiry, transfers, orders and production; no physical count, wastage, job work or WIP posting)
 - [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, revision-checked writes and conflict/reload flow done 2026-11-18; authentication and cloud hosting pending
 - [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; Tally batch masters/opening batches, GST/discount stock-line splits, APIs and webhooks pending
-- [ ] Advanced MIS, charts, scheduled email/Excel exports
+- [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart and table done 2026-11-18; scheduled email/Excel and further dashboards pending
 
 ## Progress log
+
+### 2026-11-18 — Local monthly MIS
+
+- Added a monthly MIS panel to Statistics: twelve financial-year columns, a
+  sales/purchase bar chart, sales and purchase returns, net sales/purchases,
+  receipts, payments, net cash and a financial-year total row.
+- Kept it dependency-free with CSS bars on the existing report surface; Print and
+  CSV use the normal report toolbar.
+- Extended the statistics engine test for monthly sales, purchases, receipts,
+  payments and credit notes (all 168 engine tests and 26 browser suites pass;
+  build 752.0 kB).
+- **Stage 4 item 4 remains partial:** local charting is present; scheduled
+  email/Excel delivery, additional dashboards and forecast reports remain
+  (KL-29, KL-30).
 
 ### 2026-11-18 — Local-only static release
 

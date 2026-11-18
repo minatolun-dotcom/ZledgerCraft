@@ -70,7 +70,7 @@ README. When a new limit is introduced, add it here in the same change.
 | KL-26 | No advanced voucher types | No post-dated voucher type, memorandum, optional, reversing, recurring or approval vouchers. The Cheque / DD register is a report over ordinary vouchers. |
 | KL-27 | No custom document numbering | Counters are automatic per voucher type; no prefixes, suffixes, series or manual numbering rules. |
 | KL-28 | No interest, fund forecasting or consolidation | No interest calculation, fund-flow forecast, company consolidation or group reporting. |
-| KL-29 | Limited comparatives | Year comparison exists, but no multi-period columns, trends, charts, dashboards beyond the gateway KPIs, or forecast reports. |
+| KL-29 | Limited comparatives | Year comparison exists, and Statistics has one monthly sales/purchase trend chart. There are no multi-period report columns, configurable chart ranges, other chart types, dashboard customisation or forecasts. |
 | KL-30 | Report presentation is fixed | Every report shares the app's screen and browser print layout. There is no custom print-layout designer, branded PDF, scheduled email or Excel export. |
 | KL-31 | Opening balances are simple | Opening balances are ledger-level Dr/Cr with no bill-wise or cost-centre opening allocation. |
 

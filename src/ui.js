@@ -3559,6 +3559,16 @@ function statisticsScreen() {
           .join('')
       : `<tr><td colspan="3" class="muted">${esc(emptyLabel)}</td></tr>`}</tbody>
   </table>`;
+  const stockTable = (rows, emptyLabel) => `<table class="data-table compact">
+    <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Value</th><th class="num">Share</th></tr></thead>
+    <tbody>${rows.length
+      ? rows
+          .map(
+            (row) => `<tr><td>${esc(row.name)}</td><td class="num">${fmtQty(row.closingQty)} ${esc(row.unit)}</td><td class="num">${money(row.closingValue)}</td><td class="num">${row.share.toFixed(1)}%</td></tr>`,
+          )
+          .join('')
+      : `<tr><td colspan="4" class="muted">${esc(emptyLabel)}</td></tr>`}</tbody>
+  </table>`;
 
   return `
     ${panel(
@@ -3582,6 +3592,17 @@ function statisticsScreen() {
       </div>`,
       'Top five parties by voucher value. Credit notes reduce customer sales; debit notes reduce supplier purchases. Cash sales and purchases without a party ledger are excluded.',
     )}
+    ${stats.stock
+      ? panel(
+          'Stock position',
+          `<p class="muted">Closing stock <strong>${money(stats.stock.closingValue)}</strong> across ${stats.stock.itemCount} item${stats.stock.itemCount === 1 ? '' : 's'}. ${stats.stock.idleCount} item${stats.stock.idleCount === 1 ? '' : 's'} worth <strong>${money(stats.stock.idleValue)}</strong> had no issues during the financial year.</p>
+          <div class="split-grid">
+            <div><h3>Top items by value</h3>${stockTable(stats.stock.topItems, 'No stock on hand at the financial year end.')}</div>
+            <div><h3>No issues this year</h3>${stockTable(stats.stock.idleItems, 'Every stocked item had an outward movement this year.')}</div>
+          </div>`,
+          'Closing quantities and values use the weighted-average cost at the financial year end. “No issues” means no stock left the item during the year; it is a review flag, not proof of obsolescence.',
+        )
+      : ''}
     ${panel(
       `Voucher statistics <span class="count">${stats.voucherTotal}</span>`,
       `<table class="data-table compact">

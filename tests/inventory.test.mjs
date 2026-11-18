@@ -33,6 +33,7 @@ import {
   balanceSheet,
   batchStockSummary,
   godownStockSummary,
+  statistics,
   stockMovements,
   stockSummary,
   trialBalance,
@@ -274,6 +275,29 @@ test('stock summary values purchases, sales and returns at average cost', () => 
   assert.equal(row.closingValue, 1470);
   assert.equal(row.averageRate, 105);
   assert.equal(report.totals.closingValue, 1470);
+});
+
+test('statistics summarises closing stock and items with no issues', () => {
+  const { company, group, unit, purchase, sale } = inventoryFixture();
+  purchase('2026-04-02', 10, 110);
+  sale('2026-04-05', 5, 150);
+  addStockItem(company, {
+    name: 'Leather Belt',
+    stockGroupId: group.id,
+    unitId: unit.id,
+    openingQty: 5,
+    openingRate: 200,
+  });
+
+  const stats = statistics(company);
+  assert.equal(stats.stock.closingValue, 2575);
+  assert.equal(stats.stock.itemCount, 2);
+  assert.equal(stats.stock.topItems[0].name, 'Cotton Shirt');
+  assert.equal(stats.stock.topItems[0].closingValue, 1575);
+  assert.equal(stats.stock.topItems[0].share, 61.17);
+  assert.equal(stats.stock.idleCount, 1);
+  assert.equal(stats.stock.idleValue, 1000);
+  assert.equal(stats.stock.idleItems[0].name, 'Leather Belt');
 });
 
 test('stock summary and movements honour a date range', () => {

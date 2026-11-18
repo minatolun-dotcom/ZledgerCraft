@@ -2552,9 +2552,34 @@ export function statistics(company) {
       }));
   };
 
+  let stock = null;
+  if ((company.stockItems ?? []).length) {
+    const valuation = stockSummary(company, { from: company.fyStart, to: company.fyEnd });
+    const held = valuation.rows.filter((row) => row.closingQty > 0 && row.closingValue > 0);
+    const heldValue = round2(held.reduce((sum, row) => sum + row.closingValue, 0));
+    const item = (row) => ({
+      itemId: row.itemId,
+      name: row.name,
+      unit: row.unit,
+      closingQty: row.closingQty,
+      closingValue: row.closingValue,
+      share: heldValue > 0 ? round2((row.closingValue / heldValue) * 100) : 0,
+    });
+    const idle = held.filter((row) => row.outQty === 0).sort((a, b) => b.closingValue - a.closingValue);
+    stock = {
+      closingValue: valuation.totals.closingValue,
+      itemCount: held.length,
+      topItems: held.sort((a, b) => b.closingValue - a.closingValue).slice(0, 5).map(item),
+      idleCount: idle.length,
+      idleValue: round2(idle.reduce((sum, row) => sum + row.closingValue, 0)),
+      idleItems: idle.slice(0, 5).map(item),
+    };
+  }
+
   const sorted = vouchersSorted(company);
   return {
     voucherCounts,
+    stock,
     topCustomers: topParties(['Sales', 'CreditNote'], 'sundryDebtors'),
     topSuppliers: topParties(['Purchase', 'DebitNote'], 'sundryCreditors'),
     voucherTotal: company.vouchers.length,

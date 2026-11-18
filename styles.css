@@ -1763,6 +1763,58 @@ kbd {
   color: var(--muted);
   font-size: 0.78rem;
 }
+/* Compact header on phone-sized screens. */
+@media (max-width: 600px) {
+  .topbar {
+    gap: 0.5rem;
+    padding: 0.6rem 0.8rem;
+  }
+
+  .brand {
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+  }
+
+  .company-line {
+    order: 2;
+    flex: 1 1 100%;
+    font-size: 0.8rem;
+  }
+
+  .year-picker {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .year-picker select {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .topbar-actions {
+    order: 1;
+    flex: 0 1 auto;
+    gap: 0.4rem;
+  }
+
+  .topbar .today {
+    display: none;
+  }
+
+  .user-picker {
+    min-width: 0;
+  }
+
+  .user-picker select {
+    max-width: 110px;
+  }
+
+  .topbar .btn kbd {
+    display: none;
+  }
+}
+
 /* --- Monthly MIS --- */
 .mis-chart {
   margin: 0.15rem 0 1rem;

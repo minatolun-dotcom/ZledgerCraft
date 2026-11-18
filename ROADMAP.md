@@ -118,7 +118,7 @@ Working now:
   compliance, 18 inventory, 11 Tally import, 4 XLSX); all 26 browser suites,
   including the godown/batch/transfer/order/manufacturing suite (18 checks), the
   workspace conflict suite (8 checks) and the expanded import suite, exit
-  successfully with no page errors; single-file build 752.0 kB.
+  successfully with no page errors; single-file build 752.7 kB.
 
 Why it is not production-ready: data lives in one browser's local storage, the
 audit trail is app-level rather than tamper-proof, profiles are not
@@ -293,7 +293,9 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
   CSV use the normal report toolbar.
 - Extended the statistics engine test for monthly sales, purchases, receipts,
   payments and credit notes (all 168 engine tests and 26 browser suites pass;
-  build 752.0 kB).
+  build 752.7 kB).
+- Tightened the small-screen header so the Statistics/MIS view has no document
+  overflow at 390 px; the MIS table remains horizontally scrollable.
 - **Stage 4 item 4 remains partial:** local charting is present; scheduled
   email/Excel delivery, additional dashboards and forecast reports remain
   (KL-29, KL-30).

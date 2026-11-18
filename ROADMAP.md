@@ -114,15 +114,16 @@ Working now:
 - Local monthly MIS: a dependency-free sales/purchase bar chart for the financial
   year, with sales/purchase returns, net sales and purchases, receipts, payments,
   net cash and a year-to-date row; summary cards for net sales, net purchases,
-  net profit, working capital and closing stock; top-five customer and supplier
-  concentration tables; a stock position with closing value, top items by value
-  and items with no issues during the year; working capital; top expense heads;
-  plus Print/CSV/Excel from the Statistics screen.
+  net profit, working capital and closing stock; a three-month run-rate outlook;
+  top-five customer and supplier concentration tables; a stock position with
+  closing value, top items by value and items with no issues during the year;
+  working capital; top expense heads; plus Print/CSV/Excel from the Statistics
+  screen.
 - Verification: 170/170 engine tests (12 GST, 12 TDS/TCS, 10 payroll, 5
   compliance, 18 inventory, 11 Tally import, 5 XLSX); all 26 browser suites,
   including the godown/batch/transfer/order/manufacturing suite (18 checks), the
   workspace conflict suite (8 checks) and the expanded import suite, exit
-  successfully with no page errors; single-file build 771.1 kB.
+  successfully with no page errors; single-file build 773.0 kB.
 
 Why it is not production-ready: data lives in one browser's local storage, the
 audit trail is app-level rather than tamper-proof, profiles are not
@@ -220,8 +221,8 @@ Status: **Done**, **Partial**, **Missing**.
 | Forex revaluation | Done (Stage 2; foreign asset/liability balances at dated rates) |
 | Stock ageing, godown, reorder and price-list reports | Partial — godown and batch balance reports exist; no stock ageing, reorder or price-list reports |
 | Audit trail report | Done (Stage 1) |
-| Charts, trends and forecasts | Missing |
-| Excel, branded PDF and scheduled email reports | Missing |
+| Charts, trends and forecasts | Partial — monthly sales/purchase chart and a three-month run-rate; no seasonality, growth or statistical forecasts |
+| Excel, branded PDF and scheduled email reports | Partial — Excel export exists; branded PDF and scheduled email are missing |
 | Custom print-layout designer | Missing |
 
 ### Security, platform and operations — Missing
@@ -284,7 +285,7 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [x] Inventory: godowns, batches, BOM/manufacturing, orders, transfers — 2026-11-18 (batch/expiry, transfers, orders and production; no physical count, wastage, job work or WIP posting)
 - [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, revision-checked writes and conflict/reload flow done 2026-11-18; authentication and cloud hosting pending
 - [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; Tally batch masters/opening batches, GST/discount stock-line splits, APIs and webhooks pending
-- [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart and table done 2026-11-18; scheduled email/Excel and further dashboards pending
+- [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate and Excel export done 2026-11-18; scheduled email and deeper forecasts pending
 
 ## Progress log
 
@@ -319,10 +320,14 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
   inline strings and stored ZIP entries, includes the MIS summary cards and all
   visible report tables, and was round-trip tested through the app's XLSX reader
   (build 771.1 kB; all 170 engine tests pass).
+- Added a three-month run-rate outlook from the last three completed months,
+  with an explicit warning that it ignores seasonality, growth, orders and
+  one-offs (build 773.0 kB; all 170 engine tests pass).
 - **Stage 4 item 4 remains partial:** local charting, MIS summary, party
-  concentration, stock position, working capital, expense concentration and
-  Excel export are present; scheduled email delivery and forecast reports remain
-  (KL-29, KL-30). Scheduled delivery needs a backend or mail service.
+  concentration, stock position, working capital, expense concentration, Excel
+  export and a run-rate outlook are present; scheduled email delivery and
+  deeper forecasts remain (KL-29, KL-30). Scheduled delivery needs a backend or
+  mail service.
 
 ### 2026-11-18 — Local-only static release
 

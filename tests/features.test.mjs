@@ -523,6 +523,12 @@ test('statistics count vouchers, ledgers and groups', () => {
   assert.equal(stats.workingCapital.stock, 0);
   assert.equal(stats.workingCapital.net, 2100);
   assert.equal(stats.netProfit, 300);
+  const forecast = statistics(company, { asOn: '2026-07-15' }).forecast;
+  assert.deepEqual(forecast.basis, ['2026-04', '2026-05', '2026-06']);
+  assert.equal(forecast.months.length, 3);
+  assert.equal(forecast.months[0].month, '2026-07');
+  assert.equal(forecast.months[0].sales, 300);
+  assert.equal(forecast.months[0].purchases, 133.33);
 });
 
 test('backup export and restore round-trip through validation', () => {

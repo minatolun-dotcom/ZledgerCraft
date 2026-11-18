@@ -2492,7 +2492,7 @@ function financialYearMonths(start, end) {
 }
 
 /** Statistics: voucher/master counts plus monthly MIS movements. */
-export function statistics(company) {
+export function statistics(company, filters = {}) {
   const voucherCounts = Object.keys(VOUCHER_TYPES).map((type) => {
     const items = company.vouchers.filter((voucher) => voucher.type === type);
     return {
@@ -2523,6 +2523,29 @@ export function statistics(company) {
     else if (voucher.type === 'DebitNote') row.debitNotes = round2(row.debitNotes + voucher.total);
     else if (voucher.type === 'Receipt') row.receipts = round2(row.receipts + voucher.total);
     else if (voucher.type === 'Payment') row.payments = round2(row.payments + voucher.total);
+  }
+
+  const asOn = filters.asOn || new Date().toISOString().slice(0, 10);
+  const cutoffMonth = asOn.slice(0, 7);
+  const basis = monthly.filter((row) => row.month < cutoffMonth).slice(-3);
+  let forecast = null;
+  if (
+    basis.length &&
+    cutoffMonth >= company.fyStart.slice(0, 7) &&
+    cutoffMonth <= company.fyEnd.slice(0, 7)
+  ) {
+    const nextMonths = financialYearMonths(`${cutoffMonth}-01`, company.fyEnd).slice(0, 3);
+    const average = (key, returns) =>
+      round2(
+        basis.reduce((sum, row) => sum + row[key] - row[returns], 0) / basis.length,
+      );
+    const sales = average('sales', 'creditNotes');
+    const purchases = average('purchases', 'debitNotes');
+    forecast = {
+      asOn,
+      basis: basis.map((row) => row.month),
+      months: nextMonths.map((month) => ({ month, sales, purchases })),
+    };
   }
 
   const topParties = (types, groupKey) => {
@@ -2623,6 +2646,7 @@ export function statistics(company) {
     netProfit: pnl?.netProfit ?? 0,
     expenseTotal,
     topExpenses,
+    forecast,
     topCustomers: topParties(['Sales', 'CreditNote'], 'sundryDebtors'),
     topSuppliers: topParties(['Purchase', 'DebitNote'], 'sundryCreditors'),
     voucherTotal: company.vouchers.length,

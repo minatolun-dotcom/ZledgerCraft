@@ -3600,6 +3600,21 @@ function statisticsScreen() {
       </table></div>`,
       'Net sales and purchases deduct credit/debit notes. Net cash is receipts minus payments. Journal and contra vouchers are excluded from the trend.',
     )}
+    ${stats.forecast
+      ? panel(
+          'Run-rate outlook',
+          `<p class="muted">Based on ${esc(stats.forecast.basis.map((month) => dateLabel(`${month}-01`).slice(3)).join(', '))}. Repeating the straight average for the next ${stats.forecast.months.length} month${stats.forecast.months.length === 1 ? '' : 's'}.</p>
+          <table class="data-table compact">
+            <thead><tr><th>Month</th><th class="num">Net sales</th><th class="num">Net purchases</th></tr></thead>
+            <tbody>${stats.forecast.months
+              .map(
+                (row) => `<tr><td>${esc(dateLabel(`${row.month}-01`).slice(3))}</td><td class="num">${money(row.sales)}</td><td class="num">${money(row.purchases)}</td></tr>`,
+              )
+              .join('')}</tbody>
+          </table>`,
+          'Straight average of net sales and net purchases in the last three completed months, repeated for the rest of the financial year. It ignores seasonality, growth, open orders and one-off items; treat it as a run-rate, not a projection.',
+        )
+      : ''}
     ${panel(
       'Party concentration',
       `<div class="split-grid">

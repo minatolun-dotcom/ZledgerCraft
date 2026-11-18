@@ -115,13 +115,13 @@ Working now:
   year, with sales/purchase returns, net sales and purchases, receipts, payments,
   net cash and a year-to-date row; top-five customer and supplier concentration
   tables; a stock position with closing value, top items by value and items with
-  no issues during the year; top expense heads; plus Print/CSV from the
-  Statistics screen.
+  no issues during the year; working capital; top expense heads; plus Print/CSV
+  from the Statistics screen.
 - Verification: 168/168 engine tests (12 GST, 12 TDS/TCS, 10 payroll, 5
   compliance, 18 inventory, 11 Tally import, 4 XLSX); all 26 browser suites,
   including the godown/batch/transfer/order/manufacturing suite (18 checks), the
   workspace conflict suite (8 checks) and the expanded import suite, exit
-  successfully with no page errors; single-file build 759.2 kB.
+  successfully with no page errors; single-file build 760.9 kB.
 
 Why it is not production-ready: data lives in one browser's local storage, the
 audit trail is app-level rather than tamper-proof, profiles are not
@@ -308,9 +308,13 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - Added expense concentration: total expenses and the top five expense ledgers
   by net amount, including purchases, with share of total expenses (build
   759.2 kB; all 169 engine tests pass).
+- Added a working-capital panel: receivables, stock, cash and bank less
+  payables, with net working capital at the financial year end (build 760.9 kB;
+  all 169 engine tests pass).
 - **Stage 4 item 4 remains partial:** local charting, party concentration,
-  stock position and expense concentration are present; scheduled email/Excel
-  delivery, additional dashboards and forecast reports remain (KL-29, KL-30).
+  stock position, working capital and expense concentration are present;
+  scheduled email/Excel delivery, additional dashboards and forecast reports
+  remain (KL-29, KL-30).
 
 ### 2026-11-18 — Local-only static release
 

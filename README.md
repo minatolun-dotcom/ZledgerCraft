@@ -236,7 +236,7 @@ storage because GitHub Pages cannot run the optional Node/SQLite server.
 - Group Summary with group vouchers drill-down.
 - Cash Flow (receipts and payments grouped by ledger group) and Ratio Analysis
   (current, quick, debt/equity, gross and net margin, return on assets).
-- Statistics: a monthly MIS chart of sales and purchases with returns, net sales/purchases, receipts, payments and net cash, plus top-five customer and supplier concentration tables, a stock position with top items by value and items with no issues, top expense heads, voucher counts/values by type and ledger counts by group. Print/CSV cover the statistics screen.
+- Statistics: a monthly MIS chart of sales and purchases with returns, net sales/purchases, receipts, payments and net cash, plus top-five customer and supplier concentration tables, a stock position with top items by value and items with no issues, working capital, top expense heads, voucher counts/values by type and ledger counts by group. Print/CSV cover the statistics screen.
 - Audit trail: append-only history of company, master, voucher, user,
   financial-year and restore actions, including who made the change, filterable
   by company or text. Print/CSV are available. The

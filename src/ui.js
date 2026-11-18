@@ -3611,6 +3611,20 @@ function statisticsScreen() {
           'Closing quantities and values use the weighted-average cost at the financial year end. “No issues” means no stock left the item during the year; it is a review flag, not proof of obsolescence.',
         )
       : ''}
+    ${panel(
+      'Working capital',
+      `<table class="data-table compact">
+        <tbody>
+          <tr><td>Receivables</td><td class="num">${money(stats.workingCapital.receivables)}</td></tr>
+          <tr><td>Stock</td><td class="num">${money(stats.workingCapital.stock)}</td></tr>
+          <tr><td>Cash</td><td class="num">${money(stats.workingCapital.cash)}</td></tr>
+          <tr><td>Bank</td><td class="num">${money(stats.workingCapital.bank)}</td></tr>
+          <tr><td>Less: payables</td><td class="num">${money(-stats.workingCapital.payables)}</td></tr>
+        </tbody>
+        <tfoot><tr><td>Net working capital</td><td class="num ${stats.workingCapital.net < 0 ? 'neg' : ''}"><strong>${money(stats.workingCapital.net)}</strong></td></tr></tfoot>
+      </table>`,
+      `Party balances and stock as on ${esc(dateLabel(stats.workingCapital.asOn))}. Net working capital is receivables plus stock, cash and bank, less payables.`,
+    )}
     ${stats.topExpenses.length
       ? panel(
           'Expense concentration',

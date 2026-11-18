@@ -2593,10 +2593,33 @@ export function statistics(company) {
       share: expenseTotal > 0 ? round2((row.amount / expenseTotal) * 100) : 0,
     }));
 
+  const totals = ledgerTotals(company, { to: company.fyEnd });
+  let cash = 0;
+  let bank = 0;
+  for (const ledger of company.ledgers) {
+    const entry = totals.get(ledger.id);
+    if (!entry) continue;
+    if (inGroupKey(company, ledger, 'cash')) cash = round2(cash + entry.closing);
+    if (inGroupKey(company, ledger, 'bank')) bank = round2(bank + entry.closing);
+  }
+  const receivables = outstanding(company, { side: 'receivable', asOn: company.fyEnd }).total;
+  const payables = outstanding(company, { side: 'payable', asOn: company.fyEnd }).total;
+  const stockValue = stock?.closingValue ?? 0;
+  const workingCapital = {
+    asOn: company.fyEnd,
+    receivables,
+    payables,
+    stock: stockValue,
+    cash,
+    bank,
+    net: round2(receivables + stockValue + cash + bank - payables),
+  };
+
   const sorted = vouchersSorted(company);
   return {
     voucherCounts,
     stock,
+    workingCapital,
     expenseTotal,
     topExpenses,
     topCustomers: topParties(['Sales', 'CreditNote'], 'sundryDebtors'),

@@ -516,6 +516,12 @@ test('statistics count vouchers, ledgers and groups', () => {
   assert.equal(stats.topExpenses[0].amount, 400);
   assert.equal(stats.topExpenses[0].share, 66.67);
   assert.equal(stats.topExpenses[1].name, 'Rent');
+  assert.equal(stats.workingCapital.receivables, 300);
+  assert.equal(stats.workingCapital.payables, 400);
+  assert.equal(stats.workingCapital.cash, 800);
+  assert.equal(stats.workingCapital.bank, 1400);
+  assert.equal(stats.workingCapital.stock, 0);
+  assert.equal(stats.workingCapital.net, 2100);
 });
 
 test('backup export and restore round-trip through validation', () => {

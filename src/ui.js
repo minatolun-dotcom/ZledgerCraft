@@ -3549,6 +3549,16 @@ function statisticsScreen() {
   const netSales = round2(total.sales - total.creditNotes);
   const netPurchases = round2(total.purchases - total.debitNotes);
   const netCash = round2(total.receipts - total.payments);
+  const partyTable = (rows, amountLabel, emptyLabel) => `<table class="data-table compact">
+    <thead><tr><th>Party</th><th class="num">${esc(amountLabel)}</th><th class="num">Share</th></tr></thead>
+    <tbody>${rows.length
+      ? rows
+          .map(
+            (row) => `<tr><td>${esc(row.name)}</td><td class="num">${money(row.amount)}</td><td class="num">${row.share.toFixed(1)}%</td></tr>`,
+          )
+          .join('')
+      : `<tr><td colspan="3" class="muted">${esc(emptyLabel)}</td></tr>`}</tbody>
+  </table>`;
 
   return `
     ${panel(
@@ -3563,6 +3573,14 @@ function statisticsScreen() {
         <tfoot><tr><td>Financial year</td><td class="num">${money(total.sales)}</td><td class="num">${money(total.creditNotes)}</td><td class="num">${money(netSales)}</td><td class="num">${money(total.purchases)}</td><td class="num">${money(total.debitNotes)}</td><td class="num">${money(netPurchases)}</td><td class="num">${money(total.receipts)}</td><td class="num">${money(total.payments)}</td><td class="num">${money(netCash)}</td></tr></tfoot>
       </table></div>`,
       'Net sales and purchases deduct credit/debit notes. Net cash is receipts minus payments. Journal and contra vouchers are excluded from the trend.',
+    )}
+    ${panel(
+      'Party concentration',
+      `<div class="split-grid">
+        <div><h3>Top customers</h3>${partyTable(stats.topCustomers, 'Net sales', 'No customer sales in this financial year.')}</div>
+        <div><h3>Top suppliers</h3>${partyTable(stats.topSuppliers, 'Net purchases', 'No supplier purchases in this financial year.')}</div>
+      </div>`,
+      'Top five parties by voucher value. Credit notes reduce customer sales; debit notes reduce supplier purchases. Cash sales and purchases without a party ledger are excluded.',
     )}
     ${panel(
       `Voucher statistics <span class="count">${stats.voucherTotal}</span>`,

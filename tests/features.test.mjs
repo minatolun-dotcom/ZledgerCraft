@@ -506,6 +506,11 @@ test('statistics count vouchers, ledgers and groups', () => {
   const june = stats.monthly.find((row) => row.month === '2026-06');
   assert.equal(june.sales, 0);
   assert.equal(june.payments, 0);
+  assert.equal(stats.topCustomers[0].name, 'Sharma Traders');
+  assert.equal(stats.topCustomers[0].amount, 900);
+  assert.equal(stats.topCustomers[0].share, 100);
+  assert.equal(stats.topSuppliers[0].name, 'Gupta Supplies');
+  assert.equal(stats.topSuppliers[0].amount, 400);
 });
 
 test('backup export and restore round-trip through validation', () => {

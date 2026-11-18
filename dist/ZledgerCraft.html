@@ -9256,9 +9256,38 @@ function statistics(company) {
     else if (voucher.type === 'Payment') row.payments = round2(row.payments + voucher.total);
   }
 
+  const topParties = (types, groupKey) => {
+    const totals = new Map();
+    for (const voucher of company.vouchers) {
+      if (!types.includes(voucher.type)) continue;
+      if (voucher.date < company.fyStart || voucher.date > company.fyEnd) continue;
+      const partyLine = (voucher.lines ?? []).find((line) => {
+        const ledger = company.ledgers.find((entry) => entry.id === line.ledgerId);
+        return ledger ? inGroupKey(company, ledger, groupKey) : false;
+      });
+      if (!partyLine) continue;
+      const signed = voucher.type === 'CreditNote' || voucher.type === 'DebitNote' ? -voucher.total : voucher.total;
+      const current = totals.get(partyLine.ledgerId) ?? { ledgerId: partyLine.ledgerId, amount: 0 };
+      current.amount = round2(current.amount + signed);
+      totals.set(partyLine.ledgerId, current);
+    }
+    const total = round2([...totals.values()].reduce((sum, row) => sum + Math.max(0, row.amount), 0));
+    return [...totals.values()]
+      .filter((row) => row.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5)
+      .map((row) => ({
+        ...row,
+        name: company.ledgers.find((ledger) => ledger.id === row.ledgerId)?.name ?? 'Unknown party',
+        share: total > 0 ? round2((row.amount / total) * 100) : 0,
+      }));
+  };
+
   const sorted = vouchersSorted(company);
   return {
     voucherCounts,
+    topCustomers: topParties(['Sales', 'CreditNote'], 'sundryDebtors'),
+    topSuppliers: topParties(['Purchase', 'DebitNote'], 'sundryCreditors'),
     voucherTotal: company.vouchers.length,
     ledgerCount: company.ledgers.length,
     groupCount: company.groups.length,
@@ -14097,6 +14126,16 @@ function statisticsScreen() {
   const netSales = round2(total.sales - total.creditNotes);
   const netPurchases = round2(total.purchases - total.debitNotes);
   const netCash = round2(total.receipts - total.payments);
+  const partyTable = (rows, amountLabel, emptyLabel) => `<table class="data-table compact">
+    <thead><tr><th>Party</th><th class="num">${esc(amountLabel)}</th><th class="num">Share</th></tr></thead>
+    <tbody>${rows.length
+      ? rows
+          .map(
+            (row) => `<tr><td>${esc(row.name)}</td><td class="num">${money(row.amount)}</td><td class="num">${row.share.toFixed(1)}%</td></tr>`,
+          )
+          .join('')
+      : `<tr><td colspan="3" class="muted">${esc(emptyLabel)}</td></tr>`}</tbody>
+  </table>`;
 
   return `
     ${panel(
@@ -14111,6 +14150,14 @@ function statisticsScreen() {
         <tfoot><tr><td>Financial year</td><td class="num">${money(total.sales)}</td><td class="num">${money(total.creditNotes)}</td><td class="num">${money(netSales)}</td><td class="num">${money(total.purchases)}</td><td class="num">${money(total.debitNotes)}</td><td class="num">${money(netPurchases)}</td><td class="num">${money(total.receipts)}</td><td class="num">${money(total.payments)}</td><td class="num">${money(netCash)}</td></tr></tfoot>
       </table></div>`,
       'Net sales and purchases deduct credit/debit notes. Net cash is receipts minus payments. Journal and contra vouchers are excluded from the trend.',
+    )}
+    ${panel(
+      'Party concentration',
+      `<div class="split-grid">
+        <div><h3>Top customers</h3>${partyTable(stats.topCustomers, 'Net sales', 'No customer sales in this financial year.')}</div>
+        <div><h3>Top suppliers</h3>${partyTable(stats.topSuppliers, 'Net purchases', 'No supplier purchases in this financial year.')}</div>
+      </div>`,
+      'Top five parties by voucher value. Credit notes reduce customer sales; debit notes reduce supplier purchases. Cash sales and purchases without a party ledger are excluded.',
     )}
     ${panel(
       `Voucher statistics <span class="count">${stats.voucherTotal}</span>`,

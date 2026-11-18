@@ -2525,9 +2525,38 @@ export function statistics(company) {
     else if (voucher.type === 'Payment') row.payments = round2(row.payments + voucher.total);
   }
 
+  const topParties = (types, groupKey) => {
+    const totals = new Map();
+    for (const voucher of company.vouchers) {
+      if (!types.includes(voucher.type)) continue;
+      if (voucher.date < company.fyStart || voucher.date > company.fyEnd) continue;
+      const partyLine = (voucher.lines ?? []).find((line) => {
+        const ledger = company.ledgers.find((entry) => entry.id === line.ledgerId);
+        return ledger ? inGroupKey(company, ledger, groupKey) : false;
+      });
+      if (!partyLine) continue;
+      const signed = voucher.type === 'CreditNote' || voucher.type === 'DebitNote' ? -voucher.total : voucher.total;
+      const current = totals.get(partyLine.ledgerId) ?? { ledgerId: partyLine.ledgerId, amount: 0 };
+      current.amount = round2(current.amount + signed);
+      totals.set(partyLine.ledgerId, current);
+    }
+    const total = round2([...totals.values()].reduce((sum, row) => sum + Math.max(0, row.amount), 0));
+    return [...totals.values()]
+      .filter((row) => row.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5)
+      .map((row) => ({
+        ...row,
+        name: company.ledgers.find((ledger) => ledger.id === row.ledgerId)?.name ?? 'Unknown party',
+        share: total > 0 ? round2((row.amount / total) * 100) : 0,
+      }));
+  };
+
   const sorted = vouchersSorted(company);
   return {
     voucherCounts,
+    topCustomers: topParties(['Sales', 'CreditNote'], 'sundryDebtors'),
+    topSuppliers: topParties(['Purchase', 'DebitNote'], 'sundryCreditors'),
     voucherTotal: company.vouchers.length,
     ledgerCount: company.ledgers.length,
     groupCount: company.groups.length,

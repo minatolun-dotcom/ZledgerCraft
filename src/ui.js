@@ -107,7 +107,9 @@ import {
   updateGroup,
   updateLedger,
   updateStockItem,
+  updatePendingVoucher,
   updateVoucher,
+  withdrawPendingVoucher,
   unsetBankMatch,
   withholdingTaxLedgers,
 } from './store.js';
@@ -1251,6 +1253,28 @@ export async function openAlter(voucherId) {
   return true;
 }
 
+export function openPendingVoucher(voucherId) {
+  if (!requirePermission('voucher.write')) return false;
+  const active = company();
+  if (!active) return false;
+  const voucher = (active.pendingVouchers ?? []).find((item) => item.id === voucherId);
+  if (!voucher) {
+    setFlash('Pending voucher not found.', 'warn');
+    return false;
+  }
+  if (voucher.status !== 'pending') {
+    setFlash('This voucher has already been decided.', 'warn');
+    return false;
+  }
+  if (!authUser?.id || voucher.submittedBy?.id !== authUser.id) {
+    setFlash('Only the person who submitted this voucher can edit it.', 'warn');
+    return false;
+  }
+  prepareDraft(voucher.type, voucher);
+  navigate('voucherNew', { type: voucher.type, editId: voucher.id, pendingEdit: true });
+  return true;
+}
+
 export function duplicateVoucher(voucherId) {
   const active = company();
   if (!active) return;
@@ -1791,7 +1815,7 @@ export function roleBannerHtml() {
 
 export function screenTitle() {
   if (view.screen === 'voucherNew') {
-    return `${view.editId ? 'Alter' : 'New'} ${voucherLabel(view.type || 'Payment')} voucher`;
+    return `${view.pendingEdit ? 'Revise pending' : view.editId ? 'Alter' : 'New'} ${voucherLabel(view.type || 'Payment')} voucher`;
   }
   return SCREEN_TITLES[view.screen] ?? REPORT_TITLES[view.screen] ?? 'ZledgerCraft';
 }
@@ -3129,15 +3153,22 @@ export async function handleSubmit(event) {
       return;
     }
     const editingId = view.editId;
-    const pendingApproval = Boolean(active.approvalsRequired && authRequired && authUser?.role !== 'owner' && !editingId);
+    const pendingEdit = Boolean(view.pendingEdit && editingId);
+    const pendingApproval = Boolean(
+      active.approvalsRequired && authRequired && authUser?.role !== 'owner' && !editingId,
+    );
     const input = {
       ...readVoucherForm(),
-      pending: pendingApproval,
+      pending: pendingEdit || pendingApproval,
       submittedBy: authUser
         ? { id: authUser.id, username: authUser.username, name: authUser.name }
         : { id: 'local', username: 'local', name: 'Local user' },
     };
-    const result = editingId ? updateVoucher(active, editingId, input) : addVoucher(active, input);
+    const result = pendingEdit
+      ? updatePendingVoucher(active, editingId, input, currentProfile() || {})
+      : editingId
+        ? updateVoucher(active, editingId, input)
+        : addVoucher(active, input);
     if (!result.ok) {
       showFormError(result.error);
       return;
@@ -3146,17 +3177,21 @@ export async function handleSubmit(event) {
       ? ` · ${result.voucher.instrument.kind} ${result.voucher.instrument.number} dated ${dateLabel(result.voucher.instrument.date)}`
       : '';
     logAudit(
-      editingId ? 'voucher.update' : 'voucher.create',
-      `${editingId ? 'Altered' : 'Created'} ${voucherAuditLabel(result.voucher)}${instrumentNote}.`,
+      pendingEdit ? 'voucher.pending.update' : editingId ? 'voucher.update' : 'voucher.create',
+      `${pendingEdit ? 'Revised pending' : editingId ? 'Altered' : 'Created'} ${voucherAuditLabel(result.voucher)}${instrumentNote}.`,
       active,
-      `${result.voucher.type} ${result.voucher.no}`,
+      `${result.voucher.type} ${result.voucher.no ?? 'pending'}`,
     );
     await persist();
     if (workspaceMode && workspaceSaveError) return;
     await releaseActiveLease();
     draft = null;
     if (result.pending) {
-      setFlash(`${voucherLabel(result.voucher.type)} submitted for owner approval.`);
+      setFlash(
+        pendingEdit
+          ? `${voucherLabel(result.voucher.type)} updated and still awaiting owner approval.`
+          : `${voucherLabel(result.voucher.type)} submitted for owner approval.`,
+      );
       navigate('vouchers');
       return;
     }
@@ -4683,6 +4718,41 @@ async function handleClick(event) {
       persist();
       setFlash(removed ? 'Voucher deleted.' : 'Voucher not found.');
       navigate('daybook');
+      break;
+    }
+    case 'edit-pending-voucher': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      openPendingVoucher(trigger.dataset.id);
+      break;
+    }
+    case 'withdraw-pending-voucher': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const pending = (active.pendingVouchers ?? []).find((voucher) => voucher.id === trigger.dataset.id);
+      if (!pending) break;
+      if (!window.confirm('Withdraw this pending voucher? It will be removed without posting.')) break;
+      const result = withdrawPendingVoucher(active, trigger.dataset.id, currentProfile() || {});
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit(
+        'voucher.pending.withdraw',
+        `Withdrew a pending ${voucherLabel(result.voucher.type)} before approval.`,
+        active,
+        voucherLabel(result.voucher.type),
+      );
+      persist();
+      setFlash('Pending voucher withdrawn. Nothing was posted.');
+      render();
       break;
     }
     case 'approve-pending-voucher': {

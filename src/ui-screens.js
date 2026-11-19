@@ -1018,12 +1018,14 @@ function pendingVouchersPanel(active) {
         <td>${pendingStatus ? 'Pending' : 'Rejected'}${voucher.rejectionNote ? `<br><span class="muted small">${esc(voucher.rejectionNote)}</span>` : ''}</td>
         <td class="row-actions">${
           pendingStatus
-            ? can('voucher.approve')
-              ? own
-                ? '<span class="muted small">Awaiting another owner</span>'
-                : `<button class="btn small primary" type="button" data-action="approve-pending-voucher" data-id="${esc(voucher.id)}">Approve</button>
+            ? own
+              ? `<span class="muted small">${can('voucher.approve') ? 'Awaiting another owner' : 'Awaiting owner'}</span>
+                 ${can('voucher.write') ? `<button class="btn small" type="button" data-action="edit-pending-voucher" data-id="${esc(voucher.id)}">Edit</button>
+                 <button class="btn small danger" type="button" data-action="withdraw-pending-voucher" data-id="${esc(voucher.id)}">Withdraw</button>` : ''}`
+              : can('voucher.approve')
+                ? `<button class="btn small primary" type="button" data-action="approve-pending-voucher" data-id="${esc(voucher.id)}">Approve</button>
                    <button class="btn small danger" type="button" data-action="reject-pending-voucher" data-id="${esc(voucher.id)}">Reject</button>`
-              : '<span class="muted small">Awaiting owner</span>'
+                : '<span class="muted small">Awaiting owner</span>'
             : can('voucher.approve')
               ? `<button class="btn small" type="button" data-action="delete-pending-voucher" data-id="${esc(voucher.id)}">Remove</button>`
               : ''
@@ -1191,8 +1193,11 @@ export function voucherNewScreen() {
   if (!draft || draft.type !== view.type) return '';
   const active = company();
   const meta = VOUCHER_TYPES[draft.type];
-  const editing = view.editId ? active.vouchers.find((item) => item.id === view.editId) : null;
-  const nextNo = editing ? editing.no : (active.counters[draft.type] ?? 0) + 1;
+  const pendingEditing = view.pendingEdit
+    ? (active.pendingVouchers ?? []).find((item) => item.id === view.editId)
+    : null;
+  const editing = pendingEditing || (view.editId ? active.vouchers.find((item) => item.id === view.editId) : null);
+  const nextNo = pendingEditing ? 'Pending' : editing ? editing.no : (active.counters[draft.type] ?? 0) + 1;
 
   const rows = draft.lines
     .map(
@@ -1333,8 +1338,8 @@ export function voucherNewScreen() {
     <form id="voucher-form" class="voucher-form" novalidate>
       <div class="voucher-head">
         <div>
-          <p class="eyebrow">${editing ? 'Voucher alteration' : 'Voucher entry'}</p>
-          <h1>${editing ? 'Alter' : 'New'} ${esc(meta.label)} voucher <span class="badge">${meta.shortcut}</span></h1>
+          <p class="eyebrow">${pendingEditing ? 'Pending approval' : editing ? 'Voucher alteration' : 'Voucher entry'}</p>
+          <h1>${pendingEditing ? 'Revise' : editing ? 'Alter' : 'New'} ${esc(meta.label)} voucher <span class="badge">${meta.shortcut}</span></h1>
         </div>
         <div class="voucher-meta">
           <span class="label">No.</span><strong>${nextNo}</strong>
@@ -1376,7 +1381,7 @@ export function voucherNewScreen() {
       </label>
       <p id="form-error" class="form-error" role="alert"></p>
       <div class="form-actions">
-        <button class="btn primary" type="submit">${editing ? 'Update voucher' : 'Accept'} <kbd>Alt+S</kbd></button>
+        <button class="btn primary" type="submit">${pendingEditing ? 'Resubmit for approval' : editing ? 'Update voucher' : 'Accept'} <kbd>Alt+S</kbd></button>
         <button class="btn ghost" type="button" data-screen="gateway">Esc · Gateway</button>
         <button class="btn ghost" type="button" data-screen="daybook">Day Book</button>
       </div>

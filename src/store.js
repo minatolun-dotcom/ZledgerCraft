@@ -2965,6 +2965,49 @@ export function rejectPendingVoucher(company, voucherId, actor = {}, note = '') 
   return { ok: true, voucher: pending };
 }
 
+export function updatePendingVoucher(company, voucherId, input = {}, actor = {}) {
+  const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
+  if (!pending) return { ok: false, error: 'Pending voucher not found.' };
+  if (pending.status !== 'pending') return { ok: false, error: 'Only a pending voucher can be edited.' };
+  if (!actor.id || pending.submittedBy?.id !== actor.id) {
+    return { ok: false, error: 'Only the person who submitted this voucher can edit it.' };
+  }
+  const type = VOUCHER_TYPES[input.type] ? input.type : pending.type;
+  const checked = validateVoucherInput(company, type, input);
+  if (!checked.ok) return checked;
+  pending.type = type;
+  pending.date = checked.date;
+  pending.narration = checked.narration;
+  pending.lines = checked.lines;
+  pending.total = checked.total;
+  for (const key of ['currencyCode', 'exchangeRate', 'currencyTotal', 'items', 'bill', 'instrument', 'gst', 'tds']) {
+    delete pending[key];
+  }
+  if (checked.currencyCode) {
+    pending.currencyCode = checked.currencyCode;
+    pending.exchangeRate = checked.exchangeRate;
+    pending.currencyTotal = checked.currencyTotal;
+  }
+  if (checked.items.length) pending.items = checked.items;
+  if (checked.bill) pending.bill = checked.bill;
+  if (checked.instrument) pending.instrument = checked.instrument;
+  if (checked.gst) pending.gst = checked.gst;
+  if (checked.tds) pending.tds = checked.tds;
+  pending.editedAt = new Date().toISOString();
+  return { ok: true, voucher: pending, pending: true };
+}
+
+export function withdrawPendingVoucher(company, voucherId, actor = {}) {
+  const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
+  if (!pending) return { ok: false, error: 'Pending voucher not found.' };
+  if (pending.status !== 'pending') return { ok: false, error: 'Only a pending voucher can be withdrawn.' };
+  if (!actor.id || pending.submittedBy?.id !== actor.id) {
+    return { ok: false, error: 'Only the person who submitted this voucher can withdraw it.' };
+  }
+  company.pendingVouchers = (company.pendingVouchers ?? []).filter((voucher) => voucher.id !== voucherId);
+  return { ok: true, voucher: pending };
+}
+
 export function deletePendingVoucher(company, voucherId) {
   const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
   if (!pending) return { ok: false, error: 'Pending voucher not found.' };

@@ -203,6 +203,12 @@ Status: **complete 2026-11-19**
   proposers cannot decide their own voucher. The server rejects accountant
   attempts to add posted vouchers or alter existing submissions while the
   policy is on. The voucher screen shows the approval queue and status.
+- [x] **4D. Pending voucher revision.** The original submitter can edit a
+  pending voucher in place or withdraw it before a decision. The server accepts
+  only changes to that submitter's pending entry, keeps its id, submitter and
+  submission time fixed, rejects a voucher number before approval, and still
+  prevents changes to another person's submission. Revised vouchers stay out of
+  the books until an owner approves them; the queue records an `editedAt` time.
 - [x] **4C. Read-only API and OpenAPI contract.** Owners create named bearer
   tokens under Companies → Server accounts; the token is shown once and stored
   as a SHA-256 hash in SQLite or Postgres. Tokens carry only the `books:read`
@@ -336,7 +342,7 @@ feature without breaking local development or the single-file build.
 | Report history | pass | API test checks sent/failed rows, source and recipients; Neon branch test exercises the Postgres history table |
 | Backup history | pass | Server API and Neon branch tests create a backup and verify the stored history row, source, name and status |
 | Per-account MFA policy | pass (SQLite/LAN) | Auth unit and server API tests cover requiring enrolled MFA, blocking disable, owner UI state and audit; Neon returns 501 |
-| Voucher approvals | pass | Store tests prove pending vouchers do not post or affect reports; server API test rejects accountant direct posting while approvals are on |
+| Voucher approvals | pass | Store tests prove pending vouchers do not post or affect reports; server API test rejects accountant direct posting and edits to another submitter's pending voucher, while allowing the submitter to revise and withdraw |
 | Scoped API tokens and shared limits | pass | API integration test filters listed companies and rejects out-of-scope ids; SQLite/PG limiter tables enforce the per-token window, and the Neon branch test shares a limit across two server instances |
 
 ## Progress log
@@ -529,9 +535,13 @@ and operate the current server with R2 and Resend enabled.
   separate pending queue, approve/reject/remove actions, proposer/approver
   attribution, self-approval blocking and server-side prevention of accountant
   direct posting. Pending vouchers never enter the posted books.
-- Remaining 4B limits: pending submissions cannot be edited in place, there is
-  no multi-level approval matrix, and concurrent pending-queue merges rely on
-  the normal workspace conflict flow rather than a dedicated merge.
+- Added Phase 4D pending-voucher revision: the submitter can edit or withdraw
+  an undecided submission, with server checks for ownership, fixed id/submitter/
+  submission time and no voucher number. Revised pending vouchers never post
+  until approval.
+- Remaining approvals limits: there is no multi-level approval matrix, and
+  concurrent pending-queue merges rely on the normal workspace conflict flow
+  rather than a dedicated merge.
 - Added Phase 5A integration hardening: API tokens can be restricted to
   selected companies, with every `/api/v1` list and company route filtered and
   out-of-scope ids returning `404`. API rate-limit windows moved into

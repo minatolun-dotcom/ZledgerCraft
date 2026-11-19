@@ -772,6 +772,65 @@ test('server API authenticates, shares one workspace and enforces roles', { time
     });
     assert.equal(pendingSaved.status, 200, JSON.stringify(pendingSaved.body));
 
+    const reviseBase = await accountant.request('/api/workspace');
+    const reviseState = structuredClone(reviseBase.body.state);
+    reviseState.companies[0].pendingVouchers[0].narration = 'Corrected before approval';
+    reviseState.companies[0].pendingVouchers[0].total = 35;
+    const revised = await accountant.request('/api/workspace', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ baseRev: reviseBase.body.rev, state: reviseState }),
+    });
+    assert.equal(revised.status, 200, JSON.stringify(revised.body));
+
+    const foreignBase = await owner.request('/api/workspace');
+    const foreignState = structuredClone(foreignBase.body.state);
+    foreignState.companies[0].pendingVouchers.push({
+      id: 'pending_other',
+      type: 'Receipt',
+      no: null,
+      date: '2026-04-13',
+      total: 10,
+      lines: [],
+      status: 'pending',
+      submittedBy: { id: 'someone_else', username: 'other', name: 'Other' },
+      submittedAt: '2026-04-13T00:00:00.000Z',
+    });
+    assert.equal(
+      (
+        await owner.request('/api/workspace', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ baseRev: foreignBase.body.rev, state: foreignState }),
+        })
+      ).status,
+      200,
+    );
+    const foreignEditBase = await accountant.request('/api/workspace');
+    const foreignEditState = structuredClone(foreignEditBase.body.state);
+    foreignEditState.companies[0].pendingVouchers.find(
+      (voucher) => voucher.id === 'pending_other',
+    ).narration = 'Changed by another accountant';
+    const foreignEdit = await accountant.request('/api/workspace', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ baseRev: foreignEditBase.body.rev, state: foreignEditState }),
+    });
+    assert.equal(foreignEdit.status, 403);
+    assert.match(foreignEdit.body.error, /submitter/i);
+
+    const withdrawBase = await accountant.request('/api/workspace');
+    const withdrawState = structuredClone(withdrawBase.body.state);
+    withdrawState.companies[0].pendingVouchers = withdrawState.companies[0].pendingVouchers.filter(
+      (voucher) => voucher.id !== 'pending_one',
+    );
+    const withdrawn = await accountant.request('/api/workspace', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ baseRev: withdrawBase.body.rev, state: withdrawState }),
+    });
+    assert.equal(withdrawn.status, 200, JSON.stringify(withdrawn.body));
+
     const directBase = await accountant.request('/api/workspace');
     const directState = structuredClone(directBase.body.state);
     directState.companies[0].vouchers.push({

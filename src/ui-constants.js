@@ -162,6 +162,8 @@ export const AUDIT_ACTION_LABELS = {
   'voucher.delete': 'Voucher deleted',
   'voucher.approve': 'Voucher approved',
   'voucher.reject': 'Voucher rejected',
+  'voucher.pending.update': 'Pending voucher revised',
+  'voucher.pending.withdraw': 'Pending voucher withdrawn',
   'year.add': 'Financial year added',
   'year.close': 'Financial year closed',
   'year.reopen': 'Financial year reopened',

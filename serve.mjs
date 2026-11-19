@@ -1368,8 +1368,29 @@ function accountantWriteError(previous, next, user = null) {
       const nextPending = new Map((company.pendingVouchers ?? []).map((voucher) => [voucher.id, voucher]));
       for (const [id, voucher] of oldPending) {
         const nextVoucher = nextPending.get(id);
-        if (!nextVoucher || !deepEqual(voucher, nextVoucher)) {
-          return 'Only an owner can change or remove submitted vouchers.';
+        const ownPending = voucher.status === 'pending' && voucher.submittedBy?.id === user?.id;
+        if (!nextVoucher) {
+          if (ownPending) continue;
+          return 'Only the submitter can withdraw a pending voucher.';
+        }
+        if (deepEqual(voucher, nextVoucher)) continue;
+        if (!ownPending) {
+          return 'Only the submitter can edit a pending voucher.';
+        }
+        if (nextVoucher.id !== id) {
+          return 'A pending voucher must keep its id.';
+        }
+        if (nextVoucher.status !== 'pending') {
+          return 'A submitted voucher must stay pending until an owner decides.';
+        }
+        if (!deepEqual(voucher.submittedBy, nextVoucher.submittedBy)) {
+          return 'A submitted voucher must keep its original submitter.';
+        }
+        if (nextVoucher.submittedAt !== voucher.submittedAt) {
+          return 'A submitted voucher must keep its original submission time.';
+        }
+        if (nextVoucher.no !== null && nextVoucher.no !== undefined) {
+          return 'A pending voucher cannot carry a voucher number.';
         }
       }
       for (const [id, voucher] of nextPending) {

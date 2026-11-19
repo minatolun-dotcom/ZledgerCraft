@@ -327,6 +327,15 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 ## Progress log
 
+### 2026-11-19 — Phase 4D: pending voucher revision
+
+- The submitter can revise or withdraw an undecided voucher from the approval
+  queue. The server keeps the id, submitter and submission time fixed, rejects
+  a voucher number before approval, and still blocks edits to another person's
+  submission.
+- Revised pending vouchers remain outside posted books and reports until an
+  owner approves them. The queue records the revision time.
+
 ### 2026-11-19 — Phase 5A: scoped API tokens and shared limits
 
 - API tokens can be restricted to selected companies; `/api/v1` responses are
@@ -352,8 +361,9 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
   queue, so unapproved staff vouchers never enter posted books or reports.
 - Owners approve or reject with attribution; proposers cannot decide their own
   vouchers. The server blocks accountant direct posting while approvals are on.
-- Pending vouchers cannot yet be edited in place or merged with a dedicated
-  queue policy; the normal workspace conflict flow applies.
+- Pending vouchers can now be revised or withdrawn by their submitter; there
+  is still no multi-level approval matrix or dedicated pending-queue merge
+  policy, so the normal workspace conflict flow applies.
 
 ### 2026-11-19 — Phase 4A: per-account MFA requirement (SQLite/LAN)
 

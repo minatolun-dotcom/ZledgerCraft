@@ -180,12 +180,67 @@ export function repairVoucherNumbers(state) {
   return renumbered;
 }
 
+function changedPaths(base, next, path, out, limit) {
+  if (out.length >= limit || deepEqual(base, next)) return;
+  if (Array.isArray(base) && Array.isArray(next)) {
+    const key = idKey([base, next]);
+    if (!key) {
+      out.push(path.join('.') || 'root');
+      return;
+    }
+    const baseMap = new Map(base.map((item) => [item[key], item]));
+    const nextMap = new Map(next.map((item) => [item[key], item]));
+    for (const id of new Set([...baseMap.keys(), ...nextMap.keys()])) {
+      if (out.length >= limit) return;
+      if (!baseMap.has(id) || !nextMap.has(id)) {
+        out.push([...path, id].join('.'));
+        continue;
+      }
+      changedPaths(baseMap.get(id), nextMap.get(id), [...path, id], out, limit);
+    }
+    return;
+  }
+  if (isPlainObject(base) && isPlainObject(next)) {
+    for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
+      if (out.length >= limit) return;
+      if (key === 'activeCompanyId' || key === 'currentUserId') continue;
+      const inBase = Object.prototype.hasOwnProperty.call(base, key);
+      const inNext = Object.prototype.hasOwnProperty.call(next, key);
+      if (!inBase || !inNext) {
+        out.push([...path, key].join('.'));
+        continue;
+      }
+      changedPaths(base[key], next[key], [...path, key], out, limit);
+    }
+    return;
+  }
+  out.push(path.join('.') || 'root');
+}
+
+export function workspaceChangePaths(base, next, limit = 80) {
+  const out = [];
+  changedPaths(base, next, [], out, Math.max(1, Math.min(200, Number(limit) || 80)));
+  return out;
+}
+
 export function mergeWorkspaceStates(base, local, current) {
   if (!isPlainObject(base) || !isPlainObject(local) || !isPlainObject(current)) {
     return { ok: false, reason: 'Workspace states must be objects.' };
   }
   const merged = mergeValue(base, local, current, []);
-  return merged.ok ? { ok: true, state: merged.value } : merged;
+  if (!merged.ok) return merged;
+  const localPaths = workspaceChangePaths(base, local);
+  const serverPaths = workspaceChangePaths(base, current);
+  const serverSet = new Set(serverPaths);
+  return {
+    ok: true,
+    state: merged.value,
+    mergeDetails: {
+      local: localPaths,
+      server: serverPaths,
+      overlapping: localPaths.filter((path) => serverSet.has(path)),
+    },
+  };
 }
 
 function number(value) {

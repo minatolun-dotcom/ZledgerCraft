@@ -232,6 +232,18 @@ Status: **5A complete 2026-11-19**
   10000 for a deployment. The OpenAPI description and owner panel show the
   company restriction.
 
+### Phase 6 — Multi-user merge visibility
+
+Status: **complete 2026-11-19**
+
+- [x] Record a hash-chained `workspace.merge` event when a stale save is
+  accepted through the three-way merge. The detail lists the changed field
+  paths submitted by the client and those changed on the server, plus any field
+  both sides set to the same value. Paths include company, collection and
+  record ids, so owners can see exactly which records were auto-merged. Merge
+  values and original document numbers are still not retained, and the event is
+  capped to the five paths per side shown in the audit row.
+
 ## Environment variables
 
 Phase 1 uses the following optional variables. Missing values disable the
@@ -344,6 +356,7 @@ feature without breaking local development or the single-file build.
 | Per-account MFA policy | pass (SQLite/LAN) | Auth unit and server API tests cover requiring enrolled MFA, blocking disable, owner UI state and audit; Neon returns 501 |
 | Voucher approvals | pass | Store tests prove pending vouchers do not post or affect reports; server API test rejects accountant direct posting and edits to another submitter's pending voucher, while allowing the submitter to revise and withdraw |
 | Scoped API tokens and shared limits | pass | API integration test filters listed companies and rejects out-of-scope ids; SQLite/PG limiter tables enforce the per-token window, and the Neon branch test shares a limit across two server instances |
+| Concurrent merge history | pass | Merge tests assert changed field paths and overlapping fields; the server API test verifies a `workspace.merge` audit event for an accepted stale save |
 
 ## Progress log
 
@@ -542,6 +555,12 @@ and operate the current server with R2 and Resend enabled.
 - Remaining approvals limits: there is no multi-level approval matrix, and
   concurrent pending-queue merges rely on the normal workspace conflict flow
   rather than a dedicated merge.
+- Added Phase 6 merge visibility: a successful stale-save merge now appends
+  a hash-chained `workspace.merge` server event. The event lists field paths
+  submitted by the client, changed on the server, and set identically by both
+  sides, so the owner audit shows which records were auto-merged rather than
+  only a generic merged flag. The detail is derived from `server-merge.js` and
+  capped to keep audit rows readable.
 - Added Phase 5A integration hardening: API tokens can be restricted to
   selected companies, with every `/api/v1` list and company route filtered and
   out-of-scope ids returning `404`. API rate-limit windows moved into

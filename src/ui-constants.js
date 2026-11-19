@@ -121,6 +121,7 @@ export const SERVER_EVENT_LABELS = {
   'apiToken.revoke': 'API token revoked',
   'workspace.clear': 'Workspace cleared',
   'workspace.restore': 'Backup restored',
+  'workspace.merge': 'Concurrent changes merged',
   'backup.create': 'Backup created',
 };
 

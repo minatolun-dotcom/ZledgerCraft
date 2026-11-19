@@ -480,6 +480,7 @@ export class WorkspaceStore {
     let nextState = state;
     let merged = false;
     let mergeError = '';
+    let mergeDetails = null;
     let renumbered = 0;
 
     if (currentRev !== baseRev) {
@@ -501,6 +502,7 @@ export class WorkspaceStore {
       }
       nextState = result.state;
       merged = true;
+      mergeDetails = result.mergeDetails ?? null;
       renumbered = repairVoucherNumbers(nextState);
       if (deepEqual(nextState, currentState)) {
         return {
@@ -508,6 +510,7 @@ export class WorkspaceStore {
           rev: currentRev,
           updatedAt: meta?.updated_at ?? null,
           merged: true,
+          mergeDetails,
           renumbered,
           state: currentState,
         };
@@ -526,6 +529,7 @@ export class WorkspaceStore {
       rev,
       updatedAt,
       merged,
+      mergeDetails,
       renumbered,
       state: merged ? nextState : undefined,
       mergeError,

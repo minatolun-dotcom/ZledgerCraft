@@ -182,6 +182,7 @@ export class PostgresWorkspaceStore {
       const currentState = meta.rowCount ? meta.rows[0].state : null;
       let nextState = state;
       let merged = false;
+      let mergeDetails = null;
       let renumbered = 0;
 
       if (currentRev !== baseRev) {
@@ -204,6 +205,7 @@ export class PostgresWorkspaceStore {
         }
         nextState = result.state;
         merged = true;
+        mergeDetails = result.mergeDetails ?? null;
         renumbered = repairVoucherNumbers(nextState);
         if (deepEqual(nextState, currentState)) {
           await client.query('COMMIT');
@@ -212,6 +214,7 @@ export class PostgresWorkspaceStore {
             rev: currentRev,
             updatedAt: meta.rows[0]?.updated_at ?? null,
             merged: true,
+            mergeDetails,
             renumbered,
             state: currentState,
           };
@@ -251,6 +254,7 @@ export class PostgresWorkspaceStore {
         rev,
         updatedAt: at,
         merged,
+        mergeDetails,
         renumbered,
         state: merged ? nextState : undefined,
       };

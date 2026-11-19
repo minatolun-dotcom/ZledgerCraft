@@ -462,6 +462,7 @@ function mergeScopedWorkspace(base, current, incoming, user) {
       currentUserId: current.currentUserId ?? null,
       audit: [...currentAudit, ...appendedAudit],
     },
+    mergeDetails: result.mergeDetails ?? null,
   };
 }
 
@@ -748,6 +749,19 @@ function appendServerEvent(user, action, target = '', detail = '') {
   } catch (error) {
     console.error(`Could not append server event ${action}: ${error.message}`);
   }
+}
+
+function mergeEventDetail(details) {
+  if (!details) return '';
+  const list = (paths) => {
+    const shown = paths.slice(0, 5).join(', ');
+    return paths.length > 5 ? `${shown} (+${paths.length - 5} more)` : shown;
+  };
+  const parts = [];
+  if (details.local?.length) parts.push(`Submitted: ${list(details.local)}`);
+  if (details.server?.length) parts.push(`Server: ${list(details.server)}`);
+  if (details.overlapping?.length) parts.push(`Same field: ${list(details.overlapping)}`);
+  return parts.join(' · ').slice(0, 500);
 }
 
 async function verifyServerEventChain() {
@@ -1520,7 +1534,12 @@ async function writeWorkspace(state, baseRev, user, leaseToken = '') {
           afterWrite: afterWrite(serialized),
         });
         if (written.conflict || written.forbidden) return written;
-        return { ...written, merged: true, state: merged.state };
+        return {
+          ...written,
+          merged: true,
+          mergeDetails: merged.mergeDetails ?? null,
+          state: merged.state,
+        };
       }
       const prepared = prepareWorkspaceForScopedWrite(current.state, state, user);
       if (prepared.error) return { forbidden: true, error: prepared.error };
@@ -2468,6 +2487,14 @@ async function handleWorkspaceApi(request, response, url) {
           storage,
         });
         return;
+      }
+      if (result.merged && result.mergeDetails) {
+        appendServerEvent(
+          user,
+          'workspace.merge',
+          `revision ${result.rev}`,
+          mergeEventDetail(result.mergeDetails),
+        );
       }
       json(response, 200, {
         ok: true,

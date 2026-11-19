@@ -54,7 +54,8 @@ read-only; only owners can manage companies, years, accounts and restores.
 Owners can restrict a non-owner account to selected companies; the server filters
 reads and rejects writes outside that set, including forged company ids. Scoped
 saves still merge independent changes, but hidden companies are preserved and
-never sent to the scoped browser. The same panel shows recent sign-in attempts,
+never sent to the scoped browser. An accepted merge records the changed field
+paths in the hash-chained owner audit. The same panel shows recent sign-in attempts,
 active sessions, the server-side save audit, and creates/downloads/restores
 server backups. Owners can enable authenticator-based two-step verification
 (TOTP) for an account and receive a one-time recovery code; an account can also

@@ -95,6 +95,9 @@ test('independent voucher additions merge', () => {
     merged.state.companies[0].vouchers.map((voucher) => voucher.id).sort(),
     ['v1', 'v2', 'v3', 'v4'],
   );
+  assert.deepEqual(merged.mergeDetails.local, ['companies.co1.vouchers.v3']);
+  assert.deepEqual(merged.mergeDetails.server, ['companies.co1.vouchers.v4']);
+  assert.deepEqual(merged.mergeDetails.overlapping, []);
 });
 
 test('different fields on the same ledger merge without conflict', () => {
@@ -108,6 +111,21 @@ test('different fields on the same ledger merge without conflict', () => {
   assert.equal(merged.ok, true, merged.reason);
   assert.equal(merged.state.companies[0].ledgers[0].name, 'Cash in hand');
   assert.equal(merged.state.companies[0].ledgers[0].opening, 500);
+  assert.deepEqual(merged.mergeDetails.local, ['companies.co1.ledgers.l1.name']);
+  assert.deepEqual(merged.mergeDetails.server, ['companies.co1.ledgers.l1.opening']);
+  assert.deepEqual(merged.mergeDetails.overlapping, []);
+});
+
+test('the same field set to the same value is recorded as overlapping', () => {
+  const base = baseState();
+  const local = clone(base);
+  const current = clone(base);
+  local.companies[0].ledgers[0].name = 'Shared cash';
+  current.companies[0].ledgers[0].name = 'Shared cash';
+
+  const merged = mergeWorkspaceStates(base, local, current);
+  assert.equal(merged.ok, true, merged.reason);
+  assert.deepEqual(merged.mergeDetails.overlapping, ['companies.co1.ledgers.l1.name']);
 });
 
 test('the same field and delete-versus-modify conflicts are rejected', () => {

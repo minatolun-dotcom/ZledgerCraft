@@ -732,6 +732,12 @@ test('server API authenticates, shares one workspace and enforces roles', { time
       merged.body.state.companies[0].vouchers.map((voucher) => voucher.id).sort(),
       ['voucher_a', 'voucher_b'],
     );
+    const mergeEvent = (await owner.request('/api/server-audit')).body.events.find(
+      (event) => event.action === 'workspace.merge',
+    );
+    assert.ok(mergeEvent);
+    assert.match(mergeEvent.detail, /voucher_b/);
+    assert.match(mergeEvent.detail, /voucher_a/);
 
     const approvalBase = await owner.request('/api/workspace');
     const approvalState = structuredClone(approvalBase.body.state);

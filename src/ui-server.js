@@ -167,7 +167,7 @@ export function serverUsersPanel({
         : '<tr><td colspan="5" class="muted">No server saves recorded yet.</td></tr>'}</tbody>
     </table></div>
     <h3 class="section-title">Server account audit</h3>
-    <p class="muted small">Account creation, role and company changes, password resets, 2FA changes, session revocations, clears, restores and manual backups are hash-chained separately from workspace saves.</p>
+    <p class="muted small">Account creation, role and company changes, password resets, 2FA changes, session revocations, clears, restores, manual backups and concurrent-save merges are hash-chained separately from workspace saves. Merge details list the field paths submitted alongside the server's changes.</p>
     <p class="muted small">${serverEventChain.ok === null
       ? 'Event-chain status unavailable.'
       : serverEventChain.ok

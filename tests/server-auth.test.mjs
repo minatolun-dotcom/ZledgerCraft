@@ -24,18 +24,25 @@ test('server auth verifies standard TOTP codes and account enrollment', () => {
     password: 'ledger pass',
   }).user;
   assert.equal(account.mfaEnabled, false);
+  assert.equal(account.requireMfa, false);
+  assert.equal(auth.setRequireMfa(account.id, true).ok, false);
   assert.equal(auth.enableMfa(account.id, secret).user.mfaEnabled, true);
   assert.equal(auth.mfaSecret(account.id), secret);
   assert.equal(auth.enableMfa(account.id, secret).ok, false);
+  assert.equal(auth.setRequireMfa(account.id, true).user.requireMfa, true);
+  assert.equal(auth.disableMfa(account.id).ok, false);
+  assert.equal(auth.setRequireMfa(account.id, false).user.requireMfa, false);
   const at = 1_700_000_000_000;
   const code = totpCode(secret, at);
   assert.equal(auth.verifyMfaCode(account.id, code, at), true);
   assert.equal(auth.verifyMfaCode(account.id, code, at), false);
   assert.equal(auth.disableMfa(account.id).user.mfaEnabled, false);
   assert.equal(auth.enableMfa(account.id, secret, 'ABCD1234EFGH5678').ok, true);
+  assert.equal(auth.setRequireMfa(account.id, true).ok, true);
   assert.equal(auth.consumeMfaRecovery(account.id, 'WRONG'), false);
   assert.equal(auth.consumeMfaRecovery(account.id, 'abcd1234efgh5678'), true);
   assert.equal(auth.getUser(account.id).mfaEnabled, false);
+  assert.equal(auth.getUser(account.id).requireMfa, false);
   assert.equal(auth.consumeMfaRecovery(account.id, 'ABCD1234EFGH5678'), false);
 });
 

@@ -38,13 +38,14 @@ export function serverUsersPanel({
       const lastOwner = account.role === 'owner' && ownerCount <= 1;
       return `<tr class="${isCurrent ? 'selected' : ''}">
         <td><strong>${esc(account.name)}</strong><br><span class="muted small">@${esc(account.username)}${account.email ? `<br>${esc(account.email)}` : ''}</span></td>
-        <td><span class="badge">${esc(roleLabel(account.role))}</span>${!neonAuth && account.mfaEnabled ? ' <span class="badge">2FA</span>' : ''}</td>
+        <td><span class="badge">${esc(roleLabel(account.role))}</span>${!neonAuth && account.mfaEnabled ? ' <span class="badge">2FA</span>' : ''}${!neonAuth && account.requireMfa ? ' <span class="badge">2FA required</span>' : ''}</td>
         <td class="muted small">${esc(USER_ROLES[account.role]?.blurb ?? '')}</td>
         <td>${serverScopeEditor(account)}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="set-server-email" data-id="${esc(account.id)}">${account.email ? 'Change email' : 'Set email'}</button>
           ${neonAuth ? '' : `<button class="btn small" type="button" data-action="reset-server-password" data-id="${esc(account.id)}">Reset password</button>
-          <button class="btn small" type="button" data-action="${account.mfaEnabled ? 'disable-server-mfa' : 'enable-server-mfa'}" data-id="${esc(account.id)}">${account.mfaEnabled ? 'Disable 2FA' : 'Enable 2FA'}</button>`}
+          <button class="btn small" type="button" data-action="${account.mfaEnabled ? 'disable-server-mfa' : 'enable-server-mfa'}" data-id="${esc(account.id)}">${account.mfaEnabled ? 'Disable 2FA' : 'Enable 2FA'}</button>
+          ${account.mfaEnabled ? `<button class="btn small" type="button" data-action="${account.requireMfa ? 'unrequire-server-mfa' : 'require-server-mfa'}" data-id="${esc(account.id)}">${account.requireMfa ? 'Clear 2FA requirement' : 'Require 2FA'}</button>` : ''}`}
           <button class="btn small" type="button" data-action="revoke-server-sessions" data-id="${esc(account.id)}"
             ${isCurrent ? 'disabled' : ''}>Sign out sessions</button>
           <button class="btn small danger" type="button" data-action="delete-server-user" data-id="${esc(account.id)}"

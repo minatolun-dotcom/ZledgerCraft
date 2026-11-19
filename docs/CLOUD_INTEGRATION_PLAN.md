@@ -185,6 +185,24 @@ Status: **complete 2026-11-19 — daily signed management summary by Resend, dri
   runs in the Neon Function (Node 24), not a Worker; only a small summary is
   built and mailed.
 
+### Phase 4 — Approvals and access controls
+
+Status: **in progress (4A complete 2026-11-19)**
+
+- [x] **4A. Per-account MFA policy (SQLite/LAN).** Accounts can be marked
+  `require_mfa` after TOTP enrollment. Sign-in refuses an account that requires
+  MFA without an enrolled secret, and owners must clear the requirement before
+  disabling 2FA. Recovery codes clear both MFA and the requirement to avoid a
+  lockout. This is enforced by the SQLite `AuthStore` and exposed in the owner
+  account panel; the policy is unavailable in Neon Managed Auth mode, which has
+  no TOTP support. The route returns `501` there.
+- [ ] **4B. Voucher approval workflow.** Add draft/pending/approved/rejected
+  states, proposer/approver attribution, “cannot approve your own voucher”,
+  reporting treatment and owner queue. This needs a separate accounting-state
+  migration.
+- [ ] **4C. Read-only API and OpenAPI contract.** Hashed bearer tokens, scopes,
+  versioned read endpoints and rate limits.
+
 ## Environment variables
 
 Phase 1 uses the following optional variables. Missing values disable the
@@ -267,7 +285,7 @@ feature without breaking local development or the single-file build.
 | Phase 1 engine tests | pass | `node --test tests/` passed 219 with one conditional branch-test skip |
 | R2 upload tests | pass | `tests/server-cloud.test.mjs`, `tests/server-cloud-api.test.mjs` |
 | Resend/reset tests | pass | `tests/server-auth.test.mjs`, `tests/server-cloud-api.test.mjs` |
-| Pages build output | pass | `tests/build.test.mjs`; both documents are 842.9 kB |
+| Pages build output | pass | `tests/build.test.mjs`; both documents are 844.4 kB |
 | Browser regression | pass | Chromium and Firefox: 117 core + 105 advanced + 7 render + 9 login/reset + 6 axe screens + workspace merge |
 | Neon Auth sign-in | pass | Test Neon user signed in through `/api/auth/login`; owner profile created, `/api/auth/me` returned the session and the browser rendered the Gateway |
 | Neon Postgres workspace | pass | SQLite workspace copied to Neon; saves advanced revisions; meta read returned `storage: "postgres"`; lease acquire/release and hash-chained audit verified |
@@ -294,6 +312,7 @@ feature without breaking local development or the single-file build.
 | Branded PDF attachment | pass | `tests/server-pdf.test.mjs` covers A4 output and multi-page reports; `tests/server-reports-api.test.mjs` verifies the Resend attachment and PDF signature |
 | Report history | pass | API test checks sent/failed rows, source and recipients; Neon branch test exercises the Postgres history table |
 | Backup history | pass | Server API and Neon branch tests create a backup and verify the stored history row, source, name and status |
+| Per-account MFA policy | pass (SQLite/LAN) | Auth unit and server API tests cover requiring enrolled MFA, blocking disable, owner UI state and audit; Neon returns 501 |
 
 ## Progress log
 
@@ -477,3 +496,7 @@ and operate the current server with R2 and Resend enabled.
 - Added matching backup-attempt history (`backup_attempts`/`zl_backup_attempts`)
   for daily, manual, warning and failed backups, with the ten newest in the
   owner backup panel.
+- Started Phase 4 with the SQLite/LAN `require_mfa` policy: owners can require
+  enrolled TOTP for an account, disable is blocked while required, and recovery
+  clears both MFA and the requirement. Neon Managed Auth remains unable to
+  enforce TOTP, so the route returns 501 there.

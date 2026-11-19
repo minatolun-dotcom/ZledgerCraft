@@ -1707,6 +1707,22 @@ async function handleAuthApi(request, response, url) {
       json(response, 401, { ok: false, error: 'Incorrect username or password.' });
       return;
     }
+    if (user.requireMfa && !user.mfaEnabled) {
+      await auth.recordLogin({
+        username: body.username,
+        userId: user.id,
+        ok: false,
+        ip,
+        userAgent: request.headers['user-agent'] || '',
+      });
+      await auth.recordFailure(limitKey);
+      json(response, 403, {
+        ok: false,
+        code: 'mfa_enrollment_required',
+        error: 'This account requires two-step verification. Ask an owner to enroll it.',
+      });
+      return;
+    }
     const mfaSecret = user.mfaEnabled ? await auth.mfaSecret(user.id) : '';
     let mfaOk = !mfaSecret || await auth.verifyMfaCode(user.id, body.code);
     let recoveryUsed = false;
@@ -1945,6 +1961,42 @@ async function handleAuthApi(request, response, url) {
       return;
     }
     json(response, 200, { ok: true, ...(await auth.deleteSessionById(id)) });
+    return;
+  }
+
+  const mfaRequiredMatch = pathname.match(/^\/api\/auth\/users\/([^/]+)\/mfa-required$/);
+  if (mfaRequiredMatch && (request.method === 'POST' || request.method === 'DELETE')) {
+    const actor = await requireOwner(request, response);
+    if (!actor) return;
+    if (neonAuth) {
+      json(response, 501, {
+        ok: false,
+        error: 'Neon Managed Auth does not support a per-account MFA requirement.',
+      });
+      return;
+    }
+    if (!sameOrigin(request)) {
+      json(response, 403, { ok: false, error: 'Cross-origin MFA policy changes are not allowed.' });
+      return;
+    }
+    let id;
+    try {
+      id = decodeURIComponent(mfaRequiredMatch[1]);
+    } catch {
+      json(response, 400, { ok: false, error: 'Invalid account id.' });
+      return;
+    }
+    const account = await auth.getUser(id);
+    if (!account) {
+      json(response, 404, { ok: false, error: 'Account not found.' });
+      return;
+    }
+    const required = request.method === 'POST';
+    const result = await auth.setRequireMfa(id, required);
+    if (result.ok) {
+      appendServerEvent(actor, required ? 'account.mfa.require' : 'account.mfa.unrequire', account.username);
+    }
+    json(response, result.ok ? 200 : 400, result);
     return;
   }
 

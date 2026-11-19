@@ -4346,6 +4346,30 @@ async function handleClick(event) {
         });
       break;
     }
+    case 'require-server-mfa':
+    case 'unrequire-server-mfa': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      const account = authAccounts.find((item) => item.id === trigger.dataset.id);
+      if (!account) break;
+      const required = trigger.dataset.action === 'require-server-mfa';
+      if (!window.confirm(`${required ? 'Require' : 'Stop requiring'} two-step verification for @${account.username}?`)) break;
+      fetch(`/api/auth/users/${encodeURIComponent(account.id)}/mfa-required`, { method: required ? 'POST' : 'DELETE' })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not change the two-step requirement.');
+          await refreshAuthAccounts();
+          setFlash(`Two-step ${required ? 'required' : 'no longer required'} for @${account.username}.`);
+          render();
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
     case 'set-server-email': {
       if (!can('user.manage')) {
         requirePermission('user.manage');

@@ -155,6 +155,7 @@ export function publicUser(row) {
     email: row.email || '',
     companyIds: parseCompanyIds(row.company_ids),
     mfaEnabled: Boolean(row.mfa_secret),
+    requireMfa: Boolean(row.require_mfa),
     createdAt: row.created_at,
   };
 }
@@ -199,6 +200,7 @@ export class AuthStore {
         mfa_secret TEXT,
         mfa_recovery_hash TEXT,
         mfa_last_counter INTEGER NOT NULL DEFAULT 0,
+        require_mfa INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -262,6 +264,9 @@ export class AuthStore {
     if (!columns.some((column) => column.name === 'mfa_last_counter')) {
       this.db.exec('ALTER TABLE auth_users ADD COLUMN mfa_last_counter INTEGER NOT NULL DEFAULT 0');
     }
+    if (!columns.some((column) => column.name === 'require_mfa')) {
+      this.db.exec('ALTER TABLE auth_users ADD COLUMN require_mfa INTEGER NOT NULL DEFAULT 0');
+    }
     const sessionColumns = this.db.prepare('PRAGMA table_info(auth_sessions)').all();
     if (!sessionColumns.some((column) => column.name === 'id')) {
       this.db.exec('ALTER TABLE auth_sessions ADD COLUMN id TEXT');
@@ -299,7 +304,10 @@ export class AuthStore {
       `),
       deletePasswordResets: this.db.prepare('DELETE FROM auth_password_resets WHERE user_id = ?'),
       updateMfa: this.db.prepare(
-        'UPDATE auth_users SET mfa_secret = ?, mfa_recovery_hash = ?, mfa_last_counter = 0, updated_at = ? WHERE id = ?',
+        'UPDATE auth_users SET mfa_secret = ?, mfa_recovery_hash = ?, mfa_last_counter = 0, require_mfa = 0, updated_at = ? WHERE id = ?',
+      ),
+      setRequireMfa: this.db.prepare(
+        'UPDATE auth_users SET require_mfa = ?, updated_at = ? WHERE id = ?',
       ),
       consumeMfaCounter: this.db.prepare(
         'UPDATE auth_users SET mfa_last_counter = ?, updated_at = ? WHERE id = ? AND mfa_last_counter < ?',
@@ -576,7 +584,18 @@ export class AuthStore {
   disableMfa(userId) {
     const row = this.stmts.byId.get(String(userId ?? ''));
     if (!row) return { ok: false, error: 'Account not found.' };
+    if (row.require_mfa) return { ok: false, error: 'Clear the two-step requirement before disabling 2FA.' };
     this.stmts.updateMfa.run(null, null, nowIso(), row.id);
+    return { ok: true, user: publicUser(this.stmts.byId.get(row.id)) };
+  }
+
+  setRequireMfa(userId, required) {
+    const row = this.stmts.byId.get(String(userId ?? ''));
+    if (!row) return { ok: false, error: 'Account not found.' };
+    if (required && !row.mfa_secret) {
+      return { ok: false, error: 'Enable two-step verification before requiring it.' };
+    }
+    this.stmts.setRequireMfa.run(required ? 1 : 0, nowIso(), row.id);
     return { ok: true, user: publicUser(this.stmts.byId.get(row.id)) };
   }
 

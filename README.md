@@ -57,9 +57,10 @@ saves still merge independent changes, but hidden companies are preserved and
 never sent to the scoped browser. The same panel shows recent sign-in attempts,
 active sessions, the server-side save audit, and creates/downloads/restores
 server backups. Owners can enable authenticator-based two-step verification
-(TOTP) for an account and receive a one-time recovery code; users can change
-their own password. Repeated failed sign-ins lock that account/source for 15
-minutes. Server-audit rows are hash-chained, so out-of-band database edits are
+(TOTP) for an account and receive a one-time recovery code; an account can also
+be marked as requiring 2FA, which blocks sign-in until TOTP is enrolled and
+prevents disabling it until the requirement is cleared. Users can change their
+own password. Repeated failed sign-ins lock that account/source for 15 minutes. Server-audit rows are hash-chained, so out-of-band database edits are
 detected by the owner audit view. These password and TOTP controls are the
 SQLite/LAN path; Neon mode delegates credentials to Neon Auth, which does not
 support TOTP/MFA on the managed branch.

@@ -11474,6 +11474,8 @@ const SERVER_EVENT_LABELS = {
   'account.password.change': 'Password changed',
   'account.mfa.enable': '2FA enabled',
   'account.mfa.disable': '2FA disabled',
+  'account.mfa.require': '2FA required',
+  'account.mfa.unrequire': '2FA requirement cleared',
   'account.sessions.revoke': 'Sessions revoked',
   'workspace.clear': 'Workspace cleared',
   'workspace.restore': 'Backup restored',
@@ -11578,13 +11580,14 @@ function serverUsersPanel({
       const lastOwner = account.role === 'owner' && ownerCount <= 1;
       return `<tr class="${isCurrent ? 'selected' : ''}">
         <td><strong>${esc(account.name)}</strong><br><span class="muted small">@${esc(account.username)}${account.email ? `<br>${esc(account.email)}` : ''}</span></td>
-        <td><span class="badge">${esc(roleLabel(account.role))}</span>${!neonAuth && account.mfaEnabled ? ' <span class="badge">2FA</span>' : ''}</td>
+        <td><span class="badge">${esc(roleLabel(account.role))}</span>${!neonAuth && account.mfaEnabled ? ' <span class="badge">2FA</span>' : ''}${!neonAuth && account.requireMfa ? ' <span class="badge">2FA required</span>' : ''}</td>
         <td class="muted small">${esc(USER_ROLES[account.role]?.blurb ?? '')}</td>
         <td>${serverScopeEditor(account)}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="set-server-email" data-id="${esc(account.id)}">${account.email ? 'Change email' : 'Set email'}</button>
           ${neonAuth ? '' : `<button class="btn small" type="button" data-action="reset-server-password" data-id="${esc(account.id)}">Reset password</button>
-          <button class="btn small" type="button" data-action="${account.mfaEnabled ? 'disable-server-mfa' : 'enable-server-mfa'}" data-id="${esc(account.id)}">${account.mfaEnabled ? 'Disable 2FA' : 'Enable 2FA'}</button>`}
+          <button class="btn small" type="button" data-action="${account.mfaEnabled ? 'disable-server-mfa' : 'enable-server-mfa'}" data-id="${esc(account.id)}">${account.mfaEnabled ? 'Disable 2FA' : 'Enable 2FA'}</button>
+          ${account.mfaEnabled ? `<button class="btn small" type="button" data-action="${account.requireMfa ? 'unrequire-server-mfa' : 'require-server-mfa'}" data-id="${esc(account.id)}">${account.requireMfa ? 'Clear 2FA requirement' : 'Require 2FA'}</button>` : ''}`}
           <button class="btn small" type="button" data-action="revoke-server-sessions" data-id="${esc(account.id)}"
             ${isCurrent ? 'disabled' : ''}>Sign out sessions</button>
           <button class="btn small danger" type="button" data-action="delete-server-user" data-id="${esc(account.id)}"
@@ -20760,6 +20763,30 @@ async function handleClick(event) {
           if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not disable two-step verification.');
           await refreshAuthAccounts();
           setFlash(`Two-step verification disabled for @${account.username}.`);
+          render();
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
+    case 'require-server-mfa':
+    case 'unrequire-server-mfa': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      const account = authAccounts.find((item) => item.id === trigger.dataset.id);
+      if (!account) break;
+      const required = trigger.dataset.action === 'require-server-mfa';
+      if (!window.confirm(`${required ? 'Require' : 'Stop requiring'} two-step verification for @${account.username}?`)) break;
+      fetch(`/api/auth/users/${encodeURIComponent(account.id)}/mfa-required`, { method: required ? 'POST' : 'DELETE' })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not change the two-step requirement.');
+          await refreshAuthAccounts();
+          setFlash(`Two-step ${required ? 'required' : 'no longer required'} for @${account.username}.`);
           render();
         })
         .catch((error) => {

@@ -44,9 +44,9 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 
 **Recommended next work:** follow the free-path order in
 [KNOWN_LIMITS.md § Remaining limits and free paths](KNOWN_LIMITS.md#remaining-limits-and-free-paths):
-MFA policy and voucher approvals, app-level encryption, incremental
-master-column promotion, APIs/webhooks, branded PDF reports and statutory
-integrations.
+Voucher approvals, app-level encryption, incremental master-column promotion,
+APIs/webhooks and statutory integrations. The SQLite/LAN per-account 2FA policy
+and branded PDF reports are now complete.
 
 Working now:
 
@@ -326,6 +326,14 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-19 — Phase 4A: per-account MFA requirement (SQLite/LAN)
+
+- Added `require_mfa` to SQLite/LAN accounts, with an owner control to require
+  enrolled TOTP and block sign-in if enrollment is missing.
+- Disabling 2FA is rejected while required; recovery codes clear both MFA and
+  the requirement to avoid locking the account out.
+- The policy is unavailable in Neon Managed Auth mode and the route returns 501.
 
 ### 2026-11-19 — Phase 3: scheduled daily reports and alerts
 

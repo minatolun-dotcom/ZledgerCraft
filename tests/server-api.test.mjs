@@ -249,6 +249,17 @@ test('server API scopes non-owner accounts to assigned companies', { timeout: 30
     assert.match(mfa.body.secret, /^[A-Z2-7]+$/);
     assert.match(mfa.body.recoveryCode, /^[A-F0-9]{16}$/);
     assert.match(mfa.body.uri, /^otpauth:\/\/totp\//);
+    const requireMfa = await owner.request(`/api/auth/users/${created.body.user.id}/mfa-required`, { method: 'POST' });
+    assert.equal(requireMfa.status, 200, JSON.stringify(requireMfa.body));
+    assert.equal(requireMfa.body.user.requireMfa, true);
+    assert.equal(
+      (await owner.request('/api/auth/users')).body.users.find((user) => user.id === created.body.user.id)?.requireMfa,
+      true,
+    );
+    assert.equal(
+      (await owner.request(`/api/auth/users/${created.body.user.id}/mfa`, { method: 'DELETE' })).status,
+      400,
+    );
 
     const scoped = client(base);
     const missingCode = await scoped.request('/api/auth/login', {

@@ -114,6 +114,8 @@ export const SERVER_EVENT_LABELS = {
   'account.password.change': 'Password changed',
   'account.mfa.enable': '2FA enabled',
   'account.mfa.disable': '2FA disabled',
+  'account.mfa.require': '2FA required',
+  'account.mfa.unrequire': '2FA requirement cleared',
   'account.sessions.revoke': 'Sessions revoked',
   'workspace.clear': 'Workspace cleared',
   'workspace.restore': 'Backup restored',

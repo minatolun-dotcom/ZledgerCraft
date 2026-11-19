@@ -10,6 +10,15 @@ const MODULE_ORDER = [
   'src/accounting.js',
   'src/tally.js',
   'src/xlsx.js',
+  'src/ui-constants.js',
+  'src/ui-server.js',
+  'src/ui-screens.js',
+  'src/ui-reports.js',
+  'src/ui-inventory.js',
+  'src/ui-admin.js',
+  'src/ui-tax.js',
+  'src/ui-payroll.js',
+  'src/ui-banking.js',
   'src/ui.js',
   'src/main.js',
 ];
@@ -50,4 +59,7 @@ if (output === html || !output.includes('<style>') || !output.includes('(functio
 await mkdir(join(root, 'dist'), { recursive: true });
 const target = join(root, 'dist', 'ZledgerCraft.html');
 await writeFile(target, output, 'utf8');
-console.log(`Built ${target} (${(output.length / 1024).toFixed(1)} kB)`);
+// Cloudflare Pages expects an index document at the root of its output
+// directory. Keep the downloadable single-file name as well.
+await writeFile(join(root, 'dist', 'index.html'), output, 'utf8');
+console.log(`Built ${target} and dist/index.html (${(output.length / 1024).toFixed(1)} kB)`);

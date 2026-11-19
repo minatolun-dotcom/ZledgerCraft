@@ -1,0 +1,14 @@
+{
+  "name": "zledgercraft-browser-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dev-only browser, accessibility and render benchmarks for ZledgerCraft",
+  "scripts": {
+    "test": "node runner.mjs test",
+    "bench": "node runner.mjs bench"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "playwright": "1.65.1"
+  }
+}

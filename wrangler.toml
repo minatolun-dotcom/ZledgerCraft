@@ -1,0 +1,8 @@
+name = "zledgercraft-api"
+main = "cf-api-worker.mjs"
+compatibility_date = "2026-11-19"
+workers_dev = true
+
+[[routes]]
+pattern = "books.lengkhawm.online/api/*"
+zone_name = "lengkhawm.online"

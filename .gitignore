@@ -1,1 +1,9 @@
 data/
+tools/browser/node_modules/
+tools/browser/.artifacts/
+.neon
+node_modules/
+.env.local
+
+# Cloudflare local state
+.wrangler/

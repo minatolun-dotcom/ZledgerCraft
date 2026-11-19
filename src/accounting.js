@@ -2493,6 +2493,11 @@ function financialYearMonths(start, end) {
 
 /** Statistics: voucher/master counts plus monthly MIS movements. */
 export function statistics(company, filters = {}) {
+  // Sales and purchase statistics are accounting values, not tax-inclusive
+  // cash totals: GST and TDS/TCS are collected on behalf of the government.
+  const netVoucherValue = (voucher) =>
+    voucher.gst?.taxable ?? voucher.tds?.base ?? voucher.total;
+
   const voucherCounts = Object.keys(VOUCHER_TYPES).map((type) => {
     const items = company.vouchers.filter((voucher) => voucher.type === type);
     return {
@@ -2517,10 +2522,10 @@ export function statistics(company, filters = {}) {
     if (voucher.date < company.fyStart || voucher.date > company.fyEnd) continue;
     const row = byMonth.get(voucher.date.slice(0, 7));
     if (!row) continue;
-    if (voucher.type === 'Sales') row.sales = round2(row.sales + voucher.total);
-    else if (voucher.type === 'Purchase') row.purchases = round2(row.purchases + voucher.total);
-    else if (voucher.type === 'CreditNote') row.creditNotes = round2(row.creditNotes + voucher.total);
-    else if (voucher.type === 'DebitNote') row.debitNotes = round2(row.debitNotes + voucher.total);
+    if (voucher.type === 'Sales') row.sales = round2(row.sales + netVoucherValue(voucher));
+    else if (voucher.type === 'Purchase') row.purchases = round2(row.purchases + netVoucherValue(voucher));
+    else if (voucher.type === 'CreditNote') row.creditNotes = round2(row.creditNotes + netVoucherValue(voucher));
+    else if (voucher.type === 'DebitNote') row.debitNotes = round2(row.debitNotes + netVoucherValue(voucher));
     else if (voucher.type === 'Receipt') row.receipts = round2(row.receipts + voucher.total);
     else if (voucher.type === 'Payment') row.payments = round2(row.payments + voucher.total);
   }
@@ -2558,7 +2563,8 @@ export function statistics(company, filters = {}) {
         return ledger ? inGroupKey(company, ledger, groupKey) : false;
       });
       if (!partyLine) continue;
-      const signed = voucher.type === 'CreditNote' || voucher.type === 'DebitNote' ? -voucher.total : voucher.total;
+      const value = netVoucherValue(voucher);
+      const signed = voucher.type === 'CreditNote' || voucher.type === 'DebitNote' ? -value : value;
       const current = totals.get(partyLine.ledgerId) ?? { ledgerId: partyLine.ledgerId, amount: 0 };
       current.amount = round2(current.amount + signed);
       totals.set(partyLine.ledgerId, current);

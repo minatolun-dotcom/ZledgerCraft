@@ -1,6 +1,7 @@
 :root {
   --ink: #101b2d;
   --ink-soft: #46536a;
+  --muted: #46536a;
   --navy: #112542;
   --navy-deep: #0c1a2f;
   --panel: #ffffff;
@@ -8,7 +9,7 @@
   --line: #d8dfea;
   --line-soft: #e8edf4;
   --accent: #efab3c;
-  --accent-deep: #b97713;
+  --accent-deep: #7a4b00;
   --blue: #2f6fed;
   --good: #1d7a4d;
   --bad: #b3342a;
@@ -127,6 +128,37 @@ kbd {
 
 .brand span {
   color: #ffffff;
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 1000;
+  padding: 0.55rem 0.8rem;
+  border-radius: 7px;
+  background: var(--navy);
+  color: #ffffff;
+  font-weight: 700;
+  transform: translateY(-180%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .company-line {
@@ -251,7 +283,7 @@ kbd {
 .side-note {
   margin: auto 0 0;
   font-size: 0.72rem;
-  color: #8794aa;
+  color: var(--ink-soft);
   border-top: 1px solid var(--line-soft);
   padding-top: 0.7rem;
 }
@@ -464,6 +496,37 @@ kbd {
   max-width: 110px;
 }
 
+.scope-field {
+  grid-column: 1 / -1;
+}
+
+.check-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  margin-top: 0.35rem;
+}
+
+.check-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.scope-editor summary {
+  cursor: pointer;
+  color: var(--accent, inherit);
+  font-size: 0.85rem;
+}
+
+.scope-editor form {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+  min-width: 220px;
+}
+
 .field.inline-field {
   flex-direction: row;
   align-items: center;
@@ -489,6 +552,11 @@ kbd {
   outline: 2px solid rgba(47, 111, 237, 0.35);
   outline-offset: 1px;
   border-color: var(--blue);
+}
+
+:where(button, a, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
 }
 
 .form-actions {
@@ -706,6 +774,11 @@ kbd {
 
 .table-scroll {
   overflow-x: auto;
+}
+
+.table-scroll:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
 }
 
 .companies-table {
@@ -1146,8 +1219,11 @@ kbd {
 
 .voucher-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
   font-size: 0.85rem;
 }
 
@@ -2001,4 +2077,214 @@ kbd {
   color: #eef3fb;
   font: inherit;
   font-size: 0.82rem;
+}
+
+/* --- Server sign-in --- */
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(37, 99, 235, 0.12), transparent 42%),
+    var(--bg, #f3f6fb);
+}
+
+.auth-card {
+  width: min(430px, 100%);
+  padding: 1.7rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgba(15, 35, 70, 0.12);
+}
+
+.auth-card .brand {
+  color: var(--navy);
+  margin-bottom: 1.4rem;
+}
+
+.auth-card .brand span {
+  color: var(--accent);
+}
+
+.auth-card h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.45rem;
+}
+
+.auth-card .form-grid {
+  margin-top: 1.2rem;
+}
+
+.auth-reset {
+  margin-top: 1.1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.auth-reset summary {
+  cursor: pointer;
+  color: var(--navy);
+  font-weight: 600;
+}
+
+.auth-reset .form-grid {
+  margin-top: 0.8rem;
+}
+
+.user-badge {
+  color: #eef3fb;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.user-badge strong {
+  font-weight: 700;
+}
+
+@media (max-width: 600px) {
+  .auth-card {
+    padding: 1.25rem;
+  }
+
+  .auth-card .brand {
+    margin-bottom: 1rem;
+  }
+
+  .user-badge {
+    display: none;
+  }
+}
+
+/* --- Responsive table containment --- */
+@media (max-width: 1100px) {
+  .panel {
+    overflow-x: auto;
+  }
+}
+
+/* --- Mobile layout containment --- */
+@media (max-width: 900px) {
+  .sidebar {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .sidebar nav {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .panel {
+    overflow-x: auto;
+  }
+
+  .voucher-form {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .voucher-head,
+  .voucher-meta {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .type-card,
+  .btn,
+  .nav-item {
+    transition: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .btn.small,
+  .icon-btn {
+    min-height: 44px;
+  }
+
+  .icon-btn {
+    min-width: 44px;
+  }
+
+  .voucher-banner {
+    display: block;
+  }
+
+  .type-grid.inline {
+    max-width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 1rem;
+  }
+
+  .voucher-form .table-scroll {
+    overflow: visible;
+  }
+
+  .voucher-form .lines-table,
+  .voucher-form .lines-table tbody,
+  .voucher-form .lines-table tr,
+  .voucher-form .lines-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .voucher-form .lines-table thead {
+    display: none;
+  }
+
+  .voucher-form .lines-table tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.7rem;
+    padding: 0.8rem;
+    margin-bottom: 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+
+  .voucher-form .lines-table td {
+    padding: 0;
+    border: 0;
+  }
+
+  .voucher-form .lines-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--ink-soft);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  #voucher-form .lines-table td:first-child,
+  #voucher-form .lines-table td:nth-child(4),
+  #voucher-form .lines-table td.row-actions,
+  #stock-items td:nth-child(-n + 3),
+  #stock-items td.row-actions {
+    grid-column: 1 / -1;
+  }
+
+  #voucher-form .lines-table td.row-actions,
+  #stock-items td.row-actions {
+    justify-self: end;
+    width: auto;
+  }
+
+  .voucher-form .lines-table input,
+  .voucher-form .lines-table select {
+    width: 100%;
+  }
+
+  .voucher-form .icon-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

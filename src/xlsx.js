@@ -6,6 +6,9 @@
 
 const MAX_WORKBOOK_BYTES = 50 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 25 * 1024 * 1024;
+const MAX_COLUMNS = 16_384;
+const MAX_ROWS = 1_048_576;
+const MAX_CELLS = 5_000_000;
 
 const BUILTIN_DATE_FORMATS = new Set([
   14,
@@ -77,8 +80,12 @@ async function inflateRaw(bytes) {
   } catch {
     throw new Error('This browser cannot decompress Excel workbooks. Use the CSV import instead.');
   }
-  const output = await new Response(stream).arrayBuffer();
-  return new Uint8Array(output);
+  try {
+    const output = await new Response(stream).arrayBuffer();
+    return new Uint8Array(output);
+  } catch {
+    throw new Error('The workbook has a damaged compressed entry.');
+  }
 }
 
 /** Unpacks the small subset of ZIP needed by an XLSX workbook. */
@@ -142,6 +149,9 @@ async function unzipWorkbook(bytes) {
     if (dataStart + compressedSize > bytes.length) {
       throw new Error('The workbook ZIP entry is truncated.');
     }
+    const localName = decoder.decode(bytes.subarray(localOffset + 30, localOffset + 30 + localNameLength));
+    if (localName !== name) throw new Error('The workbook ZIP directory is inconsistent.');
+    if (files.has(name)) throw new Error(`The workbook contains a duplicate ZIP entry for ${name}.`);
     const compressed = bytes.subarray(dataStart, dataStart + compressedSize);
     const data = method === 0 ? compressed : await inflateRaw(compressed);
     total += data.length;
@@ -198,7 +208,10 @@ function columnIndex(reference) {
   const letters = String(reference ?? '').match(/^[A-Z]+/i)?.[0];
   if (!letters) return 0;
   let value = 0;
-  for (const letter of letters.toUpperCase()) value = value * 26 + (letter.charCodeAt(0) - 64);
+  for (const letter of letters.toUpperCase()) {
+    value = value * 26 + (letter.charCodeAt(0) - 64);
+    if (value > MAX_COLUMNS) return -1;
+  }
   return Math.max(0, value - 1);
 }
 
@@ -236,13 +249,20 @@ function readCell(attrs, body, sharedStrings, dateStyles) {
 
 function readSheet(xml, sharedStrings, dateStyles) {
   const rows = [];
+  let cellCount = 0;
   for (const row of String(xml).matchAll(/<row\b[^>]*>([\s\S]*?)<\/row\s*>/gi)) {
+    if (rows.length >= MAX_ROWS) throw new Error('The worksheet has more than 1,048,576 rows.');
     const cells = [];
     let nextColumn = 0;
     for (const cell of row[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c\s*>)/gi)) {
       const reference = attrValue(cell[1], 'r');
       const column = reference ? columnIndex(reference) : nextColumn;
+      if (column < 0 || column >= MAX_COLUMNS) {
+        throw new Error('The worksheet has a cell outside Excel\'s 16,384-column limit.');
+      }
       nextColumn = column + 1;
+      cellCount += 1;
+      if (cellCount > MAX_CELLS) throw new Error('The worksheet has more than 5 million cells.');
       cells[column] = readCell(cell[1], cell[2] ?? '', sharedStrings, dateStyles);
     }
     while (cells.length && String(cells[cells.length - 1] ?? '').trim() === '') cells.pop();

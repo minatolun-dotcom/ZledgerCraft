@@ -1,0 +1,471 @@
+// ZledgerCraft - Payroll, salary register, run and payslip screens.
+// Screen functions read the live UI state exported by ui.js.
+import {
+  dateLabel,
+  ledgerOptions,
+  payrollLedgers,
+  payrollMonthEnd,
+  round2,
+  todayIso,
+} from './store.js';
+import {
+  amountInWords,
+  ledgerTotals,
+  payrollSummary,
+} from './accounting.js';
+import {
+  view,
+  filters,
+  voucherLabel,
+  esc,
+  company,
+  money,
+  balanceLabel,
+  panel,
+  emptyCompanyScreen,
+} from './ui.js';
+
+export function payrollMonthLabel(month) {
+  const [year, index] = String(month ?? '').split('-').map(Number);
+  if (!year || !index) return String(month ?? '');
+  return new Date(Date.UTC(year, index - 1, 1)).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+}
+
+export function defaultPayrollMonth(active) {
+  const today = todayIso().slice(0, 7);
+  if (today >= active.fyStart.slice(0, 7) && today <= active.fyEnd.slice(0, 7)) return today;
+  return active.fyStart.slice(0, 7);
+}
+
+export function employeeMonthlyTotals(employee, headMap) {
+  let gross = 0;
+  let deductions = 0;
+  for (const entry of employee.pay ?? []) {
+    const head = headMap.get(entry.payHeadId);
+    if (!head) continue;
+    if (head.kind === 'Earning') gross += entry.amount;
+    else deductions += entry.amount;
+  }
+  return { gross: round2(gross), deductions: round2(deductions), net: round2(gross - deductions) };
+}
+
+export function payrollScreen() {
+  if (!company()) return emptyCompanyScreen('Payroll');
+  const active = company();
+  const payroll = active.payroll ?? { enabled: false, payHeads: [], employees: [], runs: [] };
+  const heads = payroll.payHeads ?? [];
+  const employees = payroll.employees ?? [];
+  const editing = employees.find((employee) => employee.id === view.employeeId) ?? null;
+  const headMap = new Map(heads.map((head) => [head.id, head]));
+  const closings = ledgerTotals(active, { to: active.fyEnd });
+  const ledgers = payrollLedgers(active);
+  const month = filters.payroll.month || defaultPayrollMonth(active);
+  const runDate = filters.payroll.date || payrollMonthEnd(month) || active.fyEnd;
+  const from = filters.payroll.from || active.fyStart;
+  const to = filters.payroll.to || active.fyEnd;
+  const report = payrollSummary(active, { from, to });
+
+  const ledgerRows = [['Salaries expense', ledgers.salaries], ['Salary Payable', ledgers.payable]]
+    .map(([label, ledger]) => `<tr>
+      <td>${label}</td>
+      <td>${ledger ? esc(ledger.name) : '<span class="badge overdue">missing</span>'}</td>
+      <td class="num">${ledger ? balanceLabel(closings.get(ledger.id)?.closing ?? 0) : '—'}</td>
+    </tr>`)
+    .join('');
+  const statutoryLedgerIds = new Set(heads.filter((head) => head.statutory && head.ledgerId).map((head) => head.ledgerId));
+  const statutoryRows = [...statutoryLedgerIds]
+    .map((ledgerId) => {
+      const ledger = active.ledgers.find((item) => item.id === ledgerId);
+      if (!ledger) return '';
+      const tags = [...new Set(heads.filter((head) => head.ledgerId === ledgerId).map((head) => head.statutory))].join(' / ');
+      return `<tr>
+        <td>${esc(tags)} payable</td>
+        <td>${esc(ledger.name)}</td>
+        <td class="num">${balanceLabel(closings.get(ledger.id)?.closing ?? 0)}</td>
+      </tr>`;
+    })
+    .join('');
+
+  const setupPanel = panel(
+    'Payroll setup',
+    `<form id="payroll-form" class="form-grid" novalidate>
+      <label class="field gst-check">
+        <input type="checkbox" name="enabled"${payroll.enabled ? ' checked' : ''}>
+        <span>Run payroll for employees and post salary journals</span>
+      </label>
+      <div class="field form-actions">
+        <button class="btn primary" type="submit">Save payroll settings</button>
+      </div>
+      <p id="payroll-error" class="form-error" role="alert"></p>
+    </form>
+    <p class="muted small">Enabling payroll creates or reuses Salaries and Salary Payable ledgers, plus Provident Fund Payable, ESI Payable and Professional Tax Payable. A payroll run posts one Journal voucher for the month; payslips are local working copies and no statutory return or challan is filed.</p>
+    <div class="table-scroll" tabindex="0"><table class="data-table compact">
+      <thead><tr><th>Payroll ledger</th><th>Ledger</th><th class="num">Closing (as on ${esc(dateLabel(active.fyEnd))})</th></tr></thead>
+      <tbody>${ledgerRows}${statutoryRows}</tbody>
+    </table></div>`,
+    payroll.enabled
+      ? `Payroll is on with ${employees.length} employee${employees.length === 1 ? '' : 's'} and ${heads.length} pay head${heads.length === 1 ? '' : 's'}.`
+      : 'Payroll is off. Save the setup with it enabled to create the salary ledgers.',
+  );
+
+  const headRows = heads
+    .map((head) => {
+      const used = employees.filter((employee) => (employee.pay ?? []).some((entry) => entry.payHeadId === head.id)).length;
+      const ledger = active.ledgers.find((item) => item.id === head.ledgerId);
+      return `<tr>
+        <td><strong>${esc(head.name)}</strong></td>
+        <td><span class="badge">${esc(head.kind)}</span></td>
+        <td class="muted small">${head.statutory ? esc(head.statutory) : '—'}</td>
+        <td>${ledger ? esc(ledger.name) : '<span class="badge overdue">choose a ledger</span>'}</td>
+        <td class="num">${used}</td>
+        <td class="row-actions">
+          <button class="btn small danger" type="button" data-action="delete-pay-head" data-id="${esc(head.id)}" ${used > 0 ? 'disabled' : ''}>Delete</button>
+        </td>
+      </tr>`;
+    })
+    .join('');
+  const ledgerChoice = [
+    '<option value="">Choose a ledger</option>',
+    ...ledgerOptions(active).map(
+      (ledger) => `<option value="${esc(ledger.id)}">${esc(ledger.name)} — ${esc(ledger.groupName)}</option>`,
+    ),
+  ].join('');
+  const headsPanel = panel(
+    `Pay heads <span class="count">${heads.length}</span>`,
+    `<form id="payroll-head-form" class="inline-form" novalidate>
+      <input name="name" maxlength="60" placeholder="Pay head name" aria-label="Pay head name" required>
+      <select name="kind" aria-label="Pay head kind">
+        <option value="Earning">Earning</option>
+        <option value="Deduction">Deduction</option>
+      </select>
+      <select name="statutory" aria-label="Statutory tag">
+        <option value="">No statutory tag</option>
+        <option value="PF">PF</option>
+        <option value="ESI">ESI</option>
+        <option value="PT">PT</option>
+        <option value="TDS">TDS</option>
+      </select>
+      <select name="ledgerId" aria-label="Pay head ledger" required>${ledgerChoice}</select>
+      <button class="btn small" type="submit">Add pay head</button>
+      <p id="payroll-head-error" class="form-error" role="alert"></p>
+    </form>
+    ${heads.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
+          <thead><tr><th>Pay head</th><th>Kind</th><th>Statutory</th><th>Ledger</th><th class="num">Employees</th><th></th></tr></thead>
+          <tbody>${headRows}</tbody>
+        </table></div>`
+      : '<p class="muted">No pay heads yet.</p>'}`,
+    'Earnings debit their ledger, deductions credit theirs. Statutory tags group PF, ESI, PT and TDS in the register.',
+  );
+
+  const payFields = heads
+    .map((head) => {
+      const entry = editing?.pay?.find((item) => item.payHeadId === head.id);
+      return `<label class="field">
+        <span>${esc(head.name)} <span class="muted small">${esc(head.kind)}</span></span>
+        <input name="pay_${esc(head.id)}" inputmode="decimal" value="${entry ? esc(entry.amount) : ''}" placeholder="0.00">
+      </label>`;
+    })
+    .join('');
+  const employeeForm = heads.length
+    ? `<form id="employee-form" class="form-grid" novalidate>
+        <label class="field"><span>Name</span><input name="name" maxlength="80" value="${esc(editing?.name ?? '')}" required></label>
+        <label class="field"><span>Code</span><input name="code" maxlength="20" value="${esc(editing?.code ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>Designation</span><input name="designation" maxlength="60" value="${esc(editing?.designation ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>PAN</span><input name="pan" maxlength="10" value="${esc(editing?.pan ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>Date of joining</span><input name="dateOfJoining" type="date" value="${esc(editing?.dateOfJoining ?? '')}"></label>
+        <label class="field gst-check">
+          <input type="checkbox" name="active"${editing && editing.active === false ? '' : ' checked'}>
+          <span>Include in payroll runs</span>
+        </label>
+        <div class="pay-heads-block">
+          <p class="muted small">Monthly amounts. Leave a pay head blank when it does not apply.</p>
+          <div class="pay-grid">${payFields}</div>
+        </div>
+        <div class="field form-actions">
+          <button class="btn primary" type="submit">${editing ? 'Save employee' : 'Add employee'}</button>
+          ${editing ? '<button class="btn ghost" type="button" data-action="cancel-employee-edit">Cancel</button>' : ''}
+        </div>
+        <p id="employee-error" class="form-error" role="alert"></p>
+      </form>`
+    : '<p class="muted">Add at least one pay head before adding employees.</p>';
+
+  const employeeRows = employees
+    .map((employee) => {
+      const totals = employeeMonthlyTotals(employee, headMap);
+      return `<tr class="${employee.active === false ? 'muted' : ''}">
+        <td><strong>${esc(employee.name)}</strong>${employee.active === false ? ' <span class="badge">inactive</span>' : ''}</td>
+        <td class="muted small">${esc(employee.code || '—')}</td>
+        <td class="muted small">${esc(employee.designation || '—')}</td>
+        <td class="muted small">${employee.pan ? esc(employee.pan) : '—'}</td>
+        <td class="num">${money(totals.gross)}</td>
+        <td class="num">${money(totals.deductions)}</td>
+        <td class="num">${money(totals.net)}</td>
+        <td class="row-actions">
+          <button class="btn small ghost" type="button" data-action="edit-employee" data-id="${esc(employee.id)}">Edit</button>
+          <button class="btn small danger" type="button" data-action="delete-employee" data-id="${esc(employee.id)}">Delete</button>
+        </td>
+      </tr>`;
+    })
+    .join('');
+  const employeesPanel = panel(
+    editing ? `Edit employee · ${esc(editing.name)}` : `Employees <span class="count">${employees.length}</span>`,
+    `${employeeForm}
+    ${employees.length
+      ? `<h3 class="column-title">Monthly pay structure</h3>
+        <div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
+          <thead><tr><th>Employee</th><th>Code</th><th>Designation</th><th>PAN</th><th class="num">Earnings</th><th class="num">Deductions</th><th class="num">Net</th><th></th></tr></thead>
+          <tbody>${employeeRows}</tbody>
+        </table></div>`
+      : '<p class="muted">No employees yet.</p>'}`,
+    'Amounts are entered per employee for the month; the run posts them as salary journals and stores the snapshot.',
+  );
+
+  const runRows = report.runs
+    .map(
+      (item) => `<tr>
+        <td><strong>${esc(payrollMonthLabel(item.month))}</strong></td>
+        <td>${esc(dateLabel(item.date))}</td>
+        <td class="num">${item.employees}</td>
+        <td class="num">${money(item.gross)}</td>
+        <td class="num">${money(item.deductions)}</td>
+        <td class="num">${money(item.net)}</td>
+        <td>${item.voucherId ? `<button class="link-button" type="button" data-action="open-voucher" data-id="${esc(item.voucherId)}">Journal ${item.voucherNo}</button>` : '<span class="muted small">no voucher</span>'}</td>
+        <td class="row-actions">
+          <button class="btn small ghost" type="button" data-action="open-payroll-run" data-id="${esc(item.id)}">Payslips</button>
+          <button class="btn small danger" type="button" data-action="delete-payroll-run" data-id="${esc(item.id)}">Delete</button>
+        </td>
+      </tr>`,
+    )
+    .join('');
+  const runsPanel = panel(
+    'Payroll runs',
+    `<form id="payroll-run-form" class="inline-form" novalidate>
+      <label class="field inline-field"><span>Month</span><input name="month" type="month" value="${esc(month)}" required></label>
+      <label class="field inline-field"><span>Post date</span><input name="date" type="date" value="${esc(runDate)}" required></label>
+      <button class="btn small" type="submit">Run payroll and post journal</button>
+      <p id="payroll-run-error" class="form-error" role="alert"></p>
+    </form>
+    <p class="muted small">One run is allowed per month. The journal debits each earning ledger, credits each deduction ledger and credits Salary Payable with the net pay.</p>
+    ${report.runs.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
+          <thead><tr><th>Month</th><th>Posted</th><th class="num">Employees</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th><th>Voucher</th><th></th></tr></thead>
+          <tbody>${runRows}</tbody>
+        </table></div>`
+      : '<p class="muted">No payroll runs in this period.</p>'}`,
+    `Selected period ${esc(dateLabel(from))} to ${esc(dateLabel(to))}.`,
+  );
+
+  const payHeadRows = report.payHeads
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.name)}</strong></td>
+        <td><span class="badge">${esc(row.kind)}</span></td>
+        <td class="muted small">${row.statutory ? esc(row.statutory) : '—'}</td>
+        <td class="num">${row.count}</td>
+        <td class="num">${money(row.amount)}</td>
+      </tr>`,
+    )
+    .join('');
+  const statutoryTotalRows = report.statutory
+    .map((row) => `<tr><td><strong>${esc(row.tag)}</strong></td><td class="num">${money(row.amount)}</td></tr>`)
+    .join('');
+  const reportEmployeeRows = report.employees
+    .map(
+      (row) => `<tr>
+        <td>${esc(row.name)}</td>
+        <td class="num">${row.months}</td>
+        <td class="num">${money(row.gross)}</td>
+        <td class="num">${money(row.deductions)}</td>
+        <td class="num">${money(row.net)}</td>
+      </tr>`,
+    )
+    .join('');
+  const summaryPanel = salaryRegisterPanel(report, from, to);
+
+  if (!payroll.enabled) return setupPanel;
+  return `${setupPanel}${headsPanel}${employeesPanel}${runsPanel}${report.count ? summaryPanel : ''}`;
+}
+
+export function salaryRegisterPanel(report, from, to, standalone = false) {
+  const payHeadRows = report.payHeads
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.name)}</strong></td>
+        <td><span class="badge">${esc(row.kind)}</span></td>
+        <td class="muted small">${row.statutory ? esc(row.statutory) : '—'}</td>
+        <td class="num">${row.count}</td>
+        <td class="num">${money(row.amount)}</td>
+      </tr>`,
+    )
+    .join('');
+  const statutoryTotalRows = report.statutory
+    .map((row) => `<tr><td><strong>${esc(row.tag)}</strong></td><td class="num">${money(row.amount)}</td></tr>`)
+    .join('');
+  const reportEmployeeRows = report.employees
+    .map(
+      (row) => `<tr>
+        <td>${esc(row.name)}</td>
+        <td class="num">${row.months}</td>
+        <td class="num">${money(row.gross)}</td>
+        <td class="num">${money(row.deductions)}</td>
+        <td class="num">${money(row.net)}</td>
+      </tr>`,
+    )
+    .join('');
+  return panel(
+    'Salary register',
+    `<form id="payroll-report-form" class="inline-form" novalidate>
+      <label class="field inline-field"><span>From</span><input name="from" type="date" value="${esc(from)}" data-period></label>
+      <label class="field inline-field"><span>To</span><input name="to" type="date" value="${esc(to)}" data-period></label>
+      <button class="btn small" type="submit">Apply</button>
+      ${standalone ? '<button class="btn small ghost" type="button" data-screen="payroll">Back to payroll</button>' : '<button class="btn small ghost" type="button" data-screen="payrollRegister">Open full register</button>'}
+    </form>
+    <div class="ratio-grid">
+      <div class="ratio-card"><span class="ratio-label">Gross earnings</span><strong>${money(report.totals.gross)}</strong><span class="muted small">${report.count} run${report.count === 1 ? '' : 's'}</span></div>
+      <div class="ratio-card"><span class="ratio-label">Deductions</span><strong>${money(report.totals.deductions)}</strong><span class="muted small">PF, ESI, PT and other pay heads</span></div>
+      <div class="ratio-card"><span class="ratio-label">Net pay</span><strong>${money(report.totals.net)}</strong><span class="muted small">Credited to Salary Payable</span></div>
+      <div class="ratio-card"><span class="ratio-label">Employees paid</span><strong>${report.totals.employees}</strong><span class="muted small">Distinct employees in the period</span></div>
+    </div>
+    ${report.payHeads.length
+      ? `<h3 class="section-title">Pay head totals</h3>
+        <div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
+          <thead><tr><th>Pay head</th><th>Kind</th><th>Statutory</th><th class="num">Employee-months</th><th class="num">Amount</th></tr></thead>
+          <tbody>${payHeadRows}</tbody>
+        </table></div>`
+      : ''}
+    ${report.statutory.length
+      ? `<h3 class="section-title">Statutory deductions</h3>
+        <table class="data-table compact payroll-table">
+          <thead><tr><th>Tag</th><th class="num">Deducted</th></tr></thead>
+          <tbody>${statutoryTotalRows}</tbody>
+        </table>`
+      : ''}
+    ${report.employees.length
+      ? `<h3 class="section-title">Employee totals</h3>
+        <div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
+          <thead><tr><th>Employee</th><th class="num">Months</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th></tr></thead>
+          <tbody>${reportEmployeeRows}</tbody>
+        </table></div>`
+      : ''}`,
+    'Working papers for the selected period. Amounts come from the stored run snapshots, so later pay-head changes do not rewrite history.',
+  );
+}
+
+export function payrollRegisterScreen() {
+  if (!company()) return emptyCompanyScreen('Salary register');
+  const active = company();
+  const from = filters.payroll.from || active.fyStart;
+  const to = filters.payroll.to || active.fyEnd;
+  const report = payrollSummary(active, { from, to });
+  return salaryRegisterPanel(report, from, to, true);
+}
+
+export function payrollRunScreen() {
+  if (!company()) return emptyCompanyScreen('Payroll run');
+  const active = company();
+  const run = (active.payroll?.runs ?? []).find((item) => item.id === view.id);
+  if (!run) {
+    return panel(
+      'Payroll run',
+      '<p class="muted">That payroll run no longer exists.</p><button class="btn" type="button" data-screen="payroll">Back to payroll</button>',
+    );
+  }
+  const voucher = active.vouchers.find((item) => item.id === run.voucherId);
+  const rows = run.rows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.name)}</strong>${row.code ? ` <span class="muted small">${esc(row.code)}</span>` : ''}</td>
+        <td class="num">${money(row.gross)}</td>
+        <td class="num">${money(row.deductionTotal)}</td>
+        <td class="num">${money(row.net)}</td>
+        <td class="row-actions">
+          <button class="btn small ghost" type="button" data-action="open-payslip" data-run="${esc(run.id)}" data-id="${esc(row.employeeId)}">Payslip</button>
+        </td>
+      </tr>`,
+    )
+    .join('');
+  return panel(
+    `${payrollMonthLabel(run.month)} payroll`,
+    `<div class="ratio-grid">
+      <div class="ratio-card"><span class="ratio-label">Employees</span><strong>${run.totals.employees}</strong><span class="muted small">Posted ${esc(dateLabel(run.date))}</span></div>
+      <div class="ratio-card"><span class="ratio-label">Gross earnings</span><strong>${money(run.totals.gross)}</strong><span class="muted small">Debited to salary ledgers</span></div>
+      <div class="ratio-card"><span class="ratio-label">Deductions</span><strong>${money(run.totals.deductions)}</strong><span class="muted small">Credited to deduction ledgers</span></div>
+      <div class="ratio-card"><span class="ratio-label">Net pay</span><strong>${money(run.totals.net)}</strong><span class="muted small">Credited to Salary Payable</span></div>
+    </div>
+    <div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
+      <thead><tr><th>Employee</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <div class="form-actions">
+      <button class="btn" type="button" data-screen="payroll">Back to payroll</button>
+      ${voucher ? `<button class="btn ghost" type="button" data-action="open-voucher" data-id="${esc(voucher.id)}">Open journal ${voucher.no}</button>` : ''}
+      <button class="btn danger" type="button" data-action="delete-payroll-run" data-id="${esc(run.id)}">Delete this run</button>
+    </div>`,
+    `One journal voucher${voucher ? ` · ${esc(voucherLabel(voucher.type))} ${voucher.no}` : ''} · stored snapshot of each employee's earnings and deductions.`,
+  );
+}
+
+export function payslipScreen() {
+  if (!company()) return emptyCompanyScreen('Payslip');
+  const active = company();
+  const run = (active.payroll?.runs ?? []).find((item) => item.id === view.runId);
+  const row = run?.rows.find((item) => item.employeeId === view.employeeId);
+  if (!run || !row) {
+    return panel(
+      'Payslip',
+      '<p class="muted">That payslip no longer exists.</p><button class="btn" type="button" data-screen="payroll">Back to payroll</button>',
+    );
+  }
+  const employee = (active.payroll?.employees ?? []).find((item) => item.id === row.employeeId);
+  const voucher = active.vouchers.find((item) => item.id === run.voucherId);
+  const earningRows = row.earnings
+    .map((line) => `<tr><td>${esc(line.name)}</td><td class="num">${money(line.amount)}</td></tr>`)
+    .join('');
+  const deductionRows = row.deductions.length
+    ? row.deductions
+        .map((line) => `<tr><td>${esc(line.name)}</td><td class="num">${money(line.amount)}</td></tr>`)
+        .join('')
+    : '<tr><td class="muted">No deductions</td><td class="num">—</td></tr>';
+  return `<section class="panel payslip">
+    <div class="payslip-head">
+      <div>
+        <h2>Payslip</h2>
+        <p class="muted">${esc(payrollMonthLabel(run.month))} · ${esc(active.name)}</p>
+      </div>
+      <div class="payslip-meta">
+        <span>${esc(row.name)}${employee?.code ? ` · ${esc(employee.code)}` : ''}</span>
+        <span class="muted small">Posted ${esc(dateLabel(run.date))}${voucher ? ` · Journal ${voucher.no}` : ''}</span>
+      </div>
+    </div>
+    <div class="pay-grid payslip-meta-grid">
+      <div><span class="muted small">Designation</span><strong>${esc(employee?.designation || '—')}</strong></div>
+      <div><span class="muted small">PAN</span><strong>${esc(employee?.pan || '—')}</strong></div>
+      <div><span class="muted small">Date of joining</span><strong>${esc(employee?.dateOfJoining ? dateLabel(employee.dateOfJoining) : '—')}</strong></div>
+      <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}</strong></div>
+    </div>
+    <div class="payslip-grid">
+      <table class="data-table compact">
+        <thead><tr><th>Earnings</th><th class="num">Amount</th></tr></thead>
+        <tbody>${earningRows}</tbody>
+        <tfoot><tr><td>Gross earnings</td><td class="num">${money(row.gross)}</td></tr></tfoot>
+      </table>
+      <table class="data-table compact">
+        <thead><tr><th>Deductions</th><th class="num">Amount</th></tr></thead>
+        <tbody>${deductionRows}</tbody>
+        <tfoot><tr><td>Total deductions</td><td class="num">${money(row.deductionTotal)}</td></tr></tfoot>
+      </table>
+    </div>
+    <div class="payslip-net">
+      <span>Net pay</span>
+      <strong>${money(row.net)}</strong>
+      <span class="muted small">${esc(amountInWords(row.net))}</span>
+    </div>
+    <p class="muted small">Local working copy. PF, ESI, PT and TDS are the deduction pay heads entered for this employee; no return, certificate or challan is generated.</p>
+    <div class="form-actions">
+      <button class="btn" type="button" data-screen="payroll">Back to payroll</button>
+      <button class="btn ghost" type="button" data-action="open-payroll-run" data-id="${esc(run.id)}">Back to month</button>
+    </div>
+  </section>`;
+}
+

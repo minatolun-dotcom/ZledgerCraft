@@ -1,36 +1,99 @@
 # ZledgerCraft
 
-A local-only, keyboard-first double-entry accounting app in the TallyPrime mould:
-companies, groups and ledgers, balanced vouchers, the usual books and
-inventory with godowns, batches, transfers, orders and production. No
-dependencies, no build tooling beyond Node. By default everything
-lives in `localStorage`; the bundled server adds an optional local workspace
-shared across browser profiles. Nothing is sent off the machine.
+A local-first, keyboard-first double-entry accounting app in the TallyPrime
+mould: companies, groups and ledgers, balanced vouchers, the usual books and
+inventory with godowns, batches, transfers, orders and production. No browser
+dependencies and no build tooling beyond Node. By default everything lives in
+`localStorage`; the bundled Node server can share one SQLite workspace with
+signed-in users on a trusted local network. Setting `DATABASE_URL` and
+`NEON_AUTH_BASE_URL` switches the server to Neon Postgres and Neon Managed Auth;
+without those variables the app stays local.
 
 See [ROADMAP.md](ROADMAP.md) for the current stage and build order, and
 [KNOWN_LIMITS.md](KNOWN_LIMITS.md) for the persistent register of deferred
-product, storage, reporting and compliance limits.
+product, storage, reporting and compliance limits. The register also records
+free/self-hosted options for the remaining production limits and a recommended
+order for tackling them.
 
 ## Run
 
 ```bash
-node serve.mjs
+npm install
+npm start
 # http://127.0.0.1:4173/
 ```
 
-Open **Backup & restore → Storage** to enable the server workspace. It stores a
-local SQLite database at `data/workspace.sqlite`, shares the same books across
-browser profiles on this machine, rejects stale concurrent saves by revision,
-and falls back to browser storage for the single-file build. An older
-`data/workspace.json` is migrated on first start and renamed
-`workspace.json.migrated`. Node releases without `node:sqlite` fall back to the
-revisioned JSON file.
+`server-env.js` loads `.env.local` and then `.env` without overriding variables
+already set in the process. Tests deliberately skip both files.
+
+Open **Backup & restore → Storage** to enable the server workspace. With no
+cloud variables it stores a local SQLite database at `data/workspace.sqlite`,
+shares the same books across browser profiles on this machine, uses revision
+checks and conservative merge, and falls back to browser storage for the
+single-file build. An older `data/workspace.json` is migrated on first start and
+renamed `workspace.json.migrated`. Node releases without `node:sqlite` fall back
+to the revisioned JSON file. With `DATABASE_URL` set, companies, ledgers,
+vouchers, revisions, leases and server audit live in Neon Postgres; an existing
+SQLite workspace is copied into an empty Postgres branch on the first start.
+
+### LAN mode with server accounts
+
+Bind to the LAN and set the first owner password:
+
+```bash
+HOST=0.0.0.0 ZL_OWNER_PASSWORD='replace with a strong password' \
+  ZL_OWNER_NAME='Owner' node serve.mjs
+# other devices: http://<server-ip>:4173/
+```
+
+On first LAN start the server creates an owner account. Sign in, open
+**Companies → Server accounts**, and create accountant and viewer accounts.
+Passwords are stored as scrypt hashes and sessions use an HttpOnly,
+SameSite=Strict cookie. Accountants can edit vouchers and masters; viewers are
+read-only; only owners can manage companies, years, accounts and restores.
+Owners can restrict a non-owner account to selected companies; the server filters
+reads and rejects writes outside that set, including forged company ids. Scoped
+saves still merge independent changes, but hidden companies are preserved and
+never sent to the scoped browser. The same panel shows recent sign-in attempts,
+active sessions, the server-side save audit, and creates/downloads/restores
+server backups. Owners can enable authenticator-based two-step verification
+(TOTP) for an account and receive a one-time recovery code; users can change
+their own password. Repeated failed sign-ins lock that account/source for 15
+minutes. Server-audit rows are hash-chained, so out-of-band database edits are
+detected by the owner audit view. These password and TOTP controls are the
+SQLite/LAN path; Neon mode delegates credentials to Neon Auth, which does not
+support TOTP/MFA on the managed branch.
+
+- `HOST=127.0.0.1` (the default) needs no login, which keeps the existing local
+dev workflow. Set `ZL_AUTH=1` to require login on localhost as well.
+- `ZL_OWNER_USER` changes the seeded username (default `owner`). The bootstrap
+  password is only used when the auth database has no accounts.
+- `ZL_DATA_DIR=/path` moves `workspace.sqlite` and its auth/session tables.
+- `ZL_ALLOWED_IPS=192.168.1.0/24,127.0.0.1` restricts every HTTP request to
+  these IPv4 addresses/CIDR ranges. Leave it unset to allow any client that can
+  reach the bound interface.
+- `ZL_BACKUP_DIR=/path` moves server backups (default `data/backups`).
+  `ZL_BACKUP_KEEP` controls retention (default 7) and `ZL_BACKUP_HOURS` controls
+  the check interval (default 24). A daily SQLite or Postgres JSON backup is
+  created after the first save of the day and verified; owners can
+  also create, download or restore one from **Companies → Server accounts**.
+  Restoring replaces the books with that snapshot, creates a pre-restore
+  backup first, and leaves server accounts and passwords unchanged. These
+  copies stay on the server, so download one or copy it to separate storage for
+  disaster recovery.
+- LAN traffic is HTTP by default, so passwords and books are readable on the
+  network path. For HTTPS, set `TLS_CERT_PATH` and `TLS_KEY_PATH`. Use this only
+  on a trusted private network; do not forward the port from the internet.
+- In signed-in LAN mode the browser does not keep a book mirror or browser
+  snapshots. Download a JSON backup from **Backup & restore**, and keep the
+  server backups or an off-server copy.
 
 ## Build a single file
 
 ```bash
 node build.mjs
 # dist/ZledgerCraft.html — open it directly in a browser
+# dist/index.html        — Cloudflare Pages entry point
 ```
 
 ## Test
@@ -39,11 +102,126 @@ node build.mjs
 node --test tests/
 ```
 
+The reproducible Chromium/Firefox/WebKit browser and accessibility tooling is a
+dev-only workspace under `tools/browser`; it is not part of the app build.
+
+```bash
+cd tools/browser && npm ci
+BROWSER=chromium npm test
+BROWSER=firefox npm test
+BROWSER=chromium npm run bench   # 10,000-voucher Day Book render benchmark
+```
+
+`.github/workflows/verify.yml` runs the engine/build job plus the browser matrix
+and installs the CI WebKit host libraries.
+
 ## Deploy
 
 The static app is published from the repository root with GitHub Pages at
 `https://minatolun-dotcom.github.io/ZledgerCraft/`. The Pages site uses browser
-storage because GitHub Pages cannot run the optional Node/SQLite server.
+storage because GitHub Pages cannot run the optional Node/SQLite server. The
+Cloudflare custom domain is the hosted configuration with the Neon API.
+
+Cloudflare Pages hosts the same static bundle under the `zledgercraft` project:
+
+```bash
+node build.mjs
+npx wrangler@latest pages deploy dist --project-name zledgercraft --branch main
+```
+
+The Pages deployment is `https://zledgercraft.pages.dev/`; the custom domain is
+`https://books.lengkhawm.online/`. Pages serves the single-file app. The
+production API runs as a Neon Function (Node 24) and is reached through a
+same-origin Cloudflare Worker route:
+
+```bash
+npx neon@latest deploy --env .env.local   # API function zledgercraft
+npx wrangler@latest deploy                # /api/* proxy -> Neon Function
+```
+
+The function is declared in `neon.ts`; its Web-Request adapter is
+`neon-function.mjs`. `cf-api-worker.mjs` and `wrangler.toml` forward
+`books.lengkhawm.online/api/*` while preserving cookies and setting the
+forwarded host/protocol headers. The Worker and Function are both optional for
+local/LAN use. Cloud infrastructure work and verification are recorded in
+[`docs/CLOUD_INTEGRATION_PLAN.md`](docs/CLOUD_INTEGRATION_PLAN.md).
+
+## Optional cloud integrations
+
+These are optional; missing configuration leaves the server on its existing
+local-only behaviour.
+
+**Neon Postgres and Neon Auth**
+
+`npx neon@latest deploy` writes the connection and Auth variables to
+`.env.local`, applies the schema and deploys the `zledgercraft` function. Postgres
+stores the workspace as a JSONB document plus revision history, leases and
+hash-chained audit rows. Neon Auth owns email/password credentials; the app maps
+the Neon user to its existing role/company-scope profile and issues its own
+HttpOnly session. Profiles, sessions, login history and account lockout state
+live in Neon Postgres when `DATABASE_URL` is set. The SQLite tables remain the
+local/LAN fallback, and an existing SQLite auth store is copied into an empty
+Postgres auth store on first startup.
+
+For a branch-based integration check (creates and deletes a temporary Neon
+branch):
+
+```bash
+npm run test:neon
+```
+
+```bash
+DATABASE_URL=postgresql://...              # pooled app connection
+DATABASE_URL_UNPOOLED=postgresql://...     # migrations/recovery
+NEON_AUTH_BASE_URL=https://.../neondb/auth
+ZL_PUBLIC_URL=https://books.example.com    # trusted reset-link origin
+```
+
+In Neon mode the TOTP/MFA endpoints return 501, password changes use the Neon
+Auth reset link, and the owner account management screen creates role profiles
+by email before the person signs up. The local SQLite mode keeps its existing
+password, MFA, lockout and session features.
+
+**R2 offsite backups**
+
+When configured, every verified SQLite or Postgres JSON snapshot is uploaded
+through R2's S3-compatible API after its local integrity check. A failed upload
+keeps the local snapshot, skips local pruning for that run and can send an alert.
+
+```bash
+R2_ACCOUNT_ID=...
+R2_ACCESS_KEY_ID=...          # scoped to one bucket
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET=zledgercraft-backups
+R2_PREFIX=zledgercraft        # optional
+R2_ENDPOINT=...               # optional; defaults to the account R2 endpoint
+ZL_ALERT_EMAIL=ops@example.com
+```
+
+Use an R2 lifecycle rule for retention. The upload is a copy of the verified
+snapshot, not a live database file; download from R2 and restore through the
+existing owner restore flow.
+
+**Resend email**
+
+Resend powers backup-failure alerts (and, in SQLite/LAN mode, forgotten-password
+reset links). The server calls the HTTP API directly, so no SDK is installed.
+The verified sender is `ZledgerCraft <noreply@lengkhawm.online>`. Resend accepted
+a test message from that address for the configured account owner.
+
+```bash
+RESEND_API_KEY=re_...
+RESEND_FROM='ZledgerCraft <noreply@lengkhawm.online>'
+ZL_PUBLIC_URL=https://books.lengkhawm.online         # trusted origin
+ZL_OWNER_EMAIL=owner@example.com                    # optional initial owner email
+ZL_ALERT_EMAIL=ops@example.com                      # backup-failure recipient
+```
+
+In SQLite/LAN mode, accounts may have no email; owner-initiated password reset
+remains available. Reset tokens are hashed, expire after 30 minutes, work once
+and revoke existing sessions. In Neon mode Neon Auth sends its own reset email.
+Without `RESEND_API_KEY`, `RESEND_FROM` and `ZL_PUBLIC_URL`, Resend features are
+disabled.
 
 ## What it does
 
@@ -53,8 +231,8 @@ storage because GitHub Pages cannot run the optional Node/SQLite server.
 - Local owner, accountant and viewer profiles with role-based access and a
   profile switcher in the header. Owner manages companies, years, users and
   restores; accountant manages vouchers, masters and bank reconciliation;
-  viewer is read-only. These are local access profiles, not sign-in
-  authentication.
+  viewer is read-only. These browser profiles are not authentication; LAN mode
+  replaces them with real server accounts and a sign-in screen.
 - Multiple financial years per company with a year selector in the header.
   Closing a year locks its vouchers and creates/selects the next one; closed
   years can be reopened. Reports reset to the selected year when you switch.
@@ -167,7 +345,8 @@ storage because GitHub Pages cannot run the optional Node/SQLite server.
   balance sheet, which stay driven by ledger balances only.
 
 **Reports**
-- Day Book, with type and date filters.
+- Day Book, with type and date filters and paging (100/250/500 rows or all);
+  CSV/Excel exports include the whole filtered period, not just the visible page.
 - Ledger statement with opening balance, running balance and closing balance.
 - Trial Balance, Trading/P&L Account and Balance Sheet, each with an as-on date.
 - Cash Book / Bank Book, per ledger or combined.
@@ -269,21 +448,42 @@ storage because GitHub Pages cannot run the optional Node/SQLite server.
 - Backups include profiles and the audit trail. A restore keeps existing local
   profiles, merges the current log with the backup's log and appends a restore
   event rather than erasing history.
+- When R2 is configured, the verified server snapshot is also uploaded offsite;
+  the local snapshot is kept if the upload fails. R2 is not a live database.
 
 **Storage**
 - Browser storage remains the default and is the only mode in the single-file
   build.
-- The optional local server workspace persists to `data/workspace.sqlite`
-  through Node's built-in SQLite module and is shared by browser profiles on
-  this machine. It is opt-in, local and unauthenticated; do not expose the
-  server beyond `127.0.0.1`. Older Node versions fall back to
-  `data/workspace.json`.
+- The optional server workspace persists to `data/workspace.sqlite` through
+  Node's built-in SQLite module, or to Neon Postgres when `DATABASE_URL` is set.
+  In SQLite mode, companies, ledgers, vouchers and voucher lines are relational
+  tables; every remaining top-level company collection (groups, stock, GST, TDS,
+  payroll, banking, budgets, currencies and settings) is stored one row per
+  record in `company_records`, with stock items also indexed in `stock_items`.
+  Nested configuration stays JSON inside its row so the current accounting
+  engine keeps its shape. In Postgres mode the whole workspace is a JSONB
+  document with revision history, leases and Postgres audit tables. An older
+  whole-workspace blob is migrated once, then removed. On localhost the
+  workspace is shared by browser profiles on the same machine without a login.
+  In LAN mode the SQLite database also holds server accounts, sessions and the
+  server save audit; Neon mode keeps profiles, sessions, login history and
+  lockout state in Postgres while Neon Auth owns credentials. Older Node
+  versions fall back to `data/workspace.json`.
 - Each server save carries the revision the browser loaded. If another session
-  saved first, the server returns a conflict, the browser keeps its local copy,
-  and a banner offers **Reload server copy**. Reload snapshots local state
-  first. This is optimistic whole-workspace concurrency, not a merge.
-- Server mode keeps a browser-local mirror so switching back to browser storage
-  does not lose the latest state.
+  saved first, the server attempts a conservative three-way merge when it still
+  has the base revision. Independent company, ledger and voucher changes merge;
+  overlapping edits or voucher-line edits return a conflict, keep the local
+  copy, and offer **Reload server copy**. A company-scoped account merges only
+  its visible companies; hidden companies are preserved from the current server
+  state and are never returned or overwritten. Duplicate voucher numbers from
+  concurrent entry are reassigned. A voucher edit also acquires a hashed,
+  expiring lease, renewed while the form is open; saving a changed voucher that
+  another session leases is rejected with HTTP 423. Leases are server-local and
+  cover vouchers only. The last 20 revisions are retained, with no field-level
+  history beyond that window. Reload snapshots local state first.
+- Localhost server mode keeps a browser-local mirror so switching back to
+  browser storage does not lose the latest state. Signed-in LAN mode disables
+  that mirror and browser snapshots.
 - CSV import for ledgers (`Name,Group,Opening,Type`), multi-line balanced
   vouchers (`Date,Type,No,Ledger,Side,Amount,Narration`) and bank statements
   (`Date,Description,Reference,Debit,Credit`). Excel `.xlsx` workbooks can load
@@ -365,7 +565,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting and an unrealised forex revaluation report; no realised gain/loss posting, foreign inventory/bill allocations or interest calculation |
 | Multiple financial years per company, year-end closing and carry-forward | Covered — year selector, close/reopen and automatic next year; no closing journal is written because balances are cumulative |
 | Bill-wise entry and allocation | Covered — bill refs, due dates, explicit/FIFO settlements, ageing, bill-wise register and party statement with bill detail; no bill-wise opening allocation or bill interest |
-| User roles, TallyVault, edit log, cloud sync | Partial — local owner/accountant/viewer profiles, append-only audit trail, optional same-machine SQLite workspace with revision conflict detection; no authenticated users, vault encryption, automatic merge or cloud sync |
+| User roles, TallyVault, edit log, cloud sync | Partial — local profiles plus password-backed LAN accounts or Neon Auth, owner/accountant/viewer roles, company-level server scoping, TOTP MFA in SQLite mode, hash-chained server audit, append-only app audit, SQLite or Neon Postgres workspace with conservative and scoped merge; Neon Auth mode has no MFA and uses Postgres profiles/sessions; no vault encryption |
 | Tally XML and Excel import | Partial — Tally XML account groups, ledgers, stock groups, stock items with opening stock, balanced vouchers and matching voucher stock lines import; batch names/expiry attach to locally batch-tracked items; Excel `.xlsx` ledgers and vouchers load into the reviewed CSV path; custom Tally groups need a standard parent and units must pre-exist; skipped stock lines do not roll back the voucher; no batch masters, bill allocations, cost centres, GST/TDS detail, voucher numbers, APIs or webhooks |
 | Custom printing layouts | Print view plus CSV and Excel export; no layout designer |
 

@@ -14,6 +14,8 @@ import {
   round2,
 } from './store.js';
 
+const MAX_TALLY_CHARS = 20 * 1024 * 1024;
+
 const VOUCHER_ALIASES = {
   sales: 'Sales',
   purchase: 'Purchase',
@@ -25,10 +27,17 @@ const VOUCHER_ALIASES = {
   debitnote: 'DebitNote',
 };
 
+function xmlCodePoint(value, radix) {
+  const code = parseInt(value, radix);
+  if (!Number.isInteger(code) || code <= 0 || code > 0x10ffff) return '\uFFFD';
+  if (code >= 0xd800 && code <= 0xdfff) return '\uFFFD';
+  return String.fromCodePoint(code);
+}
+
 function decodeXml(value) {
   return String(value ?? '')
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#([0-9]+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => xmlCodePoint(hex, 16))
+    .replace(/&#([0-9]+);/g, (_, code) => xmlCodePoint(code, 10))
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&lt;/g, '<')
@@ -72,9 +81,7 @@ function isoFromTallyDate(raw) {
     const match = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
     if (match) iso = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  return date.toISOString().slice(0, 10) === iso ? iso : null;
+  return isValidIsoDate(iso) ? iso : null;
 }
 
 function normaliseVoucherType(raw) {
@@ -158,6 +165,9 @@ function resolveInventory(target, voucher) {
 export function parseTallyXml(xml) {
   const text = String(xml ?? '').trim();
   if (!text) return { ok: false, error: 'Paste or choose a Tally XML export.' };
+  if (text.length > MAX_TALLY_CHARS) {
+    return { ok: false, error: 'The Tally XML is larger than the 20 MB import limit.' };
+  }
   if (!/<[A-Za-z][^>]*>/.test(text)) return { ok: false, error: 'That does not look like Tally XML.' };
 
   const groups = [];

@@ -12,6 +12,8 @@ import {
   exportState,
   findLedgerByName,
   importState,
+  saveGstSettings,
+  saveTdsSettings,
   updateCompany,
   updateGroup,
   updateLedger,
@@ -529,6 +531,66 @@ test('statistics count vouchers, ledgers and groups', () => {
   assert.equal(forecast.months[0].month, '2026-07');
   assert.equal(forecast.months[0].sales, 300);
   assert.equal(forecast.months[0].purchases, 133.33);
+});
+
+test('statistics use accounting values, not GST or TDS-inclusive totals', () => {
+  const company = createCompany('Net Statistics Co', '2026-04-01').company;
+  const gst = saveGstSettings(company, {
+    enabled: true,
+    gstin: '27ABCDE1234F1Z5',
+    legalName: 'Net Statistics Co',
+    stateCode: '27',
+  });
+  assert.equal(gst.ok, true, gst.error);
+  const customer = addLedger(company, {
+    name: 'GST Customer',
+    groupId: groupKeyFor(company, 'sundryDebtors'),
+    gstin: '27AAACR1234F1Z2',
+    stateCode: '27',
+  }).ledger;
+  const sales = findLedgerByName(company, 'Sales');
+  const rate = company.gst.rates.find((entry) => entry.rate === 18);
+  const sale = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    gst: { rateId: rate.id, partyGstin: customer.gstin, placeOfSupply: '27' },
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 1180 },
+      { ledgerId: sales.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+  assert.equal(sale.ok, true, sale.error);
+
+  const tds = saveTdsSettings(company, { enabled: true, tan: 'PNEP12345A' });
+  assert.equal(tds.ok, true, tds.error);
+  const consultant = addLedger(company, {
+    name: 'Professional Consultant',
+    groupId: groupKeyFor(company, 'sundryCreditors'),
+    pan: 'AAAPR5555R',
+  }).ledger;
+  const fees = addLedger(company, {
+    name: 'Professional Fees',
+    groupId: groupKeyFor(company, 'indirectExpenses'),
+  }).ledger;
+  const section = company.tds.sections.find((entry) => entry.kind === 'TDS' && entry.code === '194J');
+  const purchase = addVoucher(company, {
+    type: 'Purchase',
+    date: '2026-04-08',
+    tds: { sectionId: section.id, pan: consultant.pan },
+    lines: [
+      { ledgerId: fees.id, side: 'Dr', amount: 1000 },
+      { ledgerId: consultant.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+  assert.equal(purchase.ok, true, purchase.error);
+
+  const stats = statistics(company);
+  const april = stats.monthly.find((row) => row.month === '2026-04');
+  assert.equal(april.sales, 1000);
+  assert.equal(april.purchases, 1000);
+  assert.equal(stats.topCustomers[0].amount, 1000);
+  assert.equal(stats.topSuppliers[0].amount, 1000);
+  assert.equal(stats.voucherCounts.find((row) => row.type === 'Sales').total, 1180);
 });
 
 test('backup export and restore round-trip through validation', () => {

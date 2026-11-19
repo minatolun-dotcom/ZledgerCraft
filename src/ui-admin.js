@@ -1,0 +1,501 @@
+// ZledgerCraft - Snapshots, backup, import, budgets and forex screens.
+// Screen functions read the live UI state exported by ui.js.
+import {
+  VOUCHER_TYPES,
+  booksStart,
+  addLedger,
+  addVoucher,
+  dateLabel,
+  exportState,
+  parseAmount,
+  round2,
+  todayIso,
+} from './store.js';
+import {
+  budgetVsActual,
+  forexRevaluation,
+} from './accounting.js';
+import {
+  SNAPSHOT_KEY,
+  SNAPSHOT_LIMIT,
+  state,
+  workspaceMode,
+  workspaceRev,
+  workspaceUpdatedAt,
+  workspaceStorage,
+  workspaceRemote,
+  authRequired,
+  filters,
+  fmtQty,
+  esc,
+  company,
+  can,
+  workspaceAvailable,
+  money,
+  panel,
+  emptyCompanyScreen,
+} from './ui.js';
+
+export function loadSnapshots() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SNAPSHOT_KEY) : null;
+    const parsed = JSON.parse(raw ?? '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveSnapshot(currentState, kind = 'manual') {
+  if (authRequired) return false;
+  try {
+    const snapshots = loadSnapshots();
+    snapshots.unshift({
+      at: new Date().toISOString(),
+      kind,
+      companies: currentState.companies.length,
+      vouchers: currentState.companies.reduce((sum, item) => sum + item.vouchers.length, 0),
+      payload: exportState(currentState),
+    });
+    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshots.slice(0, SNAPSHOT_LIMIT)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function localDay(iso = new Date().toISOString()) {
+  const date = new Date(iso);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** One automatic snapshot per day, once there is at least one voucher. */
+export function maybeAutoSnapshot() {
+  if (authRequired) return false;
+  const vouchers = state.companies.reduce((sum, item) => sum + item.vouchers.length, 0);
+  if (vouchers === 0) return false;
+  const today = localDay();
+  const latest = loadSnapshots().find((snapshot) => snapshot.kind === 'auto');
+  if (latest && localDay(latest.at) === today) return false;
+  return saveSnapshot(state, 'auto');
+}
+
+export function snapshotHtml() {
+  if (authRequired) {
+    return panel(
+      'Server backups',
+      '<p class="muted">Browser snapshots are disabled in LAN mode so books are not copied into device storage. Download a JSON backup below, and back up <code>data/workspace.sqlite</code> on the server machine.</p>',
+    );
+  }
+  const snapshots = loadSnapshots();
+  return panel(
+    'Automatic snapshots',
+    `<p class="muted">A daily snapshot is taken after the first meaningful change, and every restore saves the current data first. The last ${SNAPSHOT_LIMIT} are kept in this browser.</p>
+    ${snapshots.length
+      ? `<table class="data-table compact">
+          <thead><tr><th>Saved</th><th>Type</th><th class="num">Companies</th><th class="num">Vouchers</th><th></th></tr></thead>
+          <tbody>${snapshots
+            .map(
+              (snapshot, index) => `<tr>
+                <td>${esc(new Date(snapshot.at).toLocaleString('en-IN'))}</td>
+                <td><span class="badge">${esc(snapshot.kind === 'auto' ? 'daily' : snapshot.kind === 'pre-restore' ? 'pre-restore' : 'manual')}</span></td>
+                <td class="num">${snapshot.companies}</td>
+                <td class="num">${snapshot.vouchers}</td>
+                <td class="row-actions">${can('data.restore') ? `<button class="btn small" type="button" data-action="restore-snapshot" data-index="${index}">Restore</button>` : ''}</td>
+              </tr>`,
+            )
+            .join('')}</tbody>
+        </table>`
+      : '<p class="muted">No snapshots yet. One is saved after the first voucher and before any restore.</p>'}
+    <div class="form-actions">
+      <button class="btn small" type="button" data-action="save-snapshot">Save manual snapshot</button>
+    </div>`,
+  );
+}
+
+export function workspacePanel() {
+  const available = workspaceAvailable();
+  return panel(
+    'Storage',
+    `<p class="muted">${workspaceMode
+      ? authRequired
+        ? 'The LAN server workspace is active. Every change is saved to the server database and shared with signed-in users on the network.'
+        : 'The server workspace is active. Every change is saved to the local server and shared with browser profiles that open it.'
+      : available
+        ? 'Data is currently stored in this browser only. A server workspace shares it across devices on the local network.'
+        : 'This single-file build stores data in this browser only. Run <code>node app/serve.mjs</code> to enable a server workspace.'}</p>
+    <p class="muted small">${authRequired
+      ? 'Access requires a server account. Passwords are hashed; sessions use an HttpOnly cookie. Saves are revision-checked so two sessions cannot silently overwrite each other.'
+      : available
+        ? 'The localhost development server does not require authentication. Enable LAN mode with HOST=0.0.0.0 for signed-in network access.'
+        : 'Server workspaces require the HTTP server; opening the HTML file directly uses browser storage.'}</p>
+    ${workspaceMode
+      ? `<p class="muted small">${workspaceStorage === 'sqlite' ? 'SQLite backend' : 'JSON file backend'} · server revision ${workspaceRev}${workspaceUpdatedAt ? ` · last saved ${esc(new Date(workspaceUpdatedAt).toLocaleString('en-IN'))}` : ''}.${workspaceRemote ? ' A newer server copy is available.' : ''}</p>`
+      : ''}
+    <div class="form-actions">
+      ${available
+        ? workspaceMode
+          ? `<button class="btn small" type="button" data-action="logout-server"${authRequired ? '' : ' hidden'}>Sign out</button>${authRequired ? '' : '<button class="btn small" type="button" data-action="disable-workspace">Switch to browser storage</button>'}${workspaceRemote ? '<button class="btn small primary" type="button" data-action="reload-workspace">Reload server copy</button>' : ''}`
+          : '<button class="btn small primary" type="button" data-action="enable-workspace">Use server workspace</button>'
+        : ''}
+    </div>`,
+    workspaceMode ? 'Server workspace active' : 'Browser storage active',
+  );
+}
+
+export function backupScreen() {
+  const payload = exportState(state);
+  return `
+    ${workspacePanel()}
+    ${panel(
+      'Download backup',
+      `<p class="muted">Save this file somewhere safe. It contains every company, ledger and voucher stored in ${workspaceMode ? 'this server workspace' : 'this browser'}.</p>
+      <textarea class="backup-box" readonly rows="10" aria-label="Backup JSON">${esc(payload)}</textarea>
+      <div class="form-actions">
+        <a class="btn primary" download="zledgercraft-backup-${todayIso()}.json" href="data:application/json;charset=utf-8,${encodeURIComponent(payload)}">Download JSON</a>
+      </div>`,
+    )}
+    ${snapshotHtml()}
+    ${panel(
+      'Import data',
+      `<p class="muted">Bring in ledgers or balanced vouchers from CSV. Imports are all-or-nothing and can be repeated only with new names and voucher numbers.</p>
+      <div class="form-actions"><button class="btn" type="button" data-screen="importData">Open CSV import</button></div>`,
+    )}
+    ${can('data.restore')
+      ? panel(
+          'Restore backup',
+          `<p class="muted">Paste a backup below. Restoring replaces all companies currently stored in this browser.</p>
+          <form id="restore-form" novalidate>
+            <label class="field">
+              <span>Backup JSON</span>
+              <textarea name="payload" class="backup-box" rows="10" placeholder='{ "companies": [ ... ] }' aria-label="Restore JSON payload"></textarea>
+            </label>
+            <p id="restore-preview" class="muted" aria-live="polite"></p>
+            <p id="form-error" class="form-error" role="alert"></p>
+            <div class="form-actions">
+              <button class="btn danger" type="submit">Restore and replace</button>
+            </div>
+          </form>`,
+        )
+      : '<p class="muted">Only an owner can restore a backup.</p>'}`;
+}
+
+export function parseCsvChecked(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let quoted = false;
+  let quoteClosed = false;
+  const source = String(text ?? '').replace(/^\uFEFF/, '');
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (quoted) {
+      if (char === '"' && source[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = false;
+        quoteClosed = true;
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      if (field.length || quoteClosed) {
+        return { ok: false, error: 'CSV has a quote inside an unquoted field.' };
+      }
+      quoted = true;
+    } else if (char === ',') {
+      row.push(field.replace(/\r$/, ''));
+      field = '';
+      quoteClosed = false;
+    } else if (char === '\n') {
+      row.push(field.replace(/\r$/, ''));
+      rows.push(row);
+      row = [];
+      field = '';
+      quoteClosed = false;
+    } else {
+      if (quoteClosed && !/\s/.test(char)) {
+        return { ok: false, error: 'CSV has unexpected text after a closing quote.' };
+      }
+      field += char;
+    }
+  }
+  if (quoted) return { ok: false, error: 'CSV has an unclosed quoted field.' };
+  if (field.length || row.length) {
+    row.push(field.replace(/\r$/, ''));
+    rows.push(row);
+  }
+  return {
+    ok: true,
+    rows: rows.filter((entry) => entry.some((cell) => String(cell).trim() !== '')),
+  };
+}
+
+export function parseCsv(text) {
+  const parsed = parseCsvChecked(text);
+  return parsed.ok ? parsed.rows : [];
+}
+
+export function csvObjects(text) {
+  const parsed = parseCsvChecked(text);
+  if (!parsed.ok) return parsed;
+  const rows = parsed.rows;
+  if (rows.length < 2) return { ok: false, error: 'Add a header row and at least one data row.' };
+  const header = rows[0].map((cell) => String(cell).trim().toLowerCase());
+  if (header.some((name) => !name)) return { ok: false, error: 'CSV header columns cannot be empty.' };
+  if (new Set(header).size !== header.length) {
+    return { ok: false, error: 'CSV header has duplicate column names.' };
+  }
+  const objects = rows.slice(1).map((cells, index) => {
+    const record = { __row: index + 2 };
+    for (const [column, name] of header.entries()) record[name] = String(cells[column] ?? '').trim();
+    return record;
+  });
+  return { ok: true, header, rows: objects };
+}
+
+export function importLedgerCsv(text) {
+  const active = company();
+  if (!active) return { ok: false, error: 'Open a company first.' };
+  const parsed = csvObjects(text);
+  if (!parsed.ok) return parsed;
+  const nameKey = parsed.header.includes('name') ? 'name' : parsed.header.includes('ledger') ? 'ledger' : null;
+  const groupKey = parsed.header.includes('group') ? 'group' : parsed.header.includes('under') ? 'under' : null;
+  if (!nameKey || !groupKey) return { ok: false, error: 'Ledger CSV needs Name and Group columns.' };
+
+  const clone = JSON.parse(JSON.stringify(active));
+  const additions = [];
+  for (const record of parsed.rows) {
+    const name = record[nameKey];
+    const groupName = record[groupKey];
+    if (!name || !groupName) return { ok: false, error: `Row ${record.__row}: name and group are required.` };
+    const group = clone.groups.find((item) => item.name.trim().toLowerCase() === groupName.toLowerCase());
+    if (!group) return { ok: false, error: `Row ${record.__row}: group "${groupName}" was not found.` };
+    const result = addLedger(clone, {
+      name,
+      groupId: group.id,
+      opening: record.opening || 0,
+      openingType: record.type || record['dr/cr'] || 'Dr',
+    });
+    if (!result.ok) return { ok: false, error: `Row ${record.__row}: ${result.error}` };
+    additions.push({ name, groupId: group.id, opening: record.opening || 0, openingType: record.type || record['dr/cr'] || 'Dr' });
+  }
+  for (const addition of additions) {
+    const result = addLedger(active, addition);
+    if (!result.ok) return { ok: false, error: result.error };
+  }
+  return { ok: true, count: additions.length };
+}
+
+export function importVoucherCsv(text) {
+  const active = company();
+  if (!active) return { ok: false, error: 'Open a company first.' };
+  const parsed = csvObjects(text);
+  if (!parsed.ok) return parsed;
+  for (const column of ['date', 'type', 'no', 'ledger', 'side', 'amount']) {
+    if (!parsed.header.includes(column)) return { ok: false, error: `Voucher CSV needs a ${column} column.` };
+  }
+
+  const typeByName = new Map();
+  for (const [key, meta] of Object.entries(VOUCHER_TYPES)) {
+    typeByName.set(key.toLowerCase(), key);
+    typeByName.set(meta.label.toLowerCase().replace(/\s+/g, ''), key);
+  }
+  const groups = new Map();
+  for (const record of parsed.rows) {
+    const type = typeByName.get(record.type.toLowerCase().replace(/\s+/g, ''));
+    if (!type) return { ok: false, error: `Row ${record.__row}: unknown voucher type "${record.type}".` };
+    if (!record.no) return { ok: false, error: `Row ${record.__row}: voucher no is required so its lines can be grouped.` };
+    const side = /^(c|cr|credit)$/i.test(record.side) ? 'Cr' : /^(d|dr|debit)$/i.test(record.side) ? 'Dr' : null;
+    if (!side) return { ok: false, error: `Row ${record.__row}: side must be Dr or Cr.` };
+    const key = [record.date, type, record.no].join('|');
+    if (!groups.has(key)) {
+      groups.set(key, { date: record.date, type, no: record.no, narration: record.narration || '', lines: [] });
+    }
+    groups.get(key).lines.push({ ledgerName: record.ledger, side, amount: record.amount });
+  }
+
+  const clone = JSON.parse(JSON.stringify(active));
+  const vouchers = [];
+  for (const group of groups.values()) {
+    const lines = [];
+    for (const line of group.lines) {
+      const ledger = clone.ledgers.find((item) => item.name.trim().toLowerCase() === line.ledgerName.toLowerCase());
+      if (!ledger) return { ok: false, error: `Voucher ${group.type} ${group.no}: ledger "${line.ledgerName}" was not found.` };
+      lines.push({ ledgerId: ledger.id, side: line.side, amount: line.amount });
+    }
+    const result = addVoucher(clone, {
+      type: group.type,
+      date: group.date,
+      narration: group.narration,
+      lines,
+    });
+    if (!result.ok) return { ok: false, error: `Voucher ${group.type} ${group.no}: ${result.error}` };
+    vouchers.push({ type: group.type, date: group.date, narration: group.narration, lines });
+  }
+  for (const voucher of vouchers) {
+    const result = addVoucher(active, voucher);
+    if (!result.ok) return { ok: false, error: result.error };
+  }
+  return { ok: true, count: vouchers.length };
+}
+
+export function parseStatementDate(raw) {
+  const text = String(raw ?? '').trim();
+  let iso = text;
+  const match = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (match) iso = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const date = new Date(`${iso}T00:00:00Z`);
+  return date.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
+export function parseBankStatementCsv(text) {
+  const parsed = csvObjects(text);
+  if (!parsed.ok) return parsed;
+  const find = (...names) => names.find((name) => parsed.header.includes(name)) ?? null;
+  const dateKey = find('date', 'txn date', 'transaction date');
+  const descriptionKey = find('description', 'narration', 'particulars');
+  const referenceKey = find('reference', 'ref', 'cheque', 'cheque no');
+  const debitKey = find('debit', 'withdrawal', 'withdrawals');
+  const creditKey = find('credit', 'deposit', 'deposits');
+  const amountKey = find('amount');
+  const typeKey = find('type', 'dr/cr');
+  if (!dateKey) return { ok: false, error: 'Statement CSV needs a Date column.' };
+  if (!(debitKey || creditKey) && !amountKey) {
+    return { ok: false, error: 'Statement CSV needs Debit/Credit columns, or Amount and Type.' };
+  }
+
+  const lines = [];
+  for (const record of parsed.rows) {
+    const date = parseStatementDate(record[dateKey]);
+    if (!date) return { ok: false, error: `Row ${record.__row}: date must be YYYY-MM-DD or DD/MM/YYYY.` };
+    let amount = null;
+    if (debitKey || creditKey) {
+      const debitRaw = debitKey ? record[debitKey] ?? '' : '';
+      const creditRaw = creditKey ? record[creditKey] ?? '' : '';
+      const debit = debitRaw ? parseAmount(debitRaw) : null;
+      const credit = creditRaw ? parseAmount(creditRaw) : null;
+      if (debitRaw && (debit === null || debit <= 0)) return { ok: false, error: `Row ${record.__row}: debit must be a positive number.` };
+      if (creditRaw && (credit === null || credit <= 0)) return { ok: false, error: `Row ${record.__row}: credit must be a positive number.` };
+      if (debit && credit) return { ok: false, error: `Row ${record.__row}: use either debit or credit, not both.` };
+      amount = credit ? credit : debit ? -debit : null;
+    } else {
+      const parsedAmount = parseAmount(record[amountKey]);
+      if (parsedAmount === null || parsedAmount === 0) return { ok: false, error: `Row ${record.__row}: amount must be a non-zero number.` };
+      const direction = String(record[typeKey] ?? '').trim().toLowerCase();
+      if (/^(credit|cr|deposit|in)$/.test(direction)) amount = Math.abs(parsedAmount);
+      else if (/^(debit|dr|withdrawal|out)$/.test(direction)) amount = -Math.abs(parsedAmount);
+      else return { ok: false, error: `Row ${record.__row}: type must be Credit or Debit.` };
+    }
+    if (amount === null) return { ok: false, error: `Row ${record.__row}: enter a debit or credit.` };
+    lines.push({
+      date,
+      description: descriptionKey ? record[descriptionKey] ?? '' : '',
+      reference: referenceKey ? record[referenceKey] ?? '' : '',
+      amount,
+    });
+  }
+  if (!lines.length) return { ok: false, error: 'The statement has no data rows.' };
+  return { ok: true, lines };
+}
+
+export function budgetsScreen() {
+  if (!company()) return emptyCompanyScreen('Budget vs Actual');
+  const active = company();
+  const years = [...(active.years ?? [])].sort((a, b) => b.start.localeCompare(a.start));
+  const current = filters.budget;
+  const yearId = years.some((year) => year.id === current.yearId) ? current.yearId : active.yearId;
+  const report = budgetVsActual(active, { yearId, asOn: current.asOn });
+  const asOnValue = current.asOn || report.asOn;
+  const yearOptions = years
+    .map((year) => `<option value="${esc(year.id)}"${year.id === yearId ? ' selected' : ''}>${esc(dateLabel(year.start))} – ${esc(dateLabel(year.end))}</option>`)
+    .join('');
+  const rows = report.rows
+    .map((row) => {
+      const used = row.usedPercent === null ? 0 : Math.max(0, Math.min(100, row.usedPercent));
+      return `<tr>
+        <td><strong>${esc(row.name)}</strong><div class="muted small">${esc(row.targetType === 'group' ? 'Group' : 'Ledger')} · ${esc(row.nature)}</div></td>
+        <td>${esc(row.target)}</td>
+        <td class="num">${money(row.amount)}</td>
+        <td class="num">${money(row.actual)}</td>
+        <td class="num ${row.variance < 0 ? 'neg' : ''}">${money(row.variance)}</td>
+        <td class="budget-used">
+          <div class="budget-meter"><span style="width:${used}%"></span></div>
+          <span class="muted small">${row.usedPercent === null ? 'No budget' : `${fmtQty(row.usedPercent)}%`}</span>
+        </td>
+        <td><span class="badge ${row.over ? 'overdue' : ''}">${row.over ? 'Over budget' : 'Within budget'}</span></td>
+      </tr>`;
+    })
+    .join('');
+
+  return panel(
+    'Budget vs Actual',
+    `<form id="budget-report-form" class="filter-bar">
+      <label class="field inline-field"><span>Financial year</span><select name="yearId">${yearOptions}</select></label>
+      <label class="field inline-field"><span>As on</span><input name="asOn" type="date" min="${esc(report.year.start)}" max="${esc(report.year.end)}" value="${esc(asOnValue)}" data-period></label>
+      <button class="btn small" type="submit">Apply</button>
+    </form>
+    <div class="ratio-grid">
+      <div class="ratio-card"><span class="ratio-label">Budget</span><strong>${money(report.totalBudget)}</strong><span class="muted small">${report.count} budget${report.count === 1 ? '' : 's'}</span></div>
+      <div class="ratio-card"><span class="ratio-label">Actual</span><strong>${money(report.totalActual)}</strong><span class="muted small">To ${esc(dateLabel(report.asOn))}</span></div>
+      <div class="ratio-card"><span class="ratio-label">Variance</span><strong class="${report.totalVariance < 0 ? 'neg' : ''}">${money(report.totalVariance)}</strong><span class="muted small">Budget less actual</span></div>
+      <div class="ratio-card"><span class="ratio-label">Over budget</span><strong>${report.overCount}</strong><span class="muted small">Budget${report.count === 1 ? '' : 's'} exceeded</span></div>
+    </div>
+    ${report.rows.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact budget-report-table">
+          <thead><tr><th>Budget</th><th>Target</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Variance</th><th>Used</th><th>Status</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>`
+      : '<p class="muted">No budgets for this financial year. Add year-wise budgets in Masters.</p>'}`,
+    'Variance is budget less actual. Totals add each budget, so overlapping group and ledger budgets can double-count.',
+  );
+}
+
+export function forexScreen() {
+  if (!company()) return emptyCompanyScreen('Forex Revaluation');
+  const active = company();
+  const years = [...(active.years ?? [])].sort((a, b) => a.start.localeCompare(b.start));
+  const lastEnd = years.length ? years[years.length - 1].end : active.fyEnd;
+  const asOnValue = filters.forex.asOn || todayIso();
+  const report = forexRevaluation(active, { asOn: asOnValue });
+  const rows = report.rows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.ledger)}</strong><div class="muted small">${esc(row.group)}</div></td>
+        <td class="muted">${esc(row.nature)}</td>
+        <td>${esc(row.currencyCode)}</td>
+        <td class="num">${round2(row.foreignBalance).toFixed(2)}</td>
+        <td class="num">${money(row.bookBalance)}</td>
+        <td class="num">${money(row.rate)}</td>
+        <td class="num">${money(row.revalued)}</td>
+        <td class="num ${row.gain ? 'pos' : ''}">${row.gain ? money(row.gain) : '—'}</td>
+        <td class="num ${row.loss ? 'neg' : ''}">${row.loss ? money(row.loss) : '—'}</td>
+      </tr>`,
+    )
+    .join('');
+  return panel(
+    'Forex Revaluation',
+    `<p class="muted">Revalues foreign-currency asset and liability balances at the latest rate dated on or before the as-on date. Profit &amp; loss ledgers are not revalued. This report does not post a journal.</p>
+    <form id="forex-report-form" class="filter-bar">
+      <label class="field inline-field"><span>As on</span><input name="asOn" type="date" min="${esc(booksStart(active))}" max="${esc(lastEnd)}" value="${esc(asOnValue)}" data-period></label>
+      <button class="btn small" type="submit">Apply</button>
+    </form>
+    <div class="ratio-grid">
+      <div class="ratio-card"><span class="ratio-label">Unrealised gain</span><strong class="pos">${money(report.gain)}</strong><span class="muted small">${report.count} ledger balance${report.count === 1 ? '' : 's'}</span></div>
+      <div class="ratio-card"><span class="ratio-label">Unrealised loss</span><strong class="neg">${money(report.loss)}</strong><span class="muted small">${report.currencies.length} currenc${report.currencies.length === 1 ? 'y' : 'ies'}</span></div>
+      <div class="ratio-card"><span class="ratio-label">Net difference</span><strong class="${report.net < 0 ? 'neg' : 'pos'}">${money(report.net)}</strong><span class="muted small">Gain less loss</span></div>
+    </div>
+    ${report.rows.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Ledger</th><th>Nature</th><th>Currency</th><th class="num">Foreign balance</th><th class="num">Book value</th><th class="num">Rate</th><th class="num">Revalued</th><th class="num">Gain</th><th class="num">Loss</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>`
+      : '<p class="muted">No foreign-currency asset or liability balances as on this date. Record a foreign voucher in Vouchers first.</p>'}`,
+    'Foreign balances are signed: debit positive, credit negative. Only foreign vouchers build these balances; a base-currency settlement does not reduce them yet. The report is informational until a revaluation journal is posted manually.',
+  );
+}
+

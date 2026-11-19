@@ -1,6 +1,6 @@
 # ZledgerCraft roadmap and status
 
-Last updated: 2026-11-18
+Last updated: 2026-11-19
 
 This file is the source of truth for **where the app stands** and **what gets
 built next**. Every completed task updates the tracker below and the final task
@@ -15,12 +15,37 @@ tax and returns, TDS/TCS deduction and challans, payroll runs with payslips,
 and e-invoice/e-way bill plus tax-audit working papers are done. Stage 4 —
 Depth and scale is in progress (1 of 4 complete): inventory depth is complete
 with godowns, batches, stock transfers, orders, BOMs and manufacturing; the
-server workspace now uses a local SQLite database with revision-checked saves,
-and Tally XML account groups, ledgers, stock masters, vouchers with matching
-stock lines and Excel `.xlsx` ledgers/vouchers can be imported. Authentication,
-cloud hosting and APIs remain.** The single-user accounting core is
-complete, but the app is still an advanced local MVP, not production or
-statutory ready.
+server workspace now uses a local SQLite database with normalized company,
+ledger, voucher and line tables plus a row for every remaining company
+collection, server accounts, sign-in sessions, role enforcement, company-level
+access scoping, revision-checked saves and enforced voucher edit leases. Tally XML
+account groups, ledgers, stock masters, vouchers with matching stock lines and
+Excel `.xlsx` ledgers/vouchers can be imported through a hardened parser path.
+Conservative merge is implemented for independent changes. Neon Postgres now
+stores the workspace, revisions, leases, audit rows, profiles, sessions and
+account lockout state, and Neon Managed Auth handles credentials in cloud mode.
+The production API is deployed as a Neon Function behind the
+`books.lengkhawm.online` Cloudflare Worker proxy; external APIs and statutory
+integrations still need work.** The single-user accounting core is complete,
+and LAN or Neon mode adds authenticated multi-user access, but the app is still
+an advanced local MVP, not production or statutory ready.
+
+**Current position:** the accounting core, reporting, GST/TDS/payroll working
+papers, inventory depth, SQLite and Neon Postgres workspaces, LAN authentication,
+Neon Auth sign-in, MFA in SQLite mode, company scoping, conservative merge,
+backup/restore, shared Postgres profiles/sessions and hash-chained server audit
+are implemented and tested. The app is suitable for a trusted single-office LAN
+or a shared Neon-backed team with an operator who understands its limits. The
+Cloudflare Pages site and Neon Function API are live at
+`https://books.lengkhawm.online/` with HTTPS, secure HttpOnly session cookies
+and R2 backup upload verified. It is still not suitable for regulated filing or
+unreviewed internet exposure; the remaining limits and operator duties are in
+`KNOWN_LIMITS.md`.
+
+**Recommended next work:** follow the free-path order in
+[KNOWN_LIMITS.md § Remaining limits and free paths](KNOWN_LIMITS.md#remaining-limits-and-free-paths):
+MFA policy and voucher approvals, app-level encryption, incremental
+master-column promotion, APIs/webhooks and statutory integrations.
 
 Working now:
 
@@ -44,15 +69,29 @@ Working now:
   financial years and data restores, with actor attribution, search, company
   filter, Print/CSV and backup merging.
 - Local owner/accountant/viewer profiles with a header switcher and enforced
-  role permissions. These are access-control profiles, not authentication.
+  role permissions in localhost/browser mode. These are access-control
+  profiles, not authentication.
 - Optional local server workspace in `data/workspace.sqlite`, shared across
   browser profiles on the same machine, with browser storage as the fallback and
-  local mirror. Legacy `workspace.json` is migrated automatically. Saves carry a
-  revision; a stale session gets a conflict banner and must reload instead of
-  overwriting another session. The workspace database is excluded from static
-  serving and git.
+  local mirror. Companies, ledgers, vouchers and voucher lines are relational
+  rows; other company masters stay in a JSON column. Legacy `workspace.json` and
+  the old whole-workspace blob are migrated automatically and removed. Saves
+  carry a revision; a stale session gets a conflict banner and must reload
+  instead of overwriting another session. The workspace database is excluded
+  from static serving and git.
+- LAN mode with password-backed server accounts, scrypt hashes, HttpOnly
+  sessions, owner/accountant/viewer enforcement, company-level access scoping,
+  a hash-chained server save audit, recent sign-in history, active-session
+  revocation, TOTP two-step verification with recovery codes, self-service
+  password changes, per-account/source lockout, optional IPv4 allowlisting and
+  optional TLS. The first owner is seeded from `ZL_OWNER_PASSWORD`; later
+  accounts are managed under Companies → Server accounts. LAN mode never writes
+  books or snapshots to browser storage.
 - Daily automatic snapshots after the first voucher of the day, ten-snapshot
-  retention, and manual/pre-restore labels.
+  retention, and manual/pre-restore labels. The server also writes verified
+  daily SQLite backups, retains seven by default, and lets an owner create,
+  download or restore backups from the server account panel. Restoring keeps a
+  pre-restore snapshot and preserves server accounts.
 - All-or-nothing CSV import for ledgers and balanced multi-line vouchers, plus
   `.xlsx` workbook loading into the same reviewed CSV path. Tally XML imports
   account groups, ledgers, stock groups, stock items with opening stock,
@@ -119,17 +158,15 @@ Working now:
   closing value, top items by value and items with no issues during the year;
   working capital; top expense heads; plus Print/CSV/Excel from the Statistics
   screen.
-- Verification: 170/170 engine tests (12 GST, 12 TDS/TCS, 10 payroll, 5
-  compliance, 18 inventory, 11 Tally import, 5 XLSX); all 26 browser suites,
-  including the godown/batch/transfer/order/manufacturing suite (18 checks), the
-  workspace conflict suite (8 checks) and the expanded import suite, exit
-  successfully with no page errors; single-file build 773.0 kB.
+- Verification: 195/195 engine tests, including server scoping, scoped merge,
+  login history, lockout, single-use MFA, save/event audit chains and
+  backup/restore coverage; all 27 browser suites pass, including the workspace
+  conflict suite and a LAN account/backup smoke test; single-file build 815.8 kB.
 
-Why it is not production-ready: data lives in one browser's local storage, the
-audit trail is app-level rather than tamper-proof, profiles are not
-password-protected, the workspace is one same-machine SQLite database with
-revision conflicts but no authenticated writers, merge or offsite copy, bank
-reconciliation has no live/OFX/QIF feed,
+Why it is not production-ready: browser mode still lives in one browser's local
+storage with unprotected access-control profiles, the app audit trail is not
+tamper-proof, LAN mode is one same-machine SQLite server with voucher leases but
+no field-level history or offsite copy, bank reconciliation has no live/OFX/QIF feed,
 GST returns, e-invoice/e-way drafts and TDS/TCS records are unfiled working
 papers, no IRN/QR or portal acknowledgement is produced, the tax-audit checklist
 is not a Form 3CD or an audit opinion, payroll has no attendance, PF/ESI
@@ -229,12 +266,12 @@ Status: **Done**, **Partial**, **Missing**.
 
 | Feature | Status |
 | --- | --- |
-| Login, users, roles and company-level permissions | Partial — local role profiles and permission enforcement; no login/password or company-level scoping, and no authenticated identity for server writes (Stage 1) |
+| Login, users, roles and company-level permissions | Partial — LAN server accounts, passwords, sessions, TOTP MFA with recovery codes, session management, lockout, optional IP allowlisting, owner/accountant/viewer enforcement, company-level scoping and optional Resend forgot-password links are done; browser-only mode still has no login |
 | Encryption/vault protection | Missing |
 | Immutable audit/edit log | Done (Stage 1, local append-only; not cryptographic) |
-| Backend database instead of browser storage | Partial — local SQLite workspace with atomic revisioned saves and legacy JSON migration; no offsite persistence |
-| Multi-user concurrency and cloud sync | Partial — revision checks reject stale whole-workspace writes and clients can reload a newer copy; no merge, record locks, authentication or cloud sync |
-| Scheduled/offsite backups and retention | Missing |
+| Backend database instead of browser storage | Partial — local SQLite with normalized company/ledger/voucher/line tables, a row table for every remaining company collection, atomic revisioned saves and automatic legacy migration; no offsite persistence |
+| Multi-user concurrency and cloud sync | Partial — LAN auth, revision checks, conservative merge (including scoped accounts), normalized collection rows and enforced voucher edit leases are done; no field-level conflict history or cloud sync |
+| Scheduled/offsite backups and retention | Partial — verified daily SQLite backups, retention, manual backup/download/restore and pre-restore snapshots are done; optional R2 upload and failure email are implemented, but there is no automatic remote restore or client-side backup encryption |
 | Tally XML and Excel master/voucher import | Partial — Tally XML account groups, ledgers, stock groups, stock items with opening stock, balanced vouchers and matching voucher stock lines import; batch names/expiry attach to locally batch-tracked items; Excel `.xlsx` ledgers and vouchers load into the reviewed CSV path; custom Tally groups need a standard parent and units must pre-exist; skipped stock lines do not roll back the voucher; no batch masters, bill allocations, cost centres, GST/TDS detail, voucher numbers, APIs or webhooks |
 | API/webhooks and integrations | Missing |
 | Mobile-first layout | Partial (responsive desktop web) |
@@ -249,7 +286,7 @@ Status: **Done**, **Partial**, **Missing**.
 | Banking/treasury | 30% |
 | Taxation/statutory | 35–40% |
 | Payroll | 25–30% |
-| Security/platform | 45% |
+| Security/platform | 55% |
 | Overall TallyPrime-style breadth | Roughly one-third, mature accounting core |
 
 Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
@@ -283,11 +320,193 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 ### Stage 4 — Depth and scale
 
 - [x] Inventory: godowns, batches, BOM/manufacturing, orders, transfers — 2026-11-18 (batch/expiry, transfers, orders and production; no physical count, wastage, job work or WIP posting)
-- [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, revision-checked writes and conflict/reload flow done 2026-11-18; authentication and cloud hosting pending
+- [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, normalized collection rows, conservative three-way merge (including scoped accounts), revision-checked writes, conflict/reload flow, enforced voucher edit leases, LAN server authentication and company-level scoping done 2026-11-19; Neon Postgres workspace, Postgres profiles/sessions/login state, Postgres JSON backups, Neon Auth login, same-origin auth proxy, Neon Function deployment, Cloudflare Worker API proxy, branch integration test and production smoke test done 2026-11-19; field-level conflict history pending
 - [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; Tally batch masters/opening batches, GST/discount stock-line splits, APIs and webhooks pending
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate and Excel export done 2026-11-18; scheduled email and deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-19 — Phase 2: Neon Function and production API
+
+- Exported `requestHandler` from `serve.mjs` and guarded `server.listen` so the
+  same Node API runs as a Neon Function; `neon-function.mjs` translates Web
+  `Request`/`Response` to the existing handler.
+- Added `neon.ts` function declarations and environment bindings; deployed
+  `zledgercraft` to Neon branch `production` (Node 24, `aws-us-east-2`).
+- Added `cf-api-worker.mjs` and `wrangler.toml` to proxy
+  `books.lengkhawm.online/api/*` to the function with forwarded host/protocol,
+  secure cookies and HSTS.
+- Added `npm run test:neon`: creates a temporary Neon branch, runs the Postgres
+  workspace integration test against it and deletes the branch. Added the
+  production smoke test through the custom domain.
+- Verification: production register/login/session/workspace passed; a branch
+  Postgres save/reload/lease/audit test passed; `npm test` passed 219 with one
+  conditional branch-test skip, and `npm run test:neon` passed against a fresh
+  branch; static build 835.7 kB. Smoke users and test workspace rows were
+  removed, leaving an empty production workspace.
+
+### 2026-11-19 — Optional R2 backups, Resend reset email and Pages output
+
+- Added `server-r2.js` with dependency-free SigV4 signing and R2 S3 uploads of
+  verified SQLite snapshots. Failed uploads keep the local backup and can email
+  `ZL_ALERT_EMAIL` through Resend.
+- Added optional account emails and a hashed, single-use, 30-minute
+  forgot-password flow. `POST /api/auth/forgot` and `/api/auth/reset` return
+  generic responses, rate-limit reset requests and revoke sessions on use.
+- Added login-screen forgot/reset forms and owner controls for account email.
+- `node build.mjs` now emits `dist/index.html` for Cloudflare Pages as well as
+  `dist/ZledgerCraft.html`.
+- Verification: 219/219 engine tests; Chromium and Firefox pass 117 core + 105
+  advanced + 7 render + 9 login/reset + 6 axe screens + workspace merge; build
+  833.0 kB. The full trace is in `docs/CLOUD_INTEGRATION_PLAN.md`.
+
+### 2026-11-19 — Collection rows, leases, paging and import hardening
+
+- Raised the SQLite workspace schema to v2 and migrated v1 workspaces.
+  Companies, ledgers, vouchers and lines stay relational; every remaining
+  top-level company collection now gets one ordered `company_records` row per
+  record, and stock items get a dedicated `stock_items` table for inventory
+  queries.
+- Added hashed, expiring voucher leases with acquire/renew/release endpoints.
+  The UI renews while a voucher is open and releases on save/cancel; a changed
+  voucher leased by another session is rejected with HTTP 423 and a clear
+  conflict screen. Leases are enforced server-side.
+- Split the 5,073-line screen module into coherent screen, report, inventory,
+  tax, payroll, banking and admin modules without changing function names.
+- Paged the Day Book at 100/250/500/all rows with a total count. CSV and Excel
+  exports still use the full filtered period. A 10,000-voucher Day Book render
+  measured a 35.5 ms median after paging (roughly 1.5–2.0 s before).
+- Added a dev-only `tools/browser` Playwright/axe/benchmark workspace, a
+  Chromium/Firefox/WebKit CI matrix and the existing browser suites there.
+- Hardened CSV, Tally XML and XLSX imports: unclosed quotes, text after a
+  quote, duplicate/empty headers, impossible Tally dates, invalid XML entities,
+  ZIP duplicate entries and cells beyond Excel's 16,384-column limit now fail
+  with clear errors. Added real CSV/Tally fixtures and deterministic malformed
+  input/fuzz tests.
+- Verification: 207/207 engine tests; Chromium and Firefox browser suites pass
+  (117 core + 105 advanced + 7 render + 6 axe screens + workspace merge); the
+  10,000-voucher benchmark passes; build 827.0 kB.
+
+### 2026-11-19 — Audit remediation
+
+- Fixed the malformed-`Host` request that crashed the server; added a raw-socket
+  regression test.
+- Added CSP, `nosniff`, frame denial, referrer, permissions and TLS-only HSTS
+  headers to static, JSON, download and error responses.
+- Added a hash-chained server-event audit for account create/update/delete,
+  password reset/change, session revocation, MFA changes, workspace clear,
+  restore and manual backup. Shown to owners beside the save audit.
+- Made TOTP codes single-use by persisting the last accepted counter. Replayed
+  sign-ins are rejected; password changes consume the next time step.
+- Fixed 390px document overflow across all 31 screens: contained report tables,
+  labelled voucher line cards on phones, a two-column voucher type grid, an
+  active-item-scrolling nav and AA contrast for warnings and side notes.
+- Added a skip link, screen-level h1s, per-screen document titles, accessible
+  names, focus-visible styling and mobile touch targets.
+- Fixed the login `CRAFT` wordmark, undefined `--muted`, reduced-motion handling,
+  transient login-map growth, static symlink escapes and reflected 404 text.
+- Split `ui.js` into a router/handler module, `ui-screens.js` for all 81 screen
+  renderers, `ui-constants.js` for navigation/labels and `ui-server.js` for the
+  owner server panel. The screen module reads live state from `ui.js`; the
+  single-file build order is explicit.
+- Verification: 195 engine tests, 27 browser suites, 31-screen responsive sweep
+  at 1440/1024/768/390 and a clean single-file build (815.8 kB).
+
+### 2026-11-19 — Server restore, sessions and MFA
+
+- Added owner-only restore for server backups. Restore verifies the snapshot,
+  writes it atomically, preserves server accounts, and creates a pre-restore
+  SQLite backup first.
+- Added active-session listing/revocation and self-service password changes.
+  Passwords now use a new session after the change and revoke the old sessions.
+- Added persistent lockout for ten failed sign-ins per account/source in a
+  fifteen-minute window, alongside the short per-IP rate limit.
+- Added TOTP two-step verification with a one-time recovery code. Owners enable
+  it per account and receive the secret/URI once; recovery disables MFA so the
+  account can re-enroll.
+- Added an optional IPv4/CIDR allowlist (`ZL_ALLOWED_IPS`), enforced for every
+  HTTP request.
+- Hash-chained the server save audit and added chain verification to the owner
+  audit view. This is tamper-evident, not immutable against a database
+  administrator.
+- All 195 engine tests and 27 browser suites pass; build 815.8 kB.
+
+### 2026-11-19 — Company scopes, scoped merge and server operations
+
+- Added nullable company scopes to server accounts. Owners choose all, selected
+  or no companies; the server filters workspace reads, audit and company lists,
+  rejects forged hidden-company writes, and preserves hidden companies on save.
+  Existing accounts and accounts created without a scope retain all access.
+- Enabled conservative three-way merge for company-scoped stale saves. The
+  merge runs only over visible companies and current hidden companies are
+  preserved; same-field conflicts still return the normal reload response.
+- Added verified daily SQLite backups with retention and owner manual backups,
+  plus owner-only backup listing, download and restore. Restore creates a
+  pre-restore snapshot, replaces books atomically and preserves server
+  accounts. These copies stay on the server; an owner can download one for
+  separate storage.
+- Added server-side sign-in history, per-account session sign-out and an
+  owner-only view of the server save audit. Login failures are rate-limited and
+  recorded without passwords.
+- Added engine tests for account scopes, cross-company reads/writes, scoped
+  merge, login events, session revocation and backup creation. All 190 engine
+  tests, 26 browser suites and a LAN admin smoke test pass; build 798.5 kB.
+
+### 2026-11-19 — Conservative workspace merge
+
+- Added `server-merge.js`: a conservative three-way merge for stale workspace
+  saves. Arrays with stable ids merge by id; objects merge field-by-field;
+  voucher lines and other unkeyed arrays are treated as atomic, so overlapping
+  edits conflict instead of being guessed.
+- Added `workspace_revisions` history retention for the last 20 revisions. The
+  server now merges a stale save against the retained base revision, returns the
+  merged state to the client, and keeps the conflict/reload path when history
+  is unavailable or changes overlap.
+- Concurrent additions of the same voucher type and number are renumbered in
+  the merged workspace, and the client reports how many numbers changed.
+- Fixed the workspace snapshot path so `exportedAt` no longer creates false
+  merge conflicts.
+- Added merge unit tests for independent additions, same-record field merges,
+  deletion conflicts, atomic voucher lines, audit merging and renumbering; the
+  HTTP test now covers two stale sessions. All 187 engine tests and 26 browser
+  suites pass; build 786.1 kB and the offline dist check pass.
+
+### 2026-11-19 — Normalized SQLite storage
+
+- Added `server-workspace.js`: companies, ledgers, vouchers and voucher lines
+  are canonical relational rows; company subsidiary masters and top-level
+  profile/audit records retain their JSON shape so the existing accounting
+  engine continues to work unchanged.
+- Added a one-time migration from the old whole-workspace blob and legacy
+  `workspace.json`; the old blob row is removed after a successful migration so
+  stale books cannot be resurrected. Clearing the workspace removes both the
+  normalized rows and the legacy row.
+- Workspace writes remain revision-checked and transactional, with the server
+  save-audit row written in the same transaction as the normalized replacement.
+  Non-owner role validation still runs against the previous reconstructed
+  workspace.
+- Added storage round-trip, migration, conflict, rollback and legacy-removal
+  tests. All 179 engine tests and 26 browser suites pass.
+
+### 2026-11-19 — LAN multi-user access
+
+- Added `server-auth.js`: scrypt password hashes, SQLite `auth_users` and
+  `auth_sessions` tables, 7-day HttpOnly sessions, owner/accountant/viewer
+  account management, and guards against deleting the last owner or the
+  signed-in account.
+- LAN mode now binds to a non-loopback `HOST`, requires a server account and
+  seeds the first owner from `ZL_OWNER_PASSWORD`. `ZL_AUTH=1` enables the same
+  login flow on localhost; the existing localhost workflow remains available
+  without a login.
+- Workspace reads and writes require a session in LAN mode. Viewers are
+  read-only; accountants cannot change users, companies, financial years or
+  audit history; owner-only workspace clears remain enforced server-side.
+- Added a login screen, session-expiry return to login, server account panel,
+  owner/accountant/viewer labels, disabled browser book mirroring and snapshots
+  in LAN mode, and optional `TLS_CERT_PATH`/`TLS_KEY_PATH` support.
+- Added HTTP API and auth-store tests, including static data-file denial and
+  server-side role checks. All 175 engine tests and 26 browser suites pass;
+  single-file build 785.3 kB and the offline dist check passes.
 
 ### 2026-11-18 — Local monthly MIS
 

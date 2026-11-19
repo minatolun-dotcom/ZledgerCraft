@@ -179,4 +179,59 @@ test('XLSX writer builds a readable workbook with numbers and escaped text', asy
 
 test('XLSX rejects files that are not zipped workbooks', async () => {
   await assert.rejects(parseXlsxWorkbook(Buffer.from('not an xlsx file')), /not a valid \.xlsx/);
+  await assert.rejects(parseXlsxWorkbook(workbookFixture().subarray(0, 20)), /not a valid \.xlsx/);
+});
+
+function minimalWorkbook(reference) {
+  return zip([
+    { name: '[Content_Types].xml', data: '<Types/>' },
+    {
+      name: 'xl/workbook.xml',
+      data: '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>',
+    },
+    {
+      name: 'xl/_rels/workbook.xml.rels',
+      data: '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
+    },
+    {
+      name: 'xl/worksheets/sheet1.xml',
+      data: `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="${reference}"><v>1</v></c></row></sheetData></worksheet>`,
+    },
+  ]);
+}
+
+test('XLSX rejects arbitrary bytes with a user-facing Error', async () => {
+  let seed = 0x1f2e3d4c;
+  const randomByte = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed & 255;
+  };
+  for (let index = 0; index < 80; index += 1) {
+    const bytes = new Uint8Array(index * 3 + 1);
+    for (let offset = 0; offset < bytes.length; offset += 1) bytes[offset] = randomByte();
+    await assert.rejects(parseXlsxWorkbook(bytes), (error) => error instanceof Error && error.message.length > 0);
+  }
+  const valid = workbookFixture();
+  for (const length of [22, 30, 50, 100, valid.length - 1]) {
+    await assert.rejects(
+      parseXlsxWorkbook(valid.subarray(0, Math.max(0, length))),
+      (error) => error instanceof Error && error.message.length > 0,
+    );
+  }
+});
+
+test('XLSX rejects duplicate ZIP entries and cells beyond Excel column XFD', async () => {
+  await assert.rejects(
+    parseXlsxWorkbook(zip([
+      { name: 'xl/workbook.xml', data: '<workbook/>' },
+      { name: 'xl/workbook.xml', data: '<workbook/>' },
+    ])),
+    /duplicate ZIP entry/,
+  );
+  await assert.rejects(
+    parseXlsxWorkbook(minimalWorkbook('XFE1')),
+    /16,384-column limit/,
+  );
+  const lastColumn = await parseXlsxWorkbook(minimalWorkbook('XFD1'));
+  assert.equal(lastColumn.sheets[0].rows[0].length, 16_384);
 });

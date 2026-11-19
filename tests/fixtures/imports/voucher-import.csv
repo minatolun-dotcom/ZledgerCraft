@@ -1,0 +1,3 @@
+Date,Type,No,Ledger,Side,Amount,Narration
+2026-04-10,Journal,9001,"Rao, Sons",Dr,1000,"Opening, ""quoted"""
+2026-04-10,Journal,9001,Cash,Cr,1000,

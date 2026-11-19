@@ -213,6 +213,19 @@ Status: **complete 2026-11-19**
   hash-chained server audit. No write, webhook or multi-tenant endpoint is
   exposed.
 
+### Phase 5 — Integration hardening
+
+Status: **5A complete 2026-11-19**
+
+- [x] **5A. Scoped tokens and shared API limits.** Owners can create an API
+  token for all companies or selected companies; the server filters every
+  `/api/v1` response and returns `404` for a company outside the token's scope.
+  Rate-limit windows are stored in SQLite/Postgres instead of process memory,
+  so multiple function instances share one 120-requests/minute budget per
+  token. `ZL_API_RATE_LIMIT` can lower or raise the per-minute limit up to
+  10000 for a deployment. The OpenAPI description and owner panel show the
+  company restriction.
+
 ## Environment variables
 
 Phase 1 uses the following optional variables. Missing values disable the
@@ -324,6 +337,7 @@ feature without breaking local development or the single-file build.
 | Backup history | pass | Server API and Neon branch tests create a backup and verify the stored history row, source, name and status |
 | Per-account MFA policy | pass (SQLite/LAN) | Auth unit and server API tests cover requiring enrolled MFA, blocking disable, owner UI state and audit; Neon returns 501 |
 | Voucher approvals | pass | Store tests prove pending vouchers do not post or affect reports; server API test rejects accountant direct posting while approvals are on |
+| Scoped API tokens and shared limits | pass | API integration test filters listed companies and rejects out-of-scope ids; SQLite/PG limiter tables enforce the per-token window, and the Neon branch test shares a limit across two server instances |
 
 ## Progress log
 
@@ -518,6 +532,13 @@ and operate the current server with R2 and Resend enabled.
 - Remaining 4B limits: pending submissions cannot be edited in place, there is
   no multi-level approval matrix, and concurrent pending-queue merges rely on
   the normal workspace conflict flow rather than a dedicated merge.
+- Added Phase 5A integration hardening: API tokens can be restricted to
+  selected companies, with every `/api/v1` list and company route filtered and
+  out-of-scope ids returning `404`. API rate-limit windows moved into
+  `auth_api_rate_limits`/`zl_auth_api_rate_limits`, so SQLite/LAN and all
+  Postgres function instances share one per-token budget. `ZL_API_RATE_LIMIT`
+  controls the per-minute limit (default 120), and the owner token form shows
+  company access.
 - Added Phase 4C read-only API: owner-created bearer tokens are stored hashed
   with a `books:read` scope, versioned `/api/v1` routes serve companies, trial
   balance, parties and posted vouchers, and `/api/v1/openapi.json` publishes the

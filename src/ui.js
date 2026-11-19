@@ -2268,6 +2268,44 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'api-token-form') {
+    if (!can('user.manage')) {
+      requirePermission('user.manage');
+      return;
+    }
+    const data = new FormData(form);
+    const mode = data.get('scopeMode');
+    const companyIds = mode === 'selected' ? data.getAll('companyIds') : null;
+    if (mode === 'selected' && !companyIds.length) {
+      showFormError('Choose at least one company, or allow all companies.', 'api-token-error');
+      return;
+    }
+    fetch('/api/auth/api-tokens', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: data.get('name'),
+        scopes: ['books:read'],
+        companyIds,
+      }),
+    })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not create the API token.');
+        await refreshApiTokens();
+        const access = payload.apiToken.companyIds === null
+          ? 'all companies'
+          : `${payload.apiToken.companyIds.length} selected company(ies)`;
+        window.alert(`API token created for "${payload.apiToken.name}" (${access}).\n\n${payload.token}\n\nCopy it now. It is stored as a hash and cannot be shown again. Scope: books:read. It can read the books but cannot post or change anything.`);
+        render();
+      })
+      .catch((error) => {
+        setFlash(error.message, 'warn');
+        render();
+      });
+    return;
+  }
+
   if (form.id === 'server-user-form') {
     if (!can('user.manage')) {
       requirePermission('user.manage');
@@ -4231,31 +4269,6 @@ async function handleClick(event) {
           const payload = await response.json();
           if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not create a report preview.');
           window.open(payload.url, '_blank', 'noopener');
-        })
-        .catch((error) => {
-          setFlash(error.message, 'warn');
-          render();
-        });
-      break;
-    }
-    case 'create-api-token': {
-      if (!can('user.manage')) {
-        requirePermission('user.manage');
-        break;
-      }
-      const name = window.prompt('Name this API token (for example "Reports integration"):');
-      if (name === null) break;
-      fetch('/api/auth/api-tokens', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, scopes: ['books:read'] }),
-      })
-        .then(async (response) => {
-          const payload = await response.json();
-          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not create the API token.');
-          await refreshApiTokens();
-          window.alert(`API token created for "${payload.apiToken.name}".\n\n${payload.token}\n\nCopy it now. It is stored as a hash and cannot be shown again. Scope: books:read. It can read the books but cannot post or change anything.`);
-          render();
         })
         .catch((error) => {
           setFlash(error.message, 'warn');

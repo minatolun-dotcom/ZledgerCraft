@@ -116,6 +116,17 @@ test('read-only API tokens authenticate, scope to books and revoke', { timeout: 
             },
           ],
         },
+        {
+          id: 'co2',
+          name: 'Other Books',
+          fyStart: '2026-04-01',
+          fyEnd: '2027-03-31',
+          yearId: 'year2',
+          years: [{ id: 'year2', start: '2026-04-01', end: '2027-03-31', closed: false }],
+          groups: [{ id: 'cash2', name: 'Cash & Bank', parentId: null }],
+          ledgers: [{ id: 'cash2', name: 'Cash', groupId: 'cash2', opening: 0, openingType: 'Dr' }],
+          vouchers: [],
+        },
       ],
       users: [],
       audit: [],
@@ -174,6 +185,7 @@ test('read-only API tokens authenticate, scope to books and revoke', { timeout: 
     assert.equal(companies.headers.get('x-ratelimit-limit'), '120');
     assert.match(companies.headers.get('x-ratelimit-remaining'), /^\d+$/);
     const companiesBody = await companies.json();
+    assert.equal(companiesBody.data.companies.length, 2);
     assert.equal(companiesBody.data.companies[0].name, 'Read Only Books');
     assert.equal(companiesBody.data.companies[0].counts.vouchers, 1);
 
@@ -215,6 +227,38 @@ test('read-only API tokens authenticate, scope to books and revoke', { timeout: 
         })
       ).status,
       404,
+    );
+
+    const unknownScope = await owner.request('/api/auth/api-tokens', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Bad scope', companyIds: ['missing'] }),
+    });
+    assert.equal(unknownScope.status, 400);
+    const emptyScope = await owner.request('/api/auth/api-tokens', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Empty scope', companyIds: [] }),
+    });
+    assert.equal(emptyScope.status, 400);
+    const scopedToken = await owner.request('/api/auth/api-tokens', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Scoped job', companyIds: ['co1'] }),
+    });
+    assert.equal(scopedToken.status, 200, JSON.stringify(scopedToken.body));
+    assert.deepEqual(scopedToken.body.apiToken.companyIds, ['co1']);
+    const scopedHeaders = { authorization: `Bearer ${scopedToken.body.token}` };
+    const scopedCompanies = await fetch(`${base}/api/v1/companies`, { headers: scopedHeaders });
+    assert.equal(scopedCompanies.status, 200);
+    assert.deepEqual(
+      (await scopedCompanies.json()).data.companies.map((company) => company.id),
+      ['co1'],
+    );
+    assert.equal((await fetch(`${base}/api/v1/companies/co2`, { headers: scopedHeaders })).status, 404);
+    assert.equal(
+      (await fetch(`${base}/api/v1/companies/co1`, { headers: scopedHeaders })).status,
+      200,
     );
 
     const rateToken = await owner.request('/api/auth/api-tokens', {

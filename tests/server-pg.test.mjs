@@ -65,6 +65,7 @@ test(
       ZL_OWNER_PASSWORD: 'correct horse battery',
       ZL_DATA_DIR: dataDir,
       ZL_DISABLE_ENV_FILE: '1',
+      ZL_API_RATE_LIMIT: '3',
       DATABASE_URL: databaseUrl,
       DATABASE_URL_UNPOOLED: '',
       NEON_AUTH_BASE_URL: '',
@@ -192,6 +193,17 @@ test(
       assert.ok(audit.body.chain.checked > 0);
       assert.equal(audit.body.eventChain.ok, true);
 
+      const sharedRateToken = await owner.request('/api/auth/api-tokens', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Shared rate token' }),
+      });
+      assert.equal(sharedRateToken.status, 200, JSON.stringify(sharedRateToken.body));
+      const sharedRateHeaders = { authorization: `Bearer ${sharedRateToken.body.token}` };
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        assert.equal((await owner.request('/api/v1/companies', { headers: sharedRateHeaders })).status, 200);
+      }
+
       // Rate-limit failures recorded by a second instance must block the first
       // instance too, because both share the Postgres limiter table.
       const secondDataDir = mkdtempSync(join(tmpdir(), 'zledgercraft-pg-peer-'));
@@ -203,6 +215,10 @@ test(
       try {
         const peerBase = await waitForServer(peer);
         const peerClient = client(peerBase);
+        assert.equal(
+          (await peerClient.request('/api/v1/companies', { headers: sharedRateHeaders })).status,
+          429,
+        );
         for (let attempt = 1; attempt <= 8; attempt += 1) {
           const failed = await peerClient.request('/api/auth/login', {
             method: 'POST',

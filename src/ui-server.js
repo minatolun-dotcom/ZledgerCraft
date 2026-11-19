@@ -19,6 +19,7 @@ export function serverUsersPanel({
   serverCompanyChecks,
   authSessions,
   apiTokens,
+  companies,
   serverAuditRows,
   serverAuditChain,
   SERVER_EVENT_LABELS,
@@ -103,28 +104,42 @@ export function serverUsersPanel({
         : '<tr><td colspan="5" class="muted">No active sessions.</td></tr>'}</tbody>
     </table></div>
     <h3 class="section-title">Read-only API tokens</h3>
-    <p class="muted small">API tokens let external apps read companies, trial balances, parties and posted vouchers through <code>/api/v1</code>. Tokens are stored hashed and shown once, carry only the <code>books:read</code> scope, and are limited to 120 requests per minute per token. They cannot post, edit or delete anything. The <a href="/api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI 3 contract</a> describes every endpoint.</p>
-    <div class="form-actions">
-      <button class="btn primary small" type="button" data-action="create-api-token">Create API token</button>
-      <button class="btn small" type="button" data-action="refresh-api-tokens">Refresh tokens</button>
-    </div>
+    <p class="muted small">API tokens let external apps read companies, trial balances, parties and posted vouchers through <code>/api/v1</code>. Tokens are stored hashed and shown once, carry only the <code>books:read</code> scope, and are limited to 120 requests per minute per token. Each token can be restricted to selected companies. Tokens cannot post, edit or delete anything. The <a href="/api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI 3 contract</a> describes every endpoint.</p>
+    <form id="api-token-form" class="form-grid" novalidate>
+      <label class="field"><span>Token name</span><input name="name" maxlength="80" placeholder="e.g. Reporting integration" required></label>
+      <label class="field"><span>Company access</span><select name="scopeMode"><option value="all">All companies (including future)</option><option value="selected">Selected companies</option></select></label>
+      <div class="field scope-field"><span>Companies for selected access</span><div class="check-grid">${companies.length
+        ? companies.map((company) => `<label class="check-item"><input type="checkbox" name="companyIds" value="${esc(company.id)}"> <span>${esc(company.name)}</span></label>`).join('')
+        : '<span class="muted small">No companies yet.</span>'}</div><small class="muted">Ignored when All companies is selected.</small></div>
+      <div class="field form-actions">
+        <button class="btn primary" type="submit">Create API token</button>
+        <button class="btn" type="button" data-action="refresh-api-tokens">Refresh tokens</button>
+      </div>
+      <p id="api-token-error" class="form-error" role="alert"></p>
+    </form>
     <div class="table-scroll" tabindex="0"><table class="data-table compact">
-      <thead><tr><th>Name</th><th>Prefix</th><th>Scope</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Prefix</th><th>Access</th><th>Scope</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
       <tbody>${apiTokens?.length
         ? apiTokens
-            .map(
-              (apiToken) => `<tr>
+            .map((apiToken) => {
+              const access = apiToken.companyIds === null
+                ? 'All companies'
+                : apiToken.companyIds
+                    .map((id) => companies.find((company) => company.id === id)?.name || id)
+                    .join(', ');
+              return `<tr>
                 <td>${esc(apiToken.name)}</td>
                 <td><code>${esc(apiToken.prefix)}…</code></td>
+                <td class="muted small">${esc(access || 'No companies')}</td>
                 <td class="muted small">${esc((apiToken.scopes ?? []).join(', '))}</td>
                 <td>${esc(new Date(apiToken.createdAt).toLocaleString('en-IN'))}</td>
                 <td>${apiToken.lastUsedAt ? esc(new Date(apiToken.lastUsedAt).toLocaleString('en-IN')) : '<span class="muted">Never</span>'}</td>
                 <td>${apiToken.revokedAt ? '<span class="badge danger">Revoked</span>' : '<span class="badge">Active</span>'}</td>
                 <td>${apiToken.revokedAt ? '' : `<button class="btn small danger" type="button" data-action="revoke-api-token" data-id="${esc(apiToken.id)}">Revoke</button>`}</td>
-              </tr>`,
-            )
+              </tr>`;
+            })
             .join('')
-        : '<tr><td colspan="7" class="muted">No API tokens yet.</td></tr>'}</tbody>
+        : '<tr><td colspan="8" class="muted">No API tokens yet.</td></tr>'}</tbody>
     </table></div>
     <h3 class="section-title">Server save audit</h3>
     <p class="muted small">Every accepted workspace save is recorded in ${postgres ? 'Postgres' : 'SQLite'} with the signed-in account, role, revision and payload size. The rows are hash-chained; verification detects edits made outside the server. This is separate from the in-app audit trail and is only shown to owners.</p>

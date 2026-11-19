@@ -95,8 +95,10 @@ const r2Config = r2Configuration(process.env);
 const emailConfig = emailConfiguration(process.env);
 const alertEmail = String(process.env.ZL_ALERT_EMAIL || '').trim();
 const LOGIN_IP_LIMIT = { maxFailures: 8, windowMs: 60_000, lockMs: 60_000 };
-const API_RATE_LIMIT = { max: 120, windowMs: 60_000 };
-const apiRateWindows = new Map();
+const API_RATE_LIMIT = {
+  max: Math.min(10_000, Math.max(1, Number(process.env.ZL_API_RATE_LIMIT) || 120)),
+  windowMs: 60_000,
+};
 const FORGOT_IP_LIMIT = { maxFailures: 5, windowMs: 15 * 60_000, lockMs: 15 * 60_000 };
 const signingSecret = reportSecret(process.env);
 const reportTtl = reportTtlMs(process.env);
@@ -2094,9 +2096,27 @@ async function handleAuthApi(request, response, url) {
     }
     try {
       const body = JSON.parse(await readBody(request));
+      let companyIds = null;
+      if (body?.companyIds !== undefined && body?.companyIds !== null) {
+        if (!Array.isArray(body.companyIds)) {
+          json(response, 400, { ok: false, error: 'Company access must be a list of company ids.' });
+          return;
+        }
+        if (!body.companyIds.length) {
+          json(response, 400, { ok: false, error: 'Choose at least one company or allow all companies.' });
+          return;
+        }
+        const scopeError = await companyScopeError(body.companyIds);
+        if (scopeError) {
+          json(response, 400, { ok: false, error: scopeError });
+          return;
+        }
+        companyIds = body.companyIds;
+      }
       const result = await auth.createApiToken({
         name: body?.name,
         scopes: body?.scopes ?? ['books:read'],
+        companyIds,
       });
       if (result.ok) {
         appendServerEvent(actor, 'apiToken.create', result.apiToken.name, result.apiToken.prefix);
@@ -2642,30 +2662,18 @@ function apiDate(value, fallback) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? String(value) : null;
 }
 
-function apiRateLimit(response, tokenId) {
-  const now = Date.now();
-  let entry = apiRateWindows.get(tokenId);
-  if (!entry || now - entry.startedAt >= API_RATE_LIMIT.windowMs) {
-    entry = { count: 0, startedAt: now };
-    apiRateWindows.set(tokenId, entry);
-  }
-  entry.count += 1;
-  const reset = Math.ceil((entry.startedAt + API_RATE_LIMIT.windowMs - now) / 1000);
-  const remaining = Math.max(0, API_RATE_LIMIT.max - entry.count);
-  response.setHeader('x-ratelimit-limit', String(API_RATE_LIMIT.max));
-  response.setHeader('x-ratelimit-remaining', String(remaining));
-  response.setHeader('x-ratelimit-reset', String(Math.max(1, reset)));
-  if (apiRateWindows.size > 1000) {
-    for (const [key, window] of apiRateWindows) {
-      if (now - window.startedAt >= API_RATE_LIMIT.windowMs) apiRateWindows.delete(key);
-    }
-  }
-  if (entry.count > API_RATE_LIMIT.max) {
+async function apiRateLimit(response, tokenId) {
+  const limit = await auth.consumeApiRate(tokenId, API_RATE_LIMIT);
+  const reset = Math.max(1, Math.ceil((limit.resetAt - Date.now()) / 1000));
+  response.setHeader('x-ratelimit-limit', String(limit.limit));
+  response.setHeader('x-ratelimit-remaining', String(limit.remaining));
+  response.setHeader('x-ratelimit-reset', String(reset));
+  if (!limit.allowed) {
     json(
       response,
       429,
       { ok: false, error: 'API rate limit exceeded. Retry after the window resets.' },
-      { 'retry-after': String(Math.max(1, reset)) },
+      { 'retry-after': String(reset) },
     );
     return false;
   }
@@ -2692,13 +2700,17 @@ function openApiDocument(request) {
       title: 'ZledgerCraft read-only API',
       version: '1.0.0',
       description:
-        'Read-only access to posted ZledgerCraft books. Authenticate with an owner-created API token: Authorization: Bearer <token>. Tokens are limited to 120 requests per minute per token.',
+        'Read-only access to posted ZledgerCraft books. Authenticate with an owner-created API token: Authorization: Bearer <token>. Tokens can be restricted to selected companies and are limited to 120 requests per minute per token; the limit is shared by all server instances.',
     },
     servers: [{ url: `${base}/api/v1` }],
     security: [{ bearerAuth: [] }],
     components: {
       securitySchemes: {
-        bearerAuth: { type: 'http', scheme: 'bearer', description: 'Owner-created token with the books:read scope.' },
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          description: 'Owner-created token with the books:read scope and optional company restriction.',
+        },
       },
       schemas: {
         Error: {
@@ -2910,7 +2922,7 @@ async function handlePublicApi(request, response, url, pathname) {
     json(response, 403, { ok: false, error: 'This token does not have the books:read scope.' });
     return;
   }
-  if (!apiRateLimit(response, verified.apiToken.id)) return;
+  if (!(await apiRateLimit(response, verified.apiToken.id))) return;
 
   const saved = workspaceStore ? await workspaceStore.read() : { state: null };
   const state = saved.state;
@@ -2918,7 +2930,13 @@ async function handlePublicApi(request, response, url, pathname) {
     json(response, 404, { ok: false, error: 'No workspace has been created yet.' });
     return;
   }
-  const companies = state.companies ?? [];
+  const tokenCompanyIds = verified.apiToken.companyIds;
+  const allowedCompanies = Array.isArray(tokenCompanyIds)
+    ? new Set(tokenCompanyIds)
+    : null;
+  const companies = (state.companies ?? []).filter(
+    (company) => !allowedCompanies || allowedCompanies.has(company.id),
+  );
   const companyById = (id) => companies.find((company) => company.id === id) || null;
   const companyPayload = (company) => ({
     id: company.id,

@@ -322,10 +322,19 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 - [x] Inventory: godowns, batches, BOM/manufacturing, orders, transfers — 2026-11-18 (batch/expiry, transfers, orders and production; no physical count, wastage, job work or WIP posting)
 - [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, normalized collection rows, conservative three-way merge (including scoped accounts), revision-checked writes, conflict/reload flow, enforced voucher edit leases, LAN server authentication and company-level scoping done 2026-11-19; Neon Postgres workspace, Postgres profiles/sessions/login state, shared Postgres login/reset rate limits, Postgres JSON backups with R2 listing/restore, Neon Auth login, same-origin auth proxy, Neon Function deployment, Cloudflare Worker API proxy, branch integration test and production smoke test done 2026-11-19; field-level conflict history pending
-- [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; read-only token API and OpenAPI contract added 2026-11-19; Tally batch masters/opening batches, GST/discount stock-line splits, write APIs and webhooks pending
+- [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; read-only token API with company-scoped tokens, shared rate limits and OpenAPI contract added 2026-11-19; Tally batch masters/opening batches, GST/discount stock-line splits, write APIs and webhooks pending
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-19 — Phase 5A: scoped API tokens and shared limits
+
+- API tokens can be restricted to selected companies; `/api/v1` responses are
+  filtered and out-of-scope company ids return 404.
+- API rate-limit windows are stored in SQLite/Postgres, so multiple function
+  instances share one per-token budget. `ZL_API_RATE_LIMIT` sets the limit.
+- The owner token form now chooses all or selected companies, and the OpenAPI
+  contract describes company restrictions.
 
 ### 2026-11-19 — Phase 4C: read-only API and OpenAPI
 

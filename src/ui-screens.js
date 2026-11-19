@@ -466,6 +466,7 @@ export function usersPanel() {
       serverCompanyChecks,
       authSessions,
       apiTokens: authApiTokens,
+      companies: state.companies ?? [],
       serverAuditRows,
       serverAuditChain,
       SERVER_EVENT_LABELS,

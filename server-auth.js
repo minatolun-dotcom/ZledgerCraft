@@ -176,6 +176,7 @@ export function publicApiToken(row) {
     name: row.name,
     prefix: row.prefix,
     scopes: parseScopes(row.scopes),
+    companyIds: parseCompanyIds(row.company_ids),
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at || null,
     revokedAt: row.revoked_at || null,
@@ -266,11 +267,19 @@ export class AuthStore {
         token_hash TEXT NOT NULL UNIQUE,
         prefix TEXT NOT NULL,
         scopes TEXT NOT NULL DEFAULT 'books:read',
+        company_ids TEXT,
         created_at TEXT NOT NULL,
         last_used_at TEXT,
         revoked_at TEXT
       );
       CREATE INDEX IF NOT EXISTS auth_api_tokens_created ON auth_api_tokens(created_at);
+      CREATE TABLE IF NOT EXISTS auth_api_rate_limits (
+        token_id TEXT NOT NULL,
+        window_start TEXT NOT NULL,
+        count INTEGER NOT NULL,
+        PRIMARY KEY (token_id, window_start)
+      );
+      CREATE INDEX IF NOT EXISTS auth_api_rate_limits_window ON auth_api_rate_limits(window_start);
     `);
     const columns = this.db.prepare('PRAGMA table_info(auth_users)').all();
     if (!columns.some((column) => column.name === 'email')) {
@@ -299,6 +308,10 @@ export class AuthStore {
     }
     if (!columns.some((column) => column.name === 'require_mfa')) {
       this.db.exec('ALTER TABLE auth_users ADD COLUMN require_mfa INTEGER NOT NULL DEFAULT 0');
+    }
+    const apiTokenColumns = this.db.prepare('PRAGMA table_info(auth_api_tokens)').all();
+    if (!apiTokenColumns.some((column) => column.name === 'company_ids')) {
+      this.db.exec('ALTER TABLE auth_api_tokens ADD COLUMN company_ids TEXT');
     }
     const sessionColumns = this.db.prepare('PRAGMA table_info(auth_sessions)').all();
     if (!sessionColumns.some((column) => column.name === 'id')) {
@@ -346,14 +359,21 @@ export class AuthStore {
         'UPDATE auth_users SET mfa_last_counter = ?, updated_at = ? WHERE id = ? AND mfa_last_counter < ?',
       ),
       insertApiToken: this.db.prepare(`
-        INSERT INTO auth_api_tokens (id, name, token_hash, prefix, scopes, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO auth_api_tokens (id, name, token_hash, prefix, scopes, company_ids, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `),
       listApiTokens: this.db.prepare('SELECT * FROM auth_api_tokens ORDER BY created_at DESC'),
       apiTokenById: this.db.prepare('SELECT * FROM auth_api_tokens WHERE id = ?'),
       apiTokenByHash: this.db.prepare('SELECT * FROM auth_api_tokens WHERE token_hash = ? AND revoked_at IS NULL'),
       touchApiToken: this.db.prepare('UPDATE auth_api_tokens SET last_used_at = ? WHERE id = ?'),
       revokeApiToken: this.db.prepare('UPDATE auth_api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL'),
+      bumpApiRate: this.db.prepare(`
+        INSERT INTO auth_api_rate_limits (token_id, window_start, count)
+        VALUES (?, ?, 1)
+        ON CONFLICT(token_id, window_start) DO UPDATE SET count = count + 1
+      `),
+      readApiRate: this.db.prepare('SELECT count FROM auth_api_rate_limits WHERE token_id = ? AND window_start = ?'),
+      pruneApiRates: this.db.prepare('DELETE FROM auth_api_rate_limits WHERE window_start < ?'),
       deleteUser: this.db.prepare('DELETE FROM auth_users WHERE id = ?'),
       insertSession: this.db.prepare(`
         INSERT INTO auth_sessions (token_hash, id, user_id, created_at, expires_at, user_agent)
@@ -730,7 +750,7 @@ export class AuthStore {
     return this.stmts.list.all().map(publicUser);
   }
 
-  createApiToken({ name = '', scopes = ['books:read'] } = {}) {
+  createApiToken({ name = '', scopes = ['books:read'], companyIds = null } = {}) {
     const cleanName = String(name ?? '').trim();
     if (!cleanName || cleanName.length > 80) {
       return { ok: false, error: 'Token name is required and must be 80 characters or fewer.' };
@@ -739,11 +759,22 @@ export class AuthStore {
     if (cleanScopes.length !== 1 || cleanScopes[0] !== 'books:read') {
       return { ok: false, error: 'The read-only API currently supports only the books:read scope.' };
     }
+    const scope = normalizeCompanyIds(companyIds);
+    if (scope.error) return { ok: false, error: scope.error };
     const id = `api_${randomBytes(8).toString('hex')}`;
     const secret = randomBytes(32).toString('base64url');
     const token = `zlp_${id}_${secret}`;
     const at = nowIso();
-    this.stmts.insertApiToken.run(id, cleanName, sessionHash(token), `zlp_${id}`, JSON.stringify(cleanScopes), at);
+    const storedScope = scope.ids === null ? null : JSON.stringify(scope.ids);
+    this.stmts.insertApiToken.run(
+      id,
+      cleanName,
+      sessionHash(token),
+      `zlp_${id}`,
+      JSON.stringify(cleanScopes),
+      storedScope,
+      at,
+    );
     return {
       ok: true,
       token,
@@ -752,10 +783,26 @@ export class AuthStore {
         name: cleanName,
         prefix: `zlp_${id}`,
         scopes: cleanScopes,
+        companyIds: scope.ids,
         createdAt: at,
         lastUsedAt: null,
         revokedAt: null,
       },
+    };
+  }
+
+  consumeApiRate(tokenId, { max = 120, windowMs = 60_000 } = {}) {
+    const now = Date.now();
+    const windowStart = new Date(Math.floor(now / windowMs) * windowMs).toISOString();
+    const resetAt = Math.floor(now / windowMs) * windowMs + windowMs;
+    this.stmts.bumpApiRate.run(String(tokenId), windowStart);
+    const count = Number(this.stmts.readApiRate.get(String(tokenId), windowStart)?.count ?? 1);
+    this.stmts.pruneApiRates.run(new Date(resetAt - windowMs * 2).toISOString());
+    return {
+      allowed: count <= max,
+      limit: max,
+      remaining: Math.max(0, max - count),
+      resetAt,
     };
   }
 

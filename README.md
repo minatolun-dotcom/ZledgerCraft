@@ -248,8 +248,10 @@ ZL_SCHEDULER_SECRET=...        # optional manual scheduler credential (Bearer to
 
 Owners can create named API tokens under **Companies → Server accounts →
 Read-only API tokens**. A token is shown once and stored as a SHA-256 hash in
-SQLite or Postgres; it carries only the `books:read` scope, is limited to 120
-requests per minute per token, and can be revoked immediately. Send it as
+SQLite or Postgres; it carries only the `books:read` scope, can be restricted to
+selected companies, is limited to 120 requests per minute per token, and can be
+revoked immediately. Limit counters are stored in SQLite/Postgres, so every
+server instance sees the same budget. Send a token as
 `Authorization: Bearer <token>` to the versioned endpoints:
 
 - `GET /api/v1/companies`
@@ -261,7 +263,8 @@ requests per minute per token, and can be revoked immediately. Send it as
 The OpenAPI 3.0.3 contract is public at `GET /api/v1/openapi.json`. The API is
 read-only: it cannot post vouchers, edit masters or change settings, and there
 are no webhooks yet. Token create/revoke events appear in the hash-chained
-server audit.
+server audit. `ZL_API_RATE_LIMIT` overrides the per-minute token limit (default
+120, maximum 10000).
 
 **Resend email**
 

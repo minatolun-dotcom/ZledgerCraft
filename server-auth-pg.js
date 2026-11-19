@@ -119,12 +119,21 @@ export class PostgresAuthStore {
         token_hash TEXT NOT NULL UNIQUE,
         prefix TEXT NOT NULL,
         scopes TEXT NOT NULL DEFAULT 'books:read',
+        company_ids TEXT,
         created_at TEXT NOT NULL,
         last_used_at TEXT,
         revoked_at TEXT
       );
       CREATE INDEX IF NOT EXISTS zl_auth_api_tokens_created ON zl_auth_api_tokens(created_at);
+      CREATE TABLE IF NOT EXISTS zl_auth_api_rate_limits (
+        token_id TEXT NOT NULL,
+        window_start TEXT NOT NULL,
+        count INTEGER NOT NULL,
+        PRIMARY KEY (token_id, window_start)
+      );
+      CREATE INDEX IF NOT EXISTS zl_auth_api_rate_limits_window ON zl_auth_api_rate_limits(window_start);
     `);
+    await this.pool.query('ALTER TABLE zl_auth_api_tokens ADD COLUMN IF NOT EXISTS company_ids TEXT');
     const now = nowIso();
     await this.pool.query('DELETE FROM zl_auth_sessions WHERE expires_at <= $1', [now]);
     await this.pool.query('DELETE FROM zl_auth_password_resets WHERE expires_at <= $1', [now]);
@@ -640,7 +649,7 @@ export class PostgresAuthStore {
     return publicUser(await this.userRowById(String(id ?? '')));
   }
 
-  async createApiToken({ name = '', scopes = ['books:read'] } = {}) {
+  async createApiToken({ name = '', scopes = ['books:read'], companyIds = null } = {}) {
     const cleanName = String(name ?? '').trim();
     if (!cleanName || cleanName.length > 80) {
       return { ok: false, error: 'Token name is required and must be 80 characters or fewer.' };
@@ -649,13 +658,23 @@ export class PostgresAuthStore {
     if (cleanScopes.length !== 1 || cleanScopes[0] !== 'books:read') {
       return { ok: false, error: 'The read-only API currently supports only the books:read scope.' };
     }
+    const scope = normalizeCompanyIds(companyIds);
+    if (scope.error) return { ok: false, error: scope.error };
     const id = `api_${randomBytes(8).toString('hex')}`;
     const secret = randomBytes(32).toString('base64url');
     const token = `zlp_${id}_${secret}`;
     const at = nowIso();
     await this.pool.query(
-      'INSERT INTO zl_auth_api_tokens (id, name, token_hash, prefix, scopes, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
-      [id, cleanName, sessionHash(token), `zlp_${id}`, JSON.stringify(cleanScopes), at],
+      'INSERT INTO zl_auth_api_tokens (id, name, token_hash, prefix, scopes, company_ids, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [
+        id,
+        cleanName,
+        sessionHash(token),
+        `zlp_${id}`,
+        JSON.stringify(cleanScopes),
+        scope.ids === null ? null : JSON.stringify(scope.ids),
+        at,
+      ],
     );
     return {
       ok: true,
@@ -665,10 +684,34 @@ export class PostgresAuthStore {
         name: cleanName,
         prefix: `zlp_${id}`,
         scopes: cleanScopes,
+        companyIds: scope.ids,
         createdAt: at,
         lastUsedAt: null,
         revokedAt: null,
       },
+    };
+  }
+
+  async consumeApiRate(tokenId, { max = 120, windowMs = 60_000 } = {}) {
+    const now = Date.now();
+    const windowStart = new Date(Math.floor(now / windowMs) * windowMs).toISOString();
+    const resetAt = Math.floor(now / windowMs) * windowMs + windowMs;
+    const result = await this.pool.query(
+      `INSERT INTO zl_auth_api_rate_limits (token_id, window_start, count)
+       VALUES ($1, $2, 1)
+       ON CONFLICT(token_id, window_start) DO UPDATE SET count = zl_auth_api_rate_limits.count + 1
+       RETURNING count`,
+      [String(tokenId), windowStart],
+    );
+    const count = Number(result.rows[0]?.count ?? 1);
+    await this.pool.query('DELETE FROM zl_auth_api_rate_limits WHERE window_start < $1', [
+      new Date(resetAt - windowMs * 2).toISOString(),
+    ]);
+    return {
+      allowed: count <= max,
+      limit: max,
+      remaining: Math.max(0, max - count),
+      resetAt,
     };
   }
 

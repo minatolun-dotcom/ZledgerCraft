@@ -120,6 +120,24 @@ test(
       assert.equal(reloaded.status, 200, JSON.stringify(reloaded.body));
       assert.equal(reloaded.body.state.companies[0].id, company.id);
 
+      const tokenCreated = await owner.request('/api/auth/api-tokens', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'PG reporting job' }),
+      });
+      assert.equal(tokenCreated.status, 200, JSON.stringify(tokenCreated.body));
+      const apiHeaders = { authorization: `Bearer ${tokenCreated.body.token}` };
+      const apiCompanies = await owner.request('/api/v1/companies', { headers: apiHeaders });
+      assert.equal(apiCompanies.status, 200, JSON.stringify(apiCompanies.body));
+      assert.equal(apiCompanies.body.data.companies[0].id, company.id);
+      const tokenList = await owner.request('/api/auth/api-tokens');
+      assert.equal(tokenList.body.tokens[0].lastUsedAt !== null, true);
+      assert.equal(
+        (await owner.request(`/api/auth/api-tokens/${tokenCreated.body.apiToken.id}`, { method: 'DELETE' })).status,
+        200,
+      );
+      assert.equal((await owner.request('/api/v1/companies', { headers: apiHeaders })).status, 401);
+
       const lease = await owner.request('/api/workspace/leases', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

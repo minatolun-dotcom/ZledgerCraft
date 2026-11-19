@@ -11544,6 +11544,8 @@ const SERVER_EVENT_LABELS = {
   'account.mfa.require': '2FA required',
   'account.mfa.unrequire': '2FA requirement cleared',
   'account.sessions.revoke': 'Sessions revoked',
+  'apiToken.create': 'API token created',
+  'apiToken.revoke': 'API token revoked',
   'workspace.clear': 'Workspace cleared',
   'workspace.restore': 'Backup restored',
   'backup.create': 'Backup created',
@@ -11629,6 +11631,7 @@ function serverUsersPanel({
   serverScopeEditor,
   serverCompanyChecks,
   authSessions,
+  apiTokens,
   serverAuditRows,
   serverAuditChain,
   SERVER_EVENT_LABELS,
@@ -11711,6 +11714,30 @@ function serverUsersPanel({
             )
             .join('')
         : '<tr><td colspan="5" class="muted">No active sessions.</td></tr>'}</tbody>
+    </table></div>
+    <h3 class="section-title">Read-only API tokens</h3>
+    <p class="muted small">API tokens let external apps read companies, trial balances, parties and posted vouchers through <code>/api/v1</code>. Tokens are stored hashed and shown once, carry only the <code>books:read</code> scope, and are limited to 120 requests per minute per token. They cannot post, edit or delete anything. The <a href="/api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI 3 contract</a> describes every endpoint.</p>
+    <div class="form-actions">
+      <button class="btn primary small" type="button" data-action="create-api-token">Create API token</button>
+      <button class="btn small" type="button" data-action="refresh-api-tokens">Refresh tokens</button>
+    </div>
+    <div class="table-scroll" tabindex="0"><table class="data-table compact">
+      <thead><tr><th>Name</th><th>Prefix</th><th>Scope</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+      <tbody>${apiTokens?.length
+        ? apiTokens
+            .map(
+              (apiToken) => `<tr>
+                <td>${esc(apiToken.name)}</td>
+                <td><code>${esc(apiToken.prefix)}…</code></td>
+                <td class="muted small">${esc((apiToken.scopes ?? []).join(', '))}</td>
+                <td>${esc(new Date(apiToken.createdAt).toLocaleString('en-IN'))}</td>
+                <td>${apiToken.lastUsedAt ? esc(new Date(apiToken.lastUsedAt).toLocaleString('en-IN')) : '<span class="muted">Never</span>'}</td>
+                <td>${apiToken.revokedAt ? '<span class="badge danger">Revoked</span>' : '<span class="badge">Active</span>'}</td>
+                <td>${apiToken.revokedAt ? '' : `<button class="btn small danger" type="button" data-action="revoke-api-token" data-id="${esc(apiToken.id)}">Revoke</button>`}</td>
+              </tr>`,
+            )
+            .join('')
+        : '<tr><td colspan="7" class="muted">No API tokens yet.</td></tr>'}</tbody>
     </table></div>
     <h3 class="section-title">Server save audit</h3>
     <p class="muted small">Every accepted workspace save is recorded in ${postgres ? 'Postgres' : 'SQLite'} with the signed-in account, role, revision and payload size. The rows are hash-chained; verification detects edits made outside the server. This is separate from the in-app audit trail and is only shown to owners.</p>
@@ -12039,6 +12066,7 @@ function usersPanel() {
       serverScopeEditor,
       serverCompanyChecks,
       authSessions,
+      apiTokens: authApiTokens,
       serverAuditRows,
       serverAuditChain,
       SERVER_EVENT_LABELS,
@@ -16831,6 +16859,7 @@ let reportSettings = {
 };
 let authLoginEvents = [];
 let authSessions = [];
+let authApiTokens = [];
 let serverAuditRows = [];
 let serverAuditChain = { ok: null, checked: 0 };
 let serverAuditEvents = [];
@@ -16950,6 +16979,20 @@ async function refreshAuthAccounts() {
     if (response.ok && payload.ok) authAccounts = payload.users ?? [];
   } catch {
     authAccounts = [];
+  }
+}
+
+async function refreshApiTokens() {
+  if (!authRequired || authUser?.role !== 'owner') {
+    authApiTokens = [];
+    return;
+  }
+  try {
+    const response = await fetch('/api/auth/api-tokens', { cache: 'no-store' });
+    const payload = await response.json();
+    authApiTokens = response.ok && payload.ok ? payload.tokens ?? [] : [];
+  } catch {
+    authApiTokens = [];
   }
 }
 
@@ -20755,6 +20798,66 @@ async function handleClick(event) {
         });
       break;
     }
+    case 'create-api-token': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      const name = window.prompt('Name this API token (for example "Reports integration"):');
+      if (name === null) break;
+      fetch('/api/auth/api-tokens', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, scopes: ['books:read'] }),
+      })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not create the API token.');
+          await refreshApiTokens();
+          window.alert(`API token created for "${payload.apiToken.name}".\n\n${payload.token}\n\nCopy it now. It is stored as a hash and cannot be shown again. Scope: books:read. It can read the books but cannot post or change anything.`);
+          render();
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
+    case 'revoke-api-token': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      const apiToken = authApiTokens.find((item) => item.id === trigger.dataset.id);
+      if (!apiToken) break;
+      if (!window.confirm(`Revoke the API token "${apiToken.name}"? Apps using it will stop working immediately.`)) break;
+      fetch(`/api/auth/api-tokens/${encodeURIComponent(apiToken.id)}`, { method: 'DELETE' })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not revoke the API token.');
+          await refreshApiTokens();
+          setFlash(`API token "${apiToken.name}" revoked.`);
+          render();
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
+    case 'refresh-api-tokens': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      refreshApiTokens()
+        .then(() => render())
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
     case 'refresh-server-backups': {
       if (!can('user.manage')) {
         requirePermission('user.manage');
@@ -21776,6 +21879,7 @@ async function startUI() {
     return;
   }
   if (authUser?.role === 'owner') await refreshAuthAccounts();
+  if (authUser?.role === 'owner') await refreshApiTokens();
   if (authUser?.role === 'owner') await refreshServerBackups();
   if (authUser?.role === 'owner') await refreshReportSettings();
   if (authUser?.role === 'owner') await refreshAuthLogins();

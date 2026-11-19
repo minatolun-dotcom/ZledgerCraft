@@ -187,7 +187,7 @@ Status: **complete 2026-11-19 — daily signed management summary by Resend, dri
 
 ### Phase 4 — Approvals and access controls
 
-Status: **in progress (4A and 4B complete 2026-11-19)**
+Status: **complete 2026-11-19**
 
 - [x] **4A. Per-account MFA policy (SQLite/LAN).** Accounts can be marked
   `require_mfa` after TOTP enrollment. Sign-in refuses an account that requires
@@ -203,8 +203,15 @@ Status: **in progress (4A and 4B complete 2026-11-19)**
   proposers cannot decide their own voucher. The server rejects accountant
   attempts to add posted vouchers or alter existing submissions while the
   policy is on. The voucher screen shows the approval queue and status.
-- [ ] **4C. Read-only API and OpenAPI contract.** Hashed bearer tokens, scopes,
-  versioned read endpoints and rate limits.
+- [x] **4C. Read-only API and OpenAPI contract.** Owners create named bearer
+  tokens under Companies → Server accounts; the token is shown once and stored
+  as a SHA-256 hash in SQLite or Postgres. Tokens carry only the `books:read`
+  scope and are limited to 120 requests/minute per token. Versioned
+  `/api/v1` endpoints expose companies, trial balance, outstanding parties and
+  paginated posted vouchers; `/api/v1/openapi.json` publishes the OpenAPI 3.0.3
+  contract. Revocation is immediate, and token create/revoke events join the
+  hash-chained server audit. No write, webhook or multi-tenant endpoint is
+  exposed.
 
 ## Environment variables
 
@@ -511,3 +518,10 @@ and operate the current server with R2 and Resend enabled.
 - Remaining 4B limits: pending submissions cannot be edited in place, there is
   no multi-level approval matrix, and concurrent pending-queue merges rely on
   the normal workspace conflict flow rather than a dedicated merge.
+- Added Phase 4C read-only API: owner-created bearer tokens are stored hashed
+  with a `books:read` scope, versioned `/api/v1` routes serve companies, trial
+  balance, parties and posted vouchers, and `/api/v1/openapi.json` publishes the
+  OpenAPI 3.0.3 contract. Each token gets an in-memory 120-requests/minute
+  limit, revocation is immediate, and token create/revoke actions join the
+  hash-chained server audit. The API is read-only; webhooks and write endpoints
+  remain future work.

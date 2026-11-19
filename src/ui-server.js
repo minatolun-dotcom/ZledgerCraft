@@ -18,6 +18,7 @@ export function serverUsersPanel({
   serverScopeEditor,
   serverCompanyChecks,
   authSessions,
+  apiTokens,
   serverAuditRows,
   serverAuditChain,
   SERVER_EVENT_LABELS,
@@ -100,6 +101,30 @@ export function serverUsersPanel({
             )
             .join('')
         : '<tr><td colspan="5" class="muted">No active sessions.</td></tr>'}</tbody>
+    </table></div>
+    <h3 class="section-title">Read-only API tokens</h3>
+    <p class="muted small">API tokens let external apps read companies, trial balances, parties and posted vouchers through <code>/api/v1</code>. Tokens are stored hashed and shown once, carry only the <code>books:read</code> scope, and are limited to 120 requests per minute per token. They cannot post, edit or delete anything. The <a href="/api/v1/openapi.json" target="_blank" rel="noopener">OpenAPI 3 contract</a> describes every endpoint.</p>
+    <div class="form-actions">
+      <button class="btn primary small" type="button" data-action="create-api-token">Create API token</button>
+      <button class="btn small" type="button" data-action="refresh-api-tokens">Refresh tokens</button>
+    </div>
+    <div class="table-scroll" tabindex="0"><table class="data-table compact">
+      <thead><tr><th>Name</th><th>Prefix</th><th>Scope</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+      <tbody>${apiTokens?.length
+        ? apiTokens
+            .map(
+              (apiToken) => `<tr>
+                <td>${esc(apiToken.name)}</td>
+                <td><code>${esc(apiToken.prefix)}…</code></td>
+                <td class="muted small">${esc((apiToken.scopes ?? []).join(', '))}</td>
+                <td>${esc(new Date(apiToken.createdAt).toLocaleString('en-IN'))}</td>
+                <td>${apiToken.lastUsedAt ? esc(new Date(apiToken.lastUsedAt).toLocaleString('en-IN')) : '<span class="muted">Never</span>'}</td>
+                <td>${apiToken.revokedAt ? '<span class="badge danger">Revoked</span>' : '<span class="badge">Active</span>'}</td>
+                <td>${apiToken.revokedAt ? '' : `<button class="btn small danger" type="button" data-action="revoke-api-token" data-id="${esc(apiToken.id)}">Revoke</button>`}</td>
+              </tr>`,
+            )
+            .join('')
+        : '<tr><td colspan="7" class="muted">No API tokens yet.</td></tr>'}</tbody>
     </table></div>
     <h3 class="section-title">Server save audit</h3>
     <p class="muted small">Every accepted workspace save is recorded in ${postgres ? 'Postgres' : 'SQLite'} with the signed-in account, role, revision and payload size. The rows are hash-chained; verification detects edits made outside the server. This is separate from the in-app audit trail and is only shown to owners.</p>

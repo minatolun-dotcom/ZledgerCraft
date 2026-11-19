@@ -299,6 +299,7 @@ export let reportSettings = {
 };
 export let authLoginEvents = [];
 export let authSessions = [];
+export let authApiTokens = [];
 export let serverAuditRows = [];
 export let serverAuditChain = { ok: null, checked: 0 };
 export let serverAuditEvents = [];
@@ -418,6 +419,20 @@ async function refreshAuthAccounts() {
     if (response.ok && payload.ok) authAccounts = payload.users ?? [];
   } catch {
     authAccounts = [];
+  }
+}
+
+async function refreshApiTokens() {
+  if (!authRequired || authUser?.role !== 'owner') {
+    authApiTokens = [];
+    return;
+  }
+  try {
+    const response = await fetch('/api/auth/api-tokens', { cache: 'no-store' });
+    const payload = await response.json();
+    authApiTokens = response.ok && payload.ok ? payload.tokens ?? [] : [];
+  } catch {
+    authApiTokens = [];
   }
 }
 
@@ -4223,6 +4238,66 @@ async function handleClick(event) {
         });
       break;
     }
+    case 'create-api-token': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      const name = window.prompt('Name this API token (for example "Reports integration"):');
+      if (name === null) break;
+      fetch('/api/auth/api-tokens', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, scopes: ['books:read'] }),
+      })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not create the API token.');
+          await refreshApiTokens();
+          window.alert(`API token created for "${payload.apiToken.name}".\n\n${payload.token}\n\nCopy it now. It is stored as a hash and cannot be shown again. Scope: books:read. It can read the books but cannot post or change anything.`);
+          render();
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
+    case 'revoke-api-token': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      const apiToken = authApiTokens.find((item) => item.id === trigger.dataset.id);
+      if (!apiToken) break;
+      if (!window.confirm(`Revoke the API token "${apiToken.name}"? Apps using it will stop working immediately.`)) break;
+      fetch(`/api/auth/api-tokens/${encodeURIComponent(apiToken.id)}`, { method: 'DELETE' })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not revoke the API token.');
+          await refreshApiTokens();
+          setFlash(`API token "${apiToken.name}" revoked.`);
+          render();
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
+    case 'refresh-api-tokens': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      refreshApiTokens()
+        .then(() => render())
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
     case 'refresh-server-backups': {
       if (!can('user.manage')) {
         requirePermission('user.manage');
@@ -5244,6 +5319,7 @@ export async function startUI() {
     return;
   }
   if (authUser?.role === 'owner') await refreshAuthAccounts();
+  if (authUser?.role === 'owner') await refreshApiTokens();
   if (authUser?.role === 'owner') await refreshServerBackups();
   if (authUser?.role === 'owner') await refreshReportSettings();
   if (authUser?.role === 'owner') await refreshAuthLogins();

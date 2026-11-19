@@ -160,6 +160,28 @@ export function publicUser(row) {
   };
 }
 
+function parseScopes(value) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function publicApiToken(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    prefix: row.prefix,
+    scopes: parseScopes(row.scopes),
+    createdAt: row.created_at,
+    lastUsedAt: row.last_used_at || null,
+    revokedAt: row.revoked_at || null,
+  };
+}
+
 export function validPassword(password) {
   const value = String(password ?? '');
   if (value.length < 8) return 'Password must be at least 8 characters.';
@@ -238,6 +260,17 @@ export class AuthStore {
       );
       CREATE INDEX IF NOT EXISTS auth_password_resets_user ON auth_password_resets(user_id);
       CREATE INDEX IF NOT EXISTS auth_password_resets_expiry ON auth_password_resets(expires_at);
+      CREATE TABLE IF NOT EXISTS auth_api_tokens (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        prefix TEXT NOT NULL,
+        scopes TEXT NOT NULL DEFAULT 'books:read',
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        revoked_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS auth_api_tokens_created ON auth_api_tokens(created_at);
     `);
     const columns = this.db.prepare('PRAGMA table_info(auth_users)').all();
     if (!columns.some((column) => column.name === 'email')) {
@@ -312,6 +345,15 @@ export class AuthStore {
       consumeMfaCounter: this.db.prepare(
         'UPDATE auth_users SET mfa_last_counter = ?, updated_at = ? WHERE id = ? AND mfa_last_counter < ?',
       ),
+      insertApiToken: this.db.prepare(`
+        INSERT INTO auth_api_tokens (id, name, token_hash, prefix, scopes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `),
+      listApiTokens: this.db.prepare('SELECT * FROM auth_api_tokens ORDER BY created_at DESC'),
+      apiTokenById: this.db.prepare('SELECT * FROM auth_api_tokens WHERE id = ?'),
+      apiTokenByHash: this.db.prepare('SELECT * FROM auth_api_tokens WHERE token_hash = ? AND revoked_at IS NULL'),
+      touchApiToken: this.db.prepare('UPDATE auth_api_tokens SET last_used_at = ? WHERE id = ?'),
+      revokeApiToken: this.db.prepare('UPDATE auth_api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL'),
       deleteUser: this.db.prepare('DELETE FROM auth_users WHERE id = ?'),
       insertSession: this.db.prepare(`
         INSERT INTO auth_sessions (token_hash, id, user_id, created_at, expires_at, user_agent)
@@ -686,6 +728,55 @@ export class AuthStore {
 
   listUsers() {
     return this.stmts.list.all().map(publicUser);
+  }
+
+  createApiToken({ name = '', scopes = ['books:read'] } = {}) {
+    const cleanName = String(name ?? '').trim();
+    if (!cleanName || cleanName.length > 80) {
+      return { ok: false, error: 'Token name is required and must be 80 characters or fewer.' };
+    }
+    const cleanScopes = [...new Set((Array.isArray(scopes) ? scopes : ['books:read']).map((scope) => String(scope).trim()).filter(Boolean))];
+    if (cleanScopes.length !== 1 || cleanScopes[0] !== 'books:read') {
+      return { ok: false, error: 'The read-only API currently supports only the books:read scope.' };
+    }
+    const id = `api_${randomBytes(8).toString('hex')}`;
+    const secret = randomBytes(32).toString('base64url');
+    const token = `zlp_${id}_${secret}`;
+    const at = nowIso();
+    this.stmts.insertApiToken.run(id, cleanName, sessionHash(token), `zlp_${id}`, JSON.stringify(cleanScopes), at);
+    return {
+      ok: true,
+      token,
+      apiToken: {
+        id,
+        name: cleanName,
+        prefix: `zlp_${id}`,
+        scopes: cleanScopes,
+        createdAt: at,
+        lastUsedAt: null,
+        revokedAt: null,
+      },
+    };
+  }
+
+  listApiTokens() {
+    return this.stmts.listApiTokens.all().map(publicApiToken);
+  }
+
+  verifyApiToken(token) {
+    if (!token) return { ok: false, error: 'Missing API token.' };
+    const row = this.stmts.apiTokenByHash.get(sessionHash(token));
+    if (!row || row.revoked_at) return { ok: false, error: 'Invalid API token.' };
+    this.stmts.touchApiToken.run(nowIso(), row.id);
+    return { ok: true, apiToken: publicApiToken(row) };
+  }
+
+  revokeApiToken(id) {
+    const row = this.stmts.apiTokenById.get(String(id ?? ''));
+    if (!row) return { ok: false, error: 'API token not found.' };
+    if (row.revoked_at) return { ok: true, apiToken: publicApiToken(row) };
+    this.stmts.revokeApiToken.run(nowIso(), row.id);
+    return { ok: true, apiToken: publicApiToken(this.stmts.apiTokenById.get(row.id)) };
   }
 
   getUser(id) {

@@ -244,6 +244,25 @@ ZL_REPORT_TTL_HOURS=168        # optional; 1–720
 ZL_SCHEDULER_SECRET=...        # optional manual scheduler credential (Bearer token)
 ```
 
+**Read-only API**
+
+Owners can create named API tokens under **Companies → Server accounts →
+Read-only API tokens**. A token is shown once and stored as a SHA-256 hash in
+SQLite or Postgres; it carries only the `books:read` scope, is limited to 120
+requests per minute per token, and can be revoked immediately. Send it as
+`Authorization: Bearer <token>` to the versioned endpoints:
+
+- `GET /api/v1/companies`
+- `GET /api/v1/companies/{id}`
+- `GET /api/v1/companies/{id}/trial-balance?asOn=YYYY-MM-DD`
+- `GET /api/v1/companies/{id}/parties?side=receivable|payable&asOn=YYYY-MM-DD`
+- `GET /api/v1/companies/{id}/vouchers?from=&to=&type=&limit=&offset=`
+
+The OpenAPI 3.0.3 contract is public at `GET /api/v1/openapi.json`. The API is
+read-only: it cannot post vouchers, edit masters or change settings, and there
+are no webhooks yet. Token create/revoke events appear in the hash-chained
+server audit.
+
 **Resend email**
 
 Resend powers backup-failure alerts (and, in SQLite/LAN mode, forgotten-password

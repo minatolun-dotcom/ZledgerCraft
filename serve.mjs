@@ -33,6 +33,7 @@ import {
   verifyReportToken,
 } from './server-reports.js';
 import { buildReportPdf } from './server-pdf.js';
+import { outstanding, trialBalance } from './src/accounting.js';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const port = Number(process.env.PORT ?? 4173);
@@ -94,6 +95,8 @@ const r2Config = r2Configuration(process.env);
 const emailConfig = emailConfiguration(process.env);
 const alertEmail = String(process.env.ZL_ALERT_EMAIL || '').trim();
 const LOGIN_IP_LIMIT = { maxFailures: 8, windowMs: 60_000, lockMs: 60_000 };
+const API_RATE_LIMIT = { max: 120, windowMs: 60_000 };
+const apiRateWindows = new Map();
 const FORGOT_IP_LIMIT = { maxFailures: 5, windowMs: 15 * 60_000, lockMs: 15 * 60_000 };
 const signingSecret = reportSecret(process.env);
 const reportTtl = reportTtlMs(process.env);
@@ -2076,6 +2079,56 @@ async function handleAuthApi(request, response, url) {
     return;
   }
 
+  if (pathname === '/api/auth/api-tokens' && request.method === 'GET') {
+    if (!(await requireOwner(request, response))) return;
+    json(response, 200, { ok: true, tokens: await auth.listApiTokens() });
+    return;
+  }
+
+  if (pathname === '/api/auth/api-tokens' && request.method === 'POST') {
+    const actor = await requireOwner(request, response);
+    if (!actor) return;
+    if (!sameOrigin(request)) {
+      json(response, 403, { ok: false, error: 'Cross-origin API token changes are not allowed.' });
+      return;
+    }
+    try {
+      const body = JSON.parse(await readBody(request));
+      const result = await auth.createApiToken({
+        name: body?.name,
+        scopes: body?.scopes ?? ['books:read'],
+      });
+      if (result.ok) {
+        appendServerEvent(actor, 'apiToken.create', result.apiToken.name, result.apiToken.prefix);
+      }
+      json(response, result.ok ? 200 : 400, result);
+    } catch {
+      json(response, 400, { ok: false, error: 'Send a JSON token request.' });
+    }
+    return;
+  }
+
+  const apiTokenMatch = pathname.match(/^\/api\/auth\/api-tokens\/([^/]+)$/);
+  if (apiTokenMatch && request.method === 'DELETE') {
+    const actor = await requireOwner(request, response);
+    if (!actor) return;
+    if (!sameOrigin(request)) {
+      json(response, 403, { ok: false, error: 'Cross-origin API token changes are not allowed.' });
+      return;
+    }
+    let id;
+    try {
+      id = decodeURIComponent(apiTokenMatch[1]);
+    } catch {
+      json(response, 400, { ok: false, error: 'Invalid API token id.' });
+      return;
+    }
+    const result = await auth.revokeApiToken(id);
+    if (result.ok) appendServerEvent(actor, 'apiToken.revoke', result.apiToken.name, result.apiToken.prefix);
+    json(response, result.ok ? 200 : 404, result);
+    return;
+  }
+
   if (pathname === '/api/auth/users' && request.method === 'GET') {
     if (!(await requireOwner(request, response))) return;
     json(response, 200, { ok: true, users: await auth.listUsers() });
@@ -2584,6 +2637,389 @@ async function handleBackupApi(request, response, url) {
   response.end();
 }
 
+function apiDate(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? String(value) : null;
+}
+
+function apiRateLimit(response, tokenId) {
+  const now = Date.now();
+  let entry = apiRateWindows.get(tokenId);
+  if (!entry || now - entry.startedAt >= API_RATE_LIMIT.windowMs) {
+    entry = { count: 0, startedAt: now };
+    apiRateWindows.set(tokenId, entry);
+  }
+  entry.count += 1;
+  const reset = Math.ceil((entry.startedAt + API_RATE_LIMIT.windowMs - now) / 1000);
+  const remaining = Math.max(0, API_RATE_LIMIT.max - entry.count);
+  response.setHeader('x-ratelimit-limit', String(API_RATE_LIMIT.max));
+  response.setHeader('x-ratelimit-remaining', String(remaining));
+  response.setHeader('x-ratelimit-reset', String(Math.max(1, reset)));
+  if (apiRateWindows.size > 1000) {
+    for (const [key, window] of apiRateWindows) {
+      if (now - window.startedAt >= API_RATE_LIMIT.windowMs) apiRateWindows.delete(key);
+    }
+  }
+  if (entry.count > API_RATE_LIMIT.max) {
+    json(
+      response,
+      429,
+      { ok: false, error: 'API rate limit exceeded. Retry after the window resets.' },
+      { 'retry-after': String(Math.max(1, reset)) },
+    );
+    return false;
+  }
+  return true;
+}
+
+function openApiDocument(request) {
+  const base = reportBaseUrl(request) || `http://127.0.0.1:${port}`;
+  const companyParam = {
+    name: 'companyId',
+    in: 'path',
+    required: true,
+    schema: { type: 'string' },
+  };
+  const asOnParam = {
+    name: 'asOn',
+    in: 'query',
+    schema: { type: 'string', format: 'date' },
+    description: 'Balance date (YYYY-MM-DD). Defaults to the financial year end.',
+  };
+  return {
+    openapi: '3.0.3',
+    info: {
+      title: 'ZledgerCraft read-only API',
+      version: '1.0.0',
+      description:
+        'Read-only access to posted ZledgerCraft books. Authenticate with an owner-created API token: Authorization: Bearer <token>. Tokens are limited to 120 requests per minute per token.',
+    },
+    servers: [{ url: `${base}/api/v1` }],
+    security: [{ bearerAuth: [] }],
+    components: {
+      securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer', description: 'Owner-created token with the books:read scope.' },
+      },
+      schemas: {
+        Error: {
+          type: 'object',
+          properties: { ok: { type: 'boolean' }, error: { type: 'string' } },
+        },
+        Company: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            fyStart: { type: 'string', format: 'date' },
+            fyEnd: { type: 'string', format: 'date' },
+            currency: { type: 'string' },
+            approvalsRequired: { type: 'boolean' },
+            counts: {
+              type: 'object',
+              properties: {
+                ledgers: { type: 'integer' },
+                vouchers: { type: 'integer' },
+                pendingVouchers: { type: 'integer' },
+              },
+            },
+          },
+        },
+        TrialBalanceRow: {
+          type: 'object',
+          properties: {
+            ledgerId: { type: 'string', nullable: true },
+            name: { type: 'string' },
+            groupName: { type: 'string' },
+            debit: { type: 'number' },
+            credit: { type: 'number' },
+          },
+        },
+        Party: {
+          type: 'object',
+          properties: {
+            ledgerId: { type: 'string' },
+            name: { type: 'string' },
+            outstanding: { type: 'number' },
+            advance: { type: 'number' },
+            bills: { type: 'array', items: { type: 'object' } },
+          },
+        },
+        Voucher: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            no: { type: 'integer' },
+            date: { type: 'string', format: 'date' },
+            type: { type: 'string' },
+            narration: { type: 'string' },
+            lines: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  ledgerId: { type: 'string' },
+                  side: { type: 'string', enum: ['Dr', 'Cr'] },
+                  amount: { type: 'number' },
+                  costCentreId: { type: 'string', nullable: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    paths: {
+      '/companies': {
+        get: {
+          summary: 'List companies',
+          responses: {
+            200: {
+              description: 'Companies visible to the token',
+              content: { 'application/json': { schema: { type: 'object' } } },
+            },
+            401: { description: 'Missing or invalid token', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          },
+        },
+      },
+      '/companies/{companyId}': {
+        get: {
+          summary: 'Get one company',
+          parameters: [companyParam],
+          responses: {
+            200: { description: 'Company', content: { 'application/json': { schema: { $ref: '#/components/schemas/Company' } } } },
+            404: { description: 'Company not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          },
+        },
+      },
+      '/companies/{companyId}/trial-balance': {
+        get: {
+          summary: 'Trial balance as on a date',
+          parameters: [companyParam, asOnParam],
+          responses: {
+            200: {
+              description: 'Trial balance',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      asOn: { type: 'string', format: 'date' },
+                      rows: { type: 'array', items: { $ref: '#/components/schemas/TrialBalanceRow' } },
+                      debitTotal: { type: 'number' },
+                      creditTotal: { type: 'number' },
+                      difference: { type: 'number' },
+                      balanced: { type: 'boolean' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/companies/{companyId}/parties': {
+        get: {
+          summary: 'Outstanding receivables or payables',
+          parameters: [
+            companyParam,
+            { name: 'side', in: 'query', schema: { type: 'string', enum: ['receivable', 'payable'], default: 'receivable' } },
+            asOnParam,
+          ],
+          responses: {
+            200: {
+              description: 'Party outstanding',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      side: { type: 'string' },
+                      asOn: { type: 'string', format: 'date' },
+                      parties: { type: 'array', items: { $ref: '#/components/schemas/Party' } },
+                      total: { type: 'number' },
+                      advances: { type: 'number' },
+                      net: { type: 'number' },
+                      count: { type: 'integer' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/companies/{companyId}/vouchers': {
+        get: {
+          summary: 'List posted vouchers',
+          parameters: [
+            companyParam,
+            { name: 'from', in: 'query', schema: { type: 'string', format: 'date' } },
+            { name: 'to', in: 'query', schema: { type: 'string', format: 'date' } },
+            { name: 'type', in: 'query', schema: { type: 'string' } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 } },
+            { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          ],
+          responses: {
+            200: {
+              description: 'Voucher page',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      total: { type: 'integer' },
+                      limit: { type: 'integer' },
+                      offset: { type: 'integer' },
+                      vouchers: { type: 'array', items: { $ref: '#/components/schemas/Voucher' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+async function handlePublicApi(request, response, url, pathname) {
+  if (pathname === '/api/v1/openapi.json' && request.method === 'GET') {
+    json(response, 200, openApiDocument(request), { 'access-control-allow-origin': '*' });
+    return;
+  }
+  if (!pathname.startsWith('/api/v1/')) {
+    json(response, 404, { ok: false, error: 'Unknown API route.' });
+    return;
+  }
+  if (request.method !== 'GET') {
+    json(response, 405, { ok: false, error: 'The read-only API supports GET only.' }, { allow: 'GET' });
+    return;
+  }
+  if (!auth) {
+    json(response, 503, { ok: false, error: 'API tokens require server authentication storage.' });
+    return;
+  }
+  const bearer = /^Bearer\s+(.+)$/i.exec(String(request.headers.authorization || ''))?.[1] || '';
+  const verified = await auth.verifyApiToken(bearer.trim());
+  if (!verified.ok) {
+    json(response, 401, { ok: false, error: 'A valid API token is required.' }, { 'www-authenticate': 'Bearer' });
+    return;
+  }
+  if (!verified.apiToken.scopes.includes('books:read')) {
+    json(response, 403, { ok: false, error: 'This token does not have the books:read scope.' });
+    return;
+  }
+  if (!apiRateLimit(response, verified.apiToken.id)) return;
+
+  const saved = workspaceStore ? await workspaceStore.read() : { state: null };
+  const state = saved.state;
+  if (!state) {
+    json(response, 404, { ok: false, error: 'No workspace has been created yet.' });
+    return;
+  }
+  const companies = state.companies ?? [];
+  const companyById = (id) => companies.find((company) => company.id === id) || null;
+  const companyPayload = (company) => ({
+    id: company.id,
+    name: company.name,
+    fyStart: company.fyStart ?? null,
+    fyEnd: company.fyEnd ?? null,
+    currency: company.currency ?? '',
+    approvalsRequired: Boolean(company.approvalsRequired),
+    counts: {
+      ledgers: (company.ledgers ?? []).length,
+      vouchers: (company.vouchers ?? []).length,
+      pendingVouchers: (company.pendingVouchers ?? []).length,
+    },
+  });
+
+  if (pathname === '/api/v1/companies') {
+    json(response, 200, { ok: true, data: { companies: companies.map(companyPayload) } });
+    return;
+  }
+
+  const match = pathname.match(/^\/api\/v1\/companies\/([^/]+)(?:\/([a-z-]+))?$/);
+  if (!match) {
+    json(response, 404, { ok: false, error: 'Unknown API route.' });
+    return;
+  }
+  let companyId;
+  try {
+    companyId = decodeURIComponent(match[1]);
+  } catch {
+    json(response, 400, { ok: false, error: 'Invalid company id.' });
+    return;
+  }
+  const company = companyById(companyId);
+  if (!company) {
+    json(response, 404, { ok: false, error: 'Company not found.' });
+    return;
+  }
+  const resource = match[2] || '';
+  if (!resource) {
+    json(response, 200, { ok: true, data: { company: companyPayload(company) } });
+    return;
+  }
+
+  if (resource === 'trial-balance') {
+    const asOn = apiDate(url.searchParams.get('asOn'), company.fyEnd);
+    if (!asOn) {
+      json(response, 400, { ok: false, error: 'asOn must be a YYYY-MM-DD date.' });
+      return;
+    }
+    json(response, 200, { ok: true, data: trialBalance(company, { to: asOn }) });
+    return;
+  }
+
+  if (resource === 'parties') {
+    const side = url.searchParams.get('side') === 'payable' ? 'payable' : 'receivable';
+    const asOn = apiDate(url.searchParams.get('asOn'), company.fyEnd);
+    if (!asOn) {
+      json(response, 400, { ok: false, error: 'asOn must be a YYYY-MM-DD date.' });
+      return;
+    }
+    json(response, 200, { ok: true, data: outstanding(company, { side, asOn }) });
+    return;
+  }
+
+  if (resource === 'vouchers') {
+    const from = apiDate(url.searchParams.get('from'), '');
+    const to = apiDate(url.searchParams.get('to'), '');
+    if (from === null || to === null) {
+      json(response, 400, { ok: false, error: 'from and to must be YYYY-MM-DD dates.' });
+      return;
+    }
+    const type = String(url.searchParams.get('type') || '').trim().toLowerCase();
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 50));
+    const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
+    const filtered = [...(company.vouchers ?? [])]
+      .filter((voucher) => (!from || voucher.date >= from) && (!to || voucher.date <= to))
+      .filter((voucher) => !type || String(voucher.type || '').toLowerCase() === type)
+      .sort((a, b) => (a.date === b.date ? Number(b.no) - Number(a.no) : a.date < b.date ? 1 : -1));
+    const page = filtered.slice(offset, offset + limit).map((voucher) => ({
+      id: voucher.id,
+      no: voucher.no,
+      date: voucher.date,
+      type: voucher.type,
+      narration: voucher.narration ?? '',
+      lines: (voucher.lines ?? []).map((line) => ({
+        ledgerId: line.ledgerId,
+        side: line.side,
+        amount: Number(line.amount) || 0,
+        ...(line.costCentreId ? { costCentreId: line.costCentreId } : {}),
+      })),
+    }));
+    json(response, 200, {
+      ok: true,
+      data: { total: filtered.length, limit, offset, vouchers: page },
+    });
+    return;
+  }
+
+  json(response, 404, { ok: false, error: 'Unknown company resource.' });
+}
+
 export async function requestHandler(request, response) {
   for (const [name, value] of Object.entries(securityHeaders())) response.setHeader(name, value);
   if (!allowedClient(clientIp(request))) {
@@ -2622,6 +3058,10 @@ export async function requestHandler(request, response) {
     } catch (error) {
       json(response, 500, { ok: false, error: error.message || 'Scheduled jobs failed.' });
     }
+    return;
+  }
+  if (pathname === '/api/v1' || pathname.startsWith('/api/v1/')) {
+    await handlePublicApi(request, response, requestUrl, pathname);
     return;
   }
   if (pathname.startsWith('/api/reports/')) {

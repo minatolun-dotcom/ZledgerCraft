@@ -13,6 +13,7 @@ import {
   normalizeUsername,
   nowIso,
   parseCompanyIds,
+  publicApiToken,
   publicUser,
   sessionHash,
   totpCounter,
@@ -112,6 +113,17 @@ export class PostgresAuthStore {
       );
       CREATE INDEX IF NOT EXISTS zl_auth_password_resets_user ON zl_auth_password_resets(user_id);
       CREATE INDEX IF NOT EXISTS zl_auth_password_resets_expiry ON zl_auth_password_resets(expires_at);
+      CREATE TABLE IF NOT EXISTS zl_auth_api_tokens (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        prefix TEXT NOT NULL,
+        scopes TEXT NOT NULL DEFAULT 'books:read',
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        revoked_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS zl_auth_api_tokens_created ON zl_auth_api_tokens(created_at);
     `);
     const now = nowIso();
     await this.pool.query('DELETE FROM zl_auth_sessions WHERE expires_at <= $1', [now]);
@@ -626,6 +638,67 @@ export class PostgresAuthStore {
 
   async getUser(id) {
     return publicUser(await this.userRowById(String(id ?? '')));
+  }
+
+  async createApiToken({ name = '', scopes = ['books:read'] } = {}) {
+    const cleanName = String(name ?? '').trim();
+    if (!cleanName || cleanName.length > 80) {
+      return { ok: false, error: 'Token name is required and must be 80 characters or fewer.' };
+    }
+    const cleanScopes = [...new Set((Array.isArray(scopes) ? scopes : ['books:read']).map((scope) => String(scope).trim()).filter(Boolean))];
+    if (cleanScopes.length !== 1 || cleanScopes[0] !== 'books:read') {
+      return { ok: false, error: 'The read-only API currently supports only the books:read scope.' };
+    }
+    const id = `api_${randomBytes(8).toString('hex')}`;
+    const secret = randomBytes(32).toString('base64url');
+    const token = `zlp_${id}_${secret}`;
+    const at = nowIso();
+    await this.pool.query(
+      'INSERT INTO zl_auth_api_tokens (id, name, token_hash, prefix, scopes, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+      [id, cleanName, sessionHash(token), `zlp_${id}`, JSON.stringify(cleanScopes), at],
+    );
+    return {
+      ok: true,
+      token,
+      apiToken: {
+        id,
+        name: cleanName,
+        prefix: `zlp_${id}`,
+        scopes: cleanScopes,
+        createdAt: at,
+        lastUsedAt: null,
+        revokedAt: null,
+      },
+    };
+  }
+
+  async listApiTokens() {
+    const result = await this.pool.query('SELECT * FROM zl_auth_api_tokens ORDER BY created_at DESC');
+    return result.rows.map(publicApiToken);
+  }
+
+  async verifyApiToken(token) {
+    if (!token) return { ok: false, error: 'Missing API token.' };
+    const found = await this.pool.query(
+      'SELECT * FROM zl_auth_api_tokens WHERE token_hash = $1 AND revoked_at IS NULL',
+      [sessionHash(token)],
+    );
+    const row = found.rows[0];
+    if (!row) return { ok: false, error: 'Invalid API token.' };
+    await this.pool.query('UPDATE zl_auth_api_tokens SET last_used_at = $1 WHERE id = $2', [nowIso(), row.id]);
+    return { ok: true, apiToken: publicApiToken(row) };
+  }
+
+  async revokeApiToken(id) {
+    const found = await this.pool.query('SELECT * FROM zl_auth_api_tokens WHERE id = $1', [String(id ?? '')]);
+    const row = found.rows[0];
+    if (!row) return { ok: false, error: 'API token not found.' };
+    if (row.revoked_at) return { ok: true, apiToken: publicApiToken(row) };
+    const updated = await this.pool.query(
+      'UPDATE zl_auth_api_tokens SET revoked_at = $1 WHERE id = $2 AND revoked_at IS NULL RETURNING *',
+      [nowIso(), row.id],
+    );
+    return { ok: true, apiToken: publicApiToken(updated.rows[0] || row) };
   }
 
   async updateUser(id, input = {}) {

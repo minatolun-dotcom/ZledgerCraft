@@ -117,6 +117,8 @@ export const SERVER_EVENT_LABELS = {
   'account.mfa.require': '2FA required',
   'account.mfa.unrequire': '2FA requirement cleared',
   'account.sessions.revoke': 'Sessions revoked',
+  'apiToken.create': 'API token created',
+  'apiToken.revoke': 'API token revoked',
   'workspace.clear': 'Workspace cleared',
   'workspace.restore': 'Backup restored',
   'backup.create': 'Backup created',

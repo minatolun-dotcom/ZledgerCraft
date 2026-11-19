@@ -162,6 +162,11 @@ test(
       assert.equal(reportHistory.body.history[0].status, 'failed');
       assert.equal(reportHistory.body.history[0].source, 'manual');
       assert.equal(reportHistory.body.history[0].recipients, 'owner@example.com');
+      const backup = await owner.request('/api/backups', { method: 'POST' });
+      assert.equal(backup.status, 200, JSON.stringify(backup.body));
+      const backupList = await owner.request('/api/backups');
+      assert.equal(backupList.body.history[0].status, 'ok');
+      assert.equal(backupList.body.history[0].name, backup.body.backup.name);
 
       const audit = await owner.request('/api/server-audit');
       assert.equal(audit.status, 200, JSON.stringify(audit.body));

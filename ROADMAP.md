@@ -345,6 +345,8 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - Added a dependency-free branded PDF summary and attached it to report emails.
 - Added recent report-attempt history with source, recipients, result and error,
   retained in SQLite/Postgres and shown in the owner panel.
+- Added matching backup-attempt history for manual/daily runs, offsite warnings
+  and failures, with the newest ten attempts shown beside the backup list.
 - Verification: report unit and API tests pass, including signed-link retrieval,
   Resend payload, outage error and failure alert, scheduler authorization and
   Postgres settings persistence.

@@ -206,7 +206,8 @@ ZL_ALERT_EMAIL=ops@example.com
 Use an R2 lifecycle rule for retention. The upload is a copy of the verified
 snapshot, not a live database file. The owner restore flow downloads the R2 copy
 when the local file is unavailable, verifies it and creates a pre-restore backup
-before replacing the books.
+before replacing the books. The owner panel also keeps the ten most recent backup
+attempts with source, result, offsite status and error.
 
 **Scheduled daily reports**
 

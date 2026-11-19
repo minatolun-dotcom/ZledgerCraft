@@ -403,6 +403,9 @@ test('server API scopes non-owner accounts to assigned companies', { timeout: 30
     const backupList = await owner.request('/api/backups');
     assert.equal(backupList.status, 200);
     assert.ok(backupList.body.backups.some((entry) => entry.name === backup.body.backup.name));
+    assert.equal(backupList.body.history[0].status, 'ok');
+    assert.equal(backupList.body.history[0].reason, 'manual');
+    assert.equal(backupList.body.history[0].name, backup.body.backup.name);
 
     const beforeRestore = await owner.request('/api/workspace');
     const modified = structuredClone(beforeRestore.body.state);

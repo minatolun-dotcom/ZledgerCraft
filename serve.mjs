@@ -176,6 +176,16 @@ if (DatabaseSync) {
       error TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS report_attempts_at ON report_attempts(at DESC);
+    CREATE TABLE IF NOT EXISTS backup_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT 'manual',
+      name TEXT NOT NULL DEFAULT '',
+      offsite INTEGER NOT NULL DEFAULT 0,
+      error TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS backup_attempts_at ON backup_attempts(at DESC);
   `);
   const reportColumns = db.prepare('PRAGMA table_info(report_settings)').all();
   if (!reportColumns.some((column) => column.name === 'last_attempt_at')) {
@@ -826,7 +836,7 @@ async function readServerBackupBytes(name) {
   }
 }
 
-async function createServerBackup(reason = 'manual') {
+async function createServerBackupOnce(reason = 'manual') {
   if (!workspaceStore) throw new Error('Server backups require a server workspace.');
   if (!postgresStore && (!db || !sqliteBackup)) throw new Error('Server backups require SQLite.');
   await mkdir(backupDir, { recursive: true, mode: 0o700 });
@@ -913,6 +923,28 @@ async function createServerBackup(reason = 'manual') {
   };
 }
 
+async function createServerBackup(reason = 'manual') {
+  try {
+    const backup = await createServerBackupOnce(reason);
+    const offsiteFailed = backup.offsite && backup.offsite.ok === false;
+    await recordBackupAttempt({
+      status: offsiteFailed ? 'warning' : 'ok',
+      reason,
+      name: backup.name,
+      offsite: Boolean(backup.offsite?.ok),
+      error: offsiteFailed ? backup.offsite.error || 'Offsite upload failed.' : '',
+    }).catch(() => {});
+    return backup;
+  } catch (error) {
+    await recordBackupAttempt({
+      status: 'failed',
+      reason,
+      error: error.message || 'Backup failed.',
+    }).catch(() => {});
+    throw error;
+  }
+}
+
 function queueServerBackup(reason) {
   const run = backupQueue.then(
     () => createServerBackup(reason),
@@ -937,6 +969,35 @@ function scheduleServerBackupCheck() {
     maybeCreateDailyServerBackup().catch((error) => console.error(`Server backup failed: ${error.message}`));
   }, 1500);
   backupTimer.unref?.();
+}
+
+async function recordBackupAttempt({ status = 'ok', reason = 'manual', name = '', offsite = false, error = '' } = {}) {
+  const at = new Date().toISOString();
+  if (postgresStore) return postgresStore.recordBackupAttempt({ status, reason, name, offsite, error, at });
+  if (!db) return;
+  db.prepare(
+    'INSERT INTO backup_attempts (at, status, reason, name, offsite, error) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(at, String(status), String(reason), String(name), offsite ? 1 : 0, String(error).slice(0, 500));
+  db.prepare(
+    'DELETE FROM backup_attempts WHERE id NOT IN (SELECT id FROM backup_attempts ORDER BY id DESC LIMIT 50)',
+  ).run();
+}
+
+async function readBackupHistory(limit = 10) {
+  if (postgresStore) return postgresStore.getBackupHistory(limit);
+  if (!db) return [];
+  return db
+    .prepare('SELECT id, at, status, reason, name, offsite, error FROM backup_attempts ORDER BY id DESC LIMIT ?')
+    .all(Math.max(1, Math.min(50, Number(limit) || 10)))
+    .map((row) => ({
+      id: String(row.id),
+      at: row.at,
+      status: row.status,
+      reason: row.reason,
+      name: row.name || '',
+      offsite: Boolean(row.offsite),
+      error: row.error || '',
+    }));
 }
 
 async function readReportSettings() {
@@ -2407,6 +2468,7 @@ async function handleBackupApi(request, response, url) {
       json(response, 200, {
         ok: true,
         backups: await listServerBackups(),
+        history: await readBackupHistory(10),
         keep: backupKeep,
         hours: backupHours,
         offsite: { configured: Boolean(r2Config), bucket: r2Config?.bucket ?? '' },

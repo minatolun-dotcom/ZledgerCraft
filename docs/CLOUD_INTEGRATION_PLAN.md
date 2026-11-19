@@ -267,7 +267,7 @@ feature without breaking local development or the single-file build.
 | Phase 1 engine tests | pass | `node --test tests/` passed 219 with one conditional branch-test skip |
 | R2 upload tests | pass | `tests/server-cloud.test.mjs`, `tests/server-cloud-api.test.mjs` |
 | Resend/reset tests | pass | `tests/server-auth.test.mjs`, `tests/server-cloud-api.test.mjs` |
-| Pages build output | pass | `tests/build.test.mjs`; both documents are 841.8 kB |
+| Pages build output | pass | `tests/build.test.mjs`; both documents are 842.9 kB |
 | Browser regression | pass | Chromium and Firefox: 117 core + 105 advanced + 7 render + 9 login/reset + 6 axe screens + workspace merge |
 | Neon Auth sign-in | pass | Test Neon user signed in through `/api/auth/login`; owner profile created, `/api/auth/me` returned the session and the browser rendered the Gateway |
 | Neon Postgres workspace | pass | SQLite workspace copied to Neon; saves advanced revisions; meta read returned `storage: "postgres"`; lease acquire/release and hash-chained audit verified |
@@ -293,6 +293,7 @@ feature without breaking local development or the single-file build.
 | Report attempt status and failure alert | pass | `tests/server-reports-api.test.mjs` verifies the last attempt on success, a persisted Resend outage error and the failure email to `ops@example.com`; owner panel renders both |
 | Branded PDF attachment | pass | `tests/server-pdf.test.mjs` covers A4 output and multi-page reports; `tests/server-reports-api.test.mjs` verifies the Resend attachment and PDF signature |
 | Report history | pass | API test checks sent/failed rows, source and recipients; Neon branch test exercises the Postgres history table |
+| Backup history | pass | Server API and Neon branch tests create a backup and verify the stored history row, source, name and status |
 
 ## Progress log
 
@@ -473,3 +474,6 @@ and operate the current server with R2 and Resend enabled.
 - Added `report_attempts`/`zl_report_attempts` with the latest 50 attempts and
   exposed the ten newest, including source, recipients, status and error, in the
   owner report panel.
+- Added matching backup-attempt history (`backup_attempts`/`zl_backup_attempts`)
+  for daily, manual, warning and failed backups, with the ten newest in the
+  owner backup panel.

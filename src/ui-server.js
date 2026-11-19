@@ -170,6 +170,25 @@ export function serverUsersPanel({
             .join('')
         : '<tr><td colspan="4" class="muted">No server backups yet.</td></tr>'}</tbody>
     </table></div>
+    <h3 class="section-title">Recent backup attempts</h3>
+    <div class="table-scroll" tabindex="0"><table class="data-table compact">
+      <thead><tr><th>Time</th><th>Source</th><th>Result</th><th>Backup</th><th>Offsite</th><th>Error</th></tr></thead>
+      <tbody>${serverBackupInfo.history?.length
+        ? serverBackupInfo.history
+            .slice(0, 10)
+            .map(
+              (attempt) => `<tr>
+                <td>${esc(new Date(attempt.at).toLocaleString('en-IN'))}</td>
+                <td>${esc(attempt.reason || 'manual')}</td>
+                <td>${attempt.status === 'ok' ? 'OK' : attempt.status === 'warning' ? 'Warning' : 'Failed'}</td>
+                <td>${attempt.name ? `<code>${esc(attempt.name)}</code>` : '-'}</td>
+                <td>${attempt.offsite ? 'Yes' : 'No'}</td>
+                <td>${esc(attempt.error || '-')}</td>
+              </tr>`,
+            )
+            .join('')
+        : '<tr><td colspan="6" class="muted">No backup attempts yet.</td></tr>'}</tbody>
+    </table></div>
     <h3 class="section-title">Scheduled reports</h3>
     <p class="muted small">A signed daily management summary is emailed through Resend after the scheduled backup check. The link is read-only, expires automatically and never exposes the full workspace. ${reportSettings.emailConfigured ? 'Resend is configured.' : 'Resend is not configured on this server, so delivery and manual sends are disabled.'} ${reportSettings.secretConfigured ? '' : 'Set ZL_REPORT_SECRET (or a server password) to sign report links.'}</p>
     <form id="report-settings-form" class="form-grid">

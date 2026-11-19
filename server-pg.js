@@ -130,6 +130,16 @@ export class PostgresWorkspaceStore {
         error TEXT NOT NULL DEFAULT ''
       );
       CREATE INDEX IF NOT EXISTS zl_report_attempts_at ON zl_report_attempts(at DESC);
+      CREATE TABLE IF NOT EXISTS zl_backup_attempts (
+        id BIGSERIAL PRIMARY KEY,
+        at TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT 'manual',
+        name TEXT NOT NULL DEFAULT '',
+        offsite BOOLEAN NOT NULL DEFAULT FALSE,
+        error TEXT NOT NULL DEFAULT ''
+      );
+      CREATE INDEX IF NOT EXISTS zl_backup_attempts_at ON zl_backup_attempts(at DESC);
     `);
   }
 
@@ -500,6 +510,35 @@ export class PostgresWorkspaceStore {
       status: row.status,
       source: row.source,
       recipients: row.recipients || '',
+      error: row.error || '',
+    }));
+  }
+
+  async recordBackupAttempt({ status = 'ok', reason = 'manual', name = '', offsite = false, error = '', at = new Date().toISOString() } = {}) {
+    await this.pool.query(
+      `INSERT INTO zl_backup_attempts (at, status, reason, name, offsite, error)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [new Date(at), String(status), String(reason), String(name), Boolean(offsite), String(error).slice(0, 500)],
+    );
+    await this.pool.query(
+      `DELETE FROM zl_backup_attempts
+       WHERE id NOT IN (SELECT id FROM zl_backup_attempts ORDER BY id DESC LIMIT 50)`,
+    );
+  }
+
+  async getBackupHistory(limit = 10) {
+    const result = await this.pool.query(
+      `SELECT id, at, status, reason, name, offsite, error
+       FROM zl_backup_attempts ORDER BY id DESC LIMIT $1`,
+      [Math.max(1, Math.min(50, Number(limit) || 10))],
+    );
+    return result.rows.map((row) => ({
+      id: String(row.id),
+      at: new Date(row.at).toISOString(),
+      status: row.status,
+      reason: row.reason,
+      name: row.name || '',
+      offsite: Boolean(row.offsite),
       error: row.error || '',
     }));
   }

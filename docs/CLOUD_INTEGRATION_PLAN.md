@@ -164,12 +164,22 @@ Prerequisite: a decision that cloud/multi-device accounting is the next goal.
 
 ### Phase 3 — Scheduled reports and operational alerts
 
-Status: **not started**
+Status: **complete 2026-11-19 — daily signed management summary by Resend, driven by a Neon Function schedule trigger**
 
-- Add an expiring signed report link or server-rendered report export.
-- Schedule report delivery and backup checks with a proper scheduler.
-- Use Resend for delivery.
-- Do not run a full dump inside a free Cloudflare Worker cron (10 ms CPU).
+- [x] Add an expiring signed report link or server-rendered report export.
+  `GET /api/reports/daily?token=…` renders a read-only management summary from
+  live workspace state. The HMAC-signed link is scoped, defaults to seven days
+  and is rejected after expiry; it never exposes the full workspace dump.
+- [x] Schedule report delivery and backup checks with a proper scheduler.
+  A Neon Function Trigger calls `/api/internal/scheduler` daily at 02:30 UTC
+  (`30 2 * * *`) and runs the existing daily backup check plus report delivery.
+  Local/LAN servers use an hourly in-process scheduler with the same due check.
+- [x] Use Resend for delivery. Owners configure enabled/recipients under
+  Companies → Server accounts; “Send now” and “Preview signed link” are
+  available without waiting for the schedule.
+- [x] Do not run a full dump inside a free Cloudflare Worker cron. The trigger
+  runs in the Neon Function (Node 24), not a Worker; only a small summary is
+  built and mailed.
 
 ## Environment variables
 
@@ -206,6 +216,12 @@ feature without breaking local development or the single-file build.
 - `ZL_FUNCTION=1` (set by `neon.ts` for the Neon Function adapter)
 - `ZL_DATA_DIR`, `ZL_BACKUP_DIR` (function deployment uses `/tmp`; ephemeral)
 - `ZL_DISABLE_ENV_FILE=1` (optional; tests use this instead of `.env.local`)
+- `ZL_REPORT_SECRET` (required by `neon.ts` for the Function; otherwise signs
+  report links and falls back to `DATABASE_URL` or the owner password)
+- `ZL_REPORT_TTL_HOURS` (optional; default 168, clamped to 1–720)
+- `ZL_SCHEDULER_SECRET` (required by `neon.ts` for the Function; lets a manual
+  caller authenticate to `/api/internal/scheduler`; Neon trigger deliveries use
+  `x-neon-trigger-invocation-id`)
 
 ### Cloudflare Worker
 
@@ -247,7 +263,7 @@ feature without breaking local development or the single-file build.
 | Phase 1 engine tests | pass | `node --test tests/` passed 219 with one conditional branch-test skip |
 | R2 upload tests | pass | `tests/server-cloud.test.mjs`, `tests/server-cloud-api.test.mjs` |
 | Resend/reset tests | pass | `tests/server-auth.test.mjs`, `tests/server-cloud-api.test.mjs` |
-| Pages build output | pass | `tests/build.test.mjs`; both documents are 835.7 kB |
+| Pages build output | pass | `tests/build.test.mjs`; both documents are 840.5 kB |
 | Browser regression | pass | Chromium and Firefox: 117 core + 105 advanced + 7 render + 9 login/reset + 6 axe screens + workspace merge |
 | Neon Auth sign-in | pass | Test Neon user signed in through `/api/auth/login`; owner profile created, `/api/auth/me` returned the session and the browser rendered the Gateway |
 | Neon Postgres workspace | pass | SQLite workspace copied to Neon; saves advanced revisions; meta read returned `storage: "postgres"`; lease acquire/release and hash-chained audit verified |
@@ -265,6 +281,9 @@ feature without breaking local development or the single-file build.
 | Production smoke cleanup | pass | Test Neon Auth users, profiles, sessions, login events and workspace rows were removed; production auth tables are empty and `zl_workspace` is the empty state |
 | Neon branch integration | pass | `npm run test:neon` created and deleted a temporary branch; Postgres save/reload, leases and both audit chains passed |
 | WebKit | not run locally | CI installs the host libraries and runs `BROWSER=webkit` |
+| Scheduled report links | pass | `tests/server-reports.test.mjs` covers signing, tamper/expiry rejection, recipient validation and summary calculation |
+| Report delivery and scheduler | pass | `tests/server-reports-api.test.mjs` covers owner settings, signed preview/download, Resend payload and authenticated scheduler backup/`already-sent` |
+| Postgres report settings | pass | Neon branch test saves and rereads report settings through `zl_report_settings` |
 
 ## Progress log
 
@@ -416,3 +435,22 @@ and operate the current server with R2 and Resend enabled.
   downloads and verifies it before the normal pre-restore backup.
 - R2 remains the durable destination; retention is still delegated to a bucket
   lifecycle rule. Neon Auth still has no MFA and Neon Functions can cold-start.
+
+### 2026-11-19 — Phase 3: scheduled reports and operational alerts
+
+- Added `server-reports.js`: HMAC-signed expiring links, a read-only daily
+  management summary and HTML/text email rendering. The summary uses live
+  trial-balance and ledger totals; it is not a workspace dump.
+- Added `zl_report_settings` (Postgres) and `report_settings` (SQLite) plus the
+  owner endpoints `GET/PUT /api/reports/settings`, `POST /api/reports/preview`
+  and `POST /api/reports/send`.
+- Added the public signed report route at `/api/reports/daily`; no session is
+  required, but the token must be valid and unexpired.
+- Added `/api/internal/scheduler`, guarded by the Neon trigger invocation
+  header or an optional `ZL_SCHEDULER_SECRET`. It runs the daily backup check
+  and sends the report once per UTC day when enabled.
+- Declared the `daily-operations` Neon Function Trigger at `30 2 * * *`; local
+  servers use an hourly timer with the same due logic. No Cloudflare Worker
+  cron builds a report.
+- Added owner controls in Companies → Server accounts for recipients, enabled,
+  send-now and signed-link preview.

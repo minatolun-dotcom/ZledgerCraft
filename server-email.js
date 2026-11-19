@@ -40,8 +40,10 @@ export async function sendEmail(
   { fetchImpl = fetch, timeoutMs = 15_000 } = {},
 ) {
   if (!config) throw new Error('Email is not configured.');
-  const recipient = text(to);
-  if (!recipient) throw new Error('An email recipient is required.');
+  const recipients = (Array.isArray(to) ? to : String(to ?? '').split(','))
+    .map((item) => text(item))
+    .filter(Boolean);
+  if (!recipients.length) throw new Error('An email recipient is required.');
   let response;
   try {
     response = await fetchImpl(config.endpoint, {
@@ -52,7 +54,7 @@ export async function sendEmail(
       },
       body: JSON.stringify({
         from: config.from,
-        to: [recipient],
+        to: recipients,
         subject,
         text: bodyText,
         ...(html ? { html } : {}),

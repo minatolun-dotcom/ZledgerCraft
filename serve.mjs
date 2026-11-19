@@ -1,6 +1,6 @@
 // ZledgerCraft - static server with SQLite or Neon Postgres workspace storage.
 import './server-env.js';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { networkInterfaces } from 'node:os';
@@ -9,7 +9,7 @@ import { extname, isAbsolute, join, normalize, relative, resolve, sep } from 'no
 import { fileURLToPath } from 'node:url';
 import { AuthStore, generateTotpSecret, totpUri } from './server-auth.js';
 import { PostgresAuthStore } from './server-auth-pg.js';
-import { emailConfiguration, sendBackupFailureEmail, sendPasswordResetEmail } from './server-email.js';
+import { emailConfiguration, sendBackupFailureEmail, sendEmail, sendPasswordResetEmail } from './server-email.js';
 import { neonAuthConfiguration, neonForgotPassword, neonResetPassword, neonSignIn, neonSignUp } from './server-neon-auth.js';
 import { createPostgresPool, PostgresWorkspaceStore } from './server-pg.js';
 import {
@@ -21,6 +21,17 @@ import {
 } from './server-r2.js';
 import { deepEqual, mergeWorkspaceStates, repairVoucherNumbers } from './server-merge.js';
 import { readWorkspaceSnapshot, WorkspaceStore } from './server-workspace.js';
+import {
+  buildDailyReport,
+  createReportToken,
+  normalizeRecipients,
+  reportHtml,
+  reportSecret,
+  reportSubject,
+  reportText,
+  reportTtlMs,
+  verifyReportToken,
+} from './server-reports.js';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const port = Number(process.env.PORT ?? 4173);
@@ -83,6 +94,8 @@ const emailConfig = emailConfiguration(process.env);
 const alertEmail = String(process.env.ZL_ALERT_EMAIL || '').trim();
 const LOGIN_IP_LIMIT = { maxFailures: 8, windowMs: 60_000, lockMs: 60_000 };
 const FORGOT_IP_LIMIT = { maxFailures: 5, windowMs: 15 * 60_000, lockMs: 15 * 60_000 };
+const signingSecret = reportSecret(process.env);
+const reportTtl = reportTtlMs(process.env);
 let workspaceWriteQueue = Promise.resolve();
 let backupTimer = null;
 
@@ -142,6 +155,13 @@ if (DatabaseSync) {
       detail TEXT NOT NULL DEFAULT '',
       prev_hash TEXT NOT NULL DEFAULT '',
       hash TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS report_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      enabled INTEGER NOT NULL DEFAULT 0,
+      recipients TEXT NOT NULL DEFAULT '',
+      last_sent_at TEXT,
+      updated_at TEXT NOT NULL
     );
   `);
   const auditColumns = db.prepare('PRAGMA table_info(workspace_audit)').all();
@@ -897,6 +917,246 @@ function scheduleServerBackupCheck() {
     maybeCreateDailyServerBackup().catch((error) => console.error(`Server backup failed: ${error.message}`));
   }, 1500);
   backupTimer.unref?.();
+}
+
+async function readReportSettings() {
+  if (postgresStore) return postgresStore.getReportSettings();
+  if (!db) return { enabled: false, recipients: '', lastSentAt: null, updatedAt: null };
+  const row = db
+    .prepare('SELECT enabled, recipients, last_sent_at, updated_at FROM report_settings WHERE id = 1')
+    .get();
+  return {
+    enabled: Boolean(row?.enabled),
+    recipients: row?.recipients || '',
+    lastSentAt: row?.last_sent_at || null,
+    updatedAt: row?.updated_at || null,
+  };
+}
+
+async function writeReportSettings({ enabled = false, recipients = '', lastSentAt = null } = {}) {
+  if (postgresStore) {
+    return postgresStore.saveReportSettings({ enabled, recipients, lastSentAt });
+  }
+  if (!db) throw new Error('Scheduled reports require server storage.');
+  db.prepare(
+    `INSERT INTO report_settings (id, enabled, recipients, last_sent_at, updated_at)
+     VALUES (1, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       enabled = excluded.enabled,
+       recipients = excluded.recipients,
+       last_sent_at = COALESCE(excluded.last_sent_at, report_settings.last_sent_at),
+       updated_at = excluded.updated_at`,
+  ).run(enabled ? 1 : 0, String(recipients), lastSentAt, new Date().toISOString());
+  return readReportSettings();
+}
+
+function reportBaseUrl(request = null) {
+  const configured = emailConfig?.publicUrl || String(process.env.ZL_PUBLIC_URL || '').trim();
+  if (configured) return configured.replace(/\/+$/, '');
+  if (request) {
+    const proto =
+      String(request.headers['x-forwarded-proto'] || '').split(',')[0].trim() ||
+      (tlsEnabled ? 'https' : 'http');
+    const host = request.headers['x-forwarded-host'] || request.headers.host || `127.0.0.1:${port}`;
+    return `${proto}://${host}`;
+  }
+  return '';
+}
+
+function signedReportUrl(request = null, now = Date.now()) {
+  if (!signingSecret) throw new Error('Report links are not configured. Set ZL_REPORT_SECRET.');
+  const token = createReportToken(signingSecret, { now, ttlMs: reportTtl });
+  const base = reportBaseUrl(request);
+  if (!base) throw new Error('Set ZL_PUBLIC_URL to generate report links.');
+  return {
+    url: `${base}/api/reports/daily?token=${encodeURIComponent(token)}`,
+    expiresAt: new Date(now + reportTtl).toISOString(),
+  };
+}
+
+async function latestBackupForReport() {
+  try {
+    const backups = await listServerBackups();
+    const latest = backups[0];
+    if (!latest) return null;
+    return {
+      name: latest.name,
+      createdAt: latest.createdAt,
+      offsite: Boolean(latest.offsite),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function sendDailyReport({ force = false, request = null } = {}) {
+  const settings = await readReportSettings();
+  if (!force && !settings.enabled) return { skipped: 'disabled' };
+  if (!force && settings.lastSentAt?.slice(0, 10) === new Date().toISOString().slice(0, 10)) {
+    return { skipped: 'already-sent' };
+  }
+  const parsed = normalizeRecipients(settings.recipients);
+  if (!parsed.ok) throw new Error(parsed.error);
+  if (!parsed.recipients.length) throw new Error('Add at least one report recipient.');
+  if (!emailConfig) throw new Error('Resend email is not configured on this server.');
+  const signed = signedReportUrl(request);
+  const saved = await workspaceStore.read();
+  const report = buildDailyReport(saved.state, {
+    backup: await latestBackupForReport(),
+    recipients: parsed.recipients,
+  });
+  await sendEmail(
+    {
+      to: parsed.recipients,
+      subject: reportSubject(report),
+      text: reportText(report, signed),
+      html: reportHtml(report, signed),
+    },
+    emailConfig,
+  );
+  await writeReportSettings({
+    enabled: settings.enabled,
+    recipients: settings.recipients,
+    lastSentAt: new Date().toISOString(),
+  });
+  appendServerEvent(
+    { id: 'system', username: 'scheduler', role: 'owner' },
+    'report.send',
+    parsed.recipients.join(', '),
+    `${report.companies.length} company(ies)`,
+  );
+  return { sent: true, recipients: parsed.recipients, report, url: signed.url, expiresAt: signed.expiresAt };
+}
+
+async function runScheduledJobs() {
+  let backup = null;
+  let backupError = '';
+  try {
+    backup = await maybeCreateDailyServerBackup();
+  } catch (error) {
+    backupError = error.message || 'Daily backup failed.';
+    console.error(`Scheduled backup failed: ${backupError}`);
+  }
+  let report = null;
+  let reportError = '';
+  try {
+    report = await sendDailyReport({ force: false });
+  } catch (error) {
+    reportError = error.message || 'Scheduled report failed.';
+    console.error(`Scheduled report failed: ${reportError}`);
+  }
+  return {
+    ok: !backupError && !reportError,
+    backup: backup ? { name: backup.name, offsite: Boolean(backup.offsite?.ok) } : null,
+    backupError,
+    report: report?.sent ? { recipients: report.recipients.length, expiresAt: report.expiresAt } : report?.skipped || null,
+    reportError,
+  };
+}
+
+function schedulerAuthorized(request) {
+  const configured = String(process.env.ZL_SCHEDULER_SECRET || '');
+  const supplied = String(request.headers['x-zl-scheduler-secret'] || '');
+  if (configured && supplied) {
+    const expected = Buffer.from(configured);
+    const actual = Buffer.from(supplied);
+    if (expected.length === actual.length && timingSafeEqual(expected, actual)) return true;
+  }
+  return Boolean(request.headers['x-neon-trigger-invocation-id']);
+}
+
+async function handleReportApi(request, response, url, pathname) {
+  if (pathname === '/api/reports/daily' && request.method === 'GET') {
+    const verified = verifyReportToken(signingSecret, url.searchParams.get('token') || '');
+    if (!verified.ok) {
+      response.writeHead(verified.reason === 'expired' ? 410 : 401, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+      });
+      response.end(
+        `<!doctype html><meta charset="utf-8"><title>Report link unavailable</title><p>${verified.reason === 'expired' ? 'This report link has expired.' : 'This report link is invalid.'} Ask an owner for a new daily summary.</p>`,
+      );
+      return;
+    }
+    try {
+      const saved = await workspaceStore.read();
+      const report = buildDailyReport(saved.state, { backup: await latestBackupForReport() });
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+      });
+      response.end(reportHtml(report, { expiresAt: verified.expiresAt }));
+    } catch (error) {
+      json(response, 500, { ok: false, error: error.message || 'Could not build the report.' });
+    }
+    return;
+  }
+
+  const owner = await requireOwner(request, response);
+  if (!owner) return;
+  if (pathname === '/api/reports/settings' && request.method === 'GET') {
+    const settings = await readReportSettings();
+    json(response, 200, {
+      ok: true,
+      settings,
+      emailConfigured: Boolean(emailConfig),
+      secretConfigured: Boolean(signingSecret),
+      publicUrl: reportBaseUrl(request),
+    });
+    return;
+  }
+  if (pathname === '/api/reports/settings' && request.method === 'PUT') {
+    if (!sameOrigin(request)) {
+      json(response, 403, { ok: false, error: 'Cross-origin report settings are not allowed.' });
+      return;
+    }
+    let body;
+    try {
+      body = JSON.parse(await readBody(request));
+    } catch {
+      json(response, 400, { ok: false, error: 'Send report settings as JSON.' });
+      return;
+    }
+    const recipients = normalizeRecipients(body?.recipients ?? '');
+    if (!recipients.ok) {
+      json(response, 400, { ok: false, error: recipients.error });
+      return;
+    }
+    const updated = await writeReportSettings({
+      enabled: Boolean(body?.enabled),
+      recipients: recipients.recipients.join(', '),
+    });
+    json(response, 200, { ok: true, settings: updated });
+    return;
+  }
+  if (pathname === '/api/reports/preview' && request.method === 'POST') {
+    if (!sameOrigin(request)) {
+      json(response, 403, { ok: false, error: 'Cross-origin report previews are not allowed.' });
+      return;
+    }
+    try {
+      const signed = signedReportUrl(request);
+      json(response, 200, { ok: true, ...signed });
+    } catch (error) {
+      json(response, 503, { ok: false, error: error.message });
+    }
+    return;
+  }
+  if (pathname === '/api/reports/send' && request.method === 'POST') {
+    if (!sameOrigin(request)) {
+      json(response, 403, { ok: false, error: 'Cross-origin report requests are not allowed.' });
+      return;
+    }
+    try {
+      const result = await sendDailyReport({ force: true, request });
+      json(response, 200, { ok: true, ...result });
+    } catch (error) {
+      json(response, 503, { ok: false, error: error.message || 'Could not send the report.' });
+    }
+    return;
+  }
+  response.writeHead(405, { allow: 'GET, PUT, POST' });
+  response.end();
 }
 
 function accountantWriteError(previous, next) {
@@ -2096,6 +2356,25 @@ export async function requestHandler(request, response) {
     response.end('Bad request');
     return;
   }
+  if (pathname === '/api/internal/scheduler') {
+    if (request.method !== 'POST' || !schedulerAuthorized(request)) {
+      json(response, request.method === 'POST' ? 401 : 405, {
+        ok: false,
+        error: 'Scheduler authorization is required.',
+      });
+      return;
+    }
+    try {
+      json(response, 200, { ok: true, ...(await runScheduledJobs()) });
+    } catch (error) {
+      json(response, 500, { ok: false, error: error.message || 'Scheduled jobs failed.' });
+    }
+    return;
+  }
+  if (pathname.startsWith('/api/reports/')) {
+    await handleReportApi(request, response, requestUrl, pathname);
+    return;
+  }
   if (pathname.startsWith('/api/auth/')) {
     await handleAuthApi(request, response, requestUrl);
     return;
@@ -2210,5 +2489,10 @@ if (!functionMode) server.listen(port, host, () => {
   if (!functionMode && workspaceStore && (postgresStore || (db && sqliteBackup))) {
     scheduleServerBackupCheck();
     setInterval(scheduleServerBackupCheck, backupHours * 3600000).unref?.();
+    setTimeout(() => runScheduledJobs().catch((error) => console.error(`Scheduled jobs failed: ${error.message}`)), 5000).unref?.();
+    setInterval(
+      () => runScheduledJobs().catch((error) => console.error(`Scheduled jobs failed: ${error.message}`)),
+      3600000,
+    ).unref?.();
   }
 });

@@ -25,6 +25,7 @@ export function serverUsersPanel({
   serverEventChain,
   serverBackups,
   serverBackupInfo,
+  reportSettings,
   authLoginEvents,
   neonAuth,
   postgres,
@@ -169,6 +170,18 @@ export function serverUsersPanel({
             .join('')
         : '<tr><td colspan="4" class="muted">No server backups yet.</td></tr>'}</tbody>
     </table></div>
+    <h3 class="section-title">Scheduled reports</h3>
+    <p class="muted small">A signed daily management summary is emailed through Resend after the scheduled backup check. The link is read-only, expires automatically and never exposes the full workspace. ${reportSettings.emailConfigured ? 'Resend is configured.' : 'Resend is not configured on this server, so delivery and manual sends are disabled.'} ${reportSettings.secretConfigured ? '' : 'Set ZL_REPORT_SECRET (or a server password) to sign report links.'}</p>
+    <form id="report-settings-form" class="form-grid">
+      <label class="field inline-field"><input type="checkbox" name="enabled" ${reportSettings.enabled ? 'checked' : ''}> <span>Email the daily summary automatically</span></label>
+      <label class="field"><span>Recipients</span><input name="recipients" maxlength="1000" placeholder="owner@example.com, accounts@example.com" value="${esc(reportSettings.recipients || '')}"><small class="muted">Comma, semicolon or whitespace separated; up to 10 addresses.</small></label>
+      <div class="field form-actions">
+        <button class="btn primary" type="button" data-action="save-report-settings">Save report settings</button>
+        <button class="btn" type="button" data-action="send-report-now">Send now</button>
+        <button class="btn" type="button" data-action="preview-report">Preview signed link</button>
+      </div>
+    </form>
+    <p class="muted small">${reportSettings.lastSentAt ? `Last report sent ${esc(new Date(reportSettings.lastSentAt).toLocaleString('en-IN'))}.` : 'No report has been sent from this workspace yet.'}</p>
     <h3 class="section-title">Recent sign-ins</h3>
     <p class="muted small">A sign-in attempt log is kept on the server. Passwords are never recorded. Signing out an account ends every current session for that account.</p>
     <div class="form-actions"><button class="btn small" type="button" data-action="refresh-auth-logins">Refresh sign-ins</button></div>

@@ -144,6 +144,19 @@ test(
       assert.equal(released.status, 200, JSON.stringify(released.body));
       assert.equal(released.body.released, true);
 
+      const reportSettings = await owner.request('/api/reports/settings');
+      assert.equal(reportSettings.status, 200, JSON.stringify(reportSettings.body));
+      assert.equal(reportSettings.body.settings.enabled, false);
+      const savedSettings = await owner.request('/api/reports/settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: true, recipients: 'owner@example.com' }),
+      });
+      assert.equal(savedSettings.status, 200, JSON.stringify(savedSettings.body));
+      assert.equal(savedSettings.body.settings.enabled, true);
+      const rereadSettings = await owner.request('/api/reports/settings');
+      assert.equal(rereadSettings.body.settings.recipients, 'owner@example.com');
+
       const audit = await owner.request('/api/server-audit');
       assert.equal(audit.status, 200, JSON.stringify(audit.body));
       assert.equal(audit.body.chain.ok, true);

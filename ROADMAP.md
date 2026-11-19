@@ -45,7 +45,8 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 **Recommended next work:** follow the free-path order in
 [KNOWN_LIMITS.md § Remaining limits and free paths](KNOWN_LIMITS.md#remaining-limits-and-free-paths):
 MFA policy and voucher approvals, app-level encryption, incremental
-master-column promotion, APIs/webhooks and statutory integrations.
+master-column promotion, APIs/webhooks, branded PDF reports and statutory
+integrations.
 
 Working now:
 
@@ -259,7 +260,7 @@ Status: **Done**, **Partial**, **Missing**.
 | Stock ageing, godown, reorder and price-list reports | Partial — godown and batch balance reports exist; no stock ageing, reorder or price-list reports |
 | Audit trail report | Done (Stage 1) |
 | Charts, trends and forecasts | Partial — monthly sales/purchase chart and a three-month run-rate; no seasonality, growth or statistical forecasts |
-| Excel, branded PDF and scheduled email reports | Partial — Excel export exists; branded PDF and scheduled email are missing |
+| Excel, branded PDF and scheduled email reports | Partial — Excel export and Resend scheduled daily summaries exist; branded PDF and deeper forecasts are missing |
 | Custom print-layout designer | Missing |
 
 ### Security, platform and operations — Missing
@@ -271,7 +272,7 @@ Status: **Done**, **Partial**, **Missing**.
 | Immutable audit/edit log | Done (Stage 1, local append-only; not cryptographic) |
 | Backend database instead of browser storage | Partial — local SQLite with normalized company/ledger/voucher/line tables, a row table for every remaining company collection, atomic revisioned saves and automatic legacy migration; no offsite persistence |
 | Multi-user concurrency and cloud sync | Partial — LAN auth, revision checks, conservative merge (including scoped accounts), normalized collection rows and enforced voucher edit leases are done; no field-level conflict history or cloud sync |
-| Scheduled/offsite backups and retention | Partial — verified daily SQLite backups, retention, manual backup/download/restore and pre-restore snapshots are done; optional R2 upload and failure email are implemented, but there is no automatic remote restore or client-side backup encryption |
+| Scheduled/offsite backups and retention | Partial — verified daily backups, retention, manual backup/download/restore, pre-restore snapshots, R2 upload, remote listing/download/restore and failure email are done; no client-side backup encryption |
 | Tally XML and Excel master/voucher import | Partial — Tally XML account groups, ledgers, stock groups, stock items with opening stock, balanced vouchers and matching voucher stock lines import; batch names/expiry attach to locally batch-tracked items; Excel `.xlsx` ledgers and vouchers load into the reviewed CSV path; custom Tally groups need a standard parent and units must pre-exist; skipped stock lines do not roll back the voucher; no batch masters, bill allocations, cost centres, GST/TDS detail, voucher numbers, APIs or webhooks |
 | API/webhooks and integrations | Missing |
 | Mobile-first layout | Partial (responsive desktop web) |
@@ -322,9 +323,22 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [x] Inventory: godowns, batches, BOM/manufacturing, orders, transfers — 2026-11-18 (batch/expiry, transfers, orders and production; no physical count, wastage, job work or WIP posting)
 - [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, normalized collection rows, conservative three-way merge (including scoped accounts), revision-checked writes, conflict/reload flow, enforced voucher edit leases, LAN server authentication and company-level scoping done 2026-11-19; Neon Postgres workspace, Postgres profiles/sessions/login state, shared Postgres login/reset rate limits, Postgres JSON backups with R2 listing/restore, Neon Auth login, same-origin auth proxy, Neon Function deployment, Cloudflare Worker API proxy, branch integration test and production smoke test done 2026-11-19; field-level conflict history pending
 - [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; Tally batch masters/opening batches, GST/discount stock-line splits, APIs and webhooks pending
-- [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate and Excel export done 2026-11-18; scheduled email and deeper forecasts pending
+- [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export and Resend scheduled daily summaries done 2026-11-19; branded PDF and deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-19 — Phase 3: scheduled daily reports and alerts
+
+- Added a signed, expiring read-only daily management summary rendered from the
+  live workspace. Links default to seven days and reject tampered/expired
+  tokens.
+- Added owner settings for recipients/enabled, send-now and preview, plus
+  `report_settings`/`zl_report_settings` persistence.
+- Declared a Neon Function Trigger (`30 2 * * *` UTC) that runs the daily backup
+  check and report delivery; local/LAN servers use an hourly due check.
+- Resend delivers the summary; no full workspace dump is built in a Worker cron.
+- Verification: report unit and API tests pass, including signed-link retrieval,
+  Resend payload, scheduler authorization and Postgres settings persistence.
 
 ### 2026-11-19 — Shared source limits and durable R2 recovery
 

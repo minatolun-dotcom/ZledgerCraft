@@ -282,6 +282,15 @@ export let authInfo = null;
 export let authAccounts = [];
 export let serverBackups = [];
 export let serverBackupInfo = { keep: 7, hours: 24, offsite: { configured: false, bucket: '' } };
+export let reportSettings = {
+  enabled: false,
+  recipients: '',
+  lastSentAt: null,
+  updatedAt: null,
+  emailConfigured: false,
+  secretConfigured: false,
+  publicUrl: '',
+};
 export let authLoginEvents = [];
 export let authSessions = [];
 export let serverAuditRows = [];
@@ -423,6 +432,35 @@ async function refreshServerBackups() {
     }
   } catch {
     serverBackups = [];
+  }
+}
+
+async function refreshReportSettings() {
+  if (!authRequired || authUser?.role !== 'owner') {
+    reportSettings = {
+      enabled: false,
+      recipients: '',
+      lastSentAt: null,
+      updatedAt: null,
+      emailConfigured: false,
+      secretConfigured: false,
+      publicUrl: '',
+    };
+    return;
+  }
+  try {
+    const response = await fetch('/api/reports/settings', { cache: 'no-store' });
+    const payload = await response.json();
+    if (response.ok && payload.ok) {
+      reportSettings = {
+        ...payload.settings,
+        emailConfigured: Boolean(payload.emailConfigured),
+        secretConfigured: Boolean(payload.secretConfigured),
+        publicUrl: payload.publicUrl || '',
+      };
+    }
+  } catch {
+    // Leave the last known settings visible when the server is unreachable.
   }
 }
 
@@ -4090,6 +4128,70 @@ async function handleClick(event) {
         });
       break;
     }
+    case 'save-report-settings': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      const form = document.getElementById('report-settings-form');
+      if (!form) break;
+      fetch('/api/reports/settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          enabled: Boolean(form.elements.enabled?.checked),
+          recipients: form.elements.recipients?.value || '',
+        }),
+      })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not save report settings.');
+          await refreshReportSettings();
+          setFlash('Scheduled report settings saved.');
+          render();
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
+    case 'send-report-now': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      fetch('/api/reports/send', { method: 'POST' })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not send the report.');
+          await refreshReportSettings();
+          setFlash(`Daily summary sent to ${payload.recipients?.length || 0} recipient(s).`);
+          render();
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
+    case 'preview-report': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      fetch('/api/reports/preview', { method: 'POST' })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not create a report preview.');
+          window.open(payload.url, '_blank', 'noopener');
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
     case 'refresh-server-backups': {
       if (!can('user.manage')) {
         requirePermission('user.manage');
@@ -5014,6 +5116,7 @@ export async function startUI() {
   }
   if (authUser?.role === 'owner') await refreshAuthAccounts();
   if (authUser?.role === 'owner') await refreshServerBackups();
+  if (authUser?.role === 'owner') await refreshReportSettings();
   if (authUser?.role === 'owner') await refreshAuthLogins();
   if (authUser?.role === 'owner') await refreshAuthSessions();
   if (authUser?.role === 'owner') await refreshServerAudit();

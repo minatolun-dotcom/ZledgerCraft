@@ -110,6 +110,13 @@ export class PostgresWorkspaceStore {
         prev_hash TEXT NOT NULL,
         hash TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS zl_report_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        recipients TEXT NOT NULL DEFAULT '',
+        last_sent_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL
+      );
     `);
   }
 
@@ -409,6 +416,47 @@ export class PostgresWorkspaceStore {
       previous = row.hash;
     }
     return { ok: true, checked: result.rows.length };
+  }
+
+  async getReportSettings() {
+    const result = await this.pool.query(
+      'SELECT enabled, recipients, last_sent_at, updated_at FROM zl_report_settings WHERE id = 1',
+    );
+    if (!result.rowCount) {
+      return { enabled: false, recipients: '', lastSentAt: null, updatedAt: null };
+    }
+    const row = result.rows[0];
+    return {
+      enabled: Boolean(row.enabled),
+      recipients: row.recipients || '',
+      lastSentAt: row.last_sent_at ? new Date(row.last_sent_at).toISOString() : null,
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  }
+
+  async saveReportSettings({ enabled = false, recipients = '', lastSentAt = null } = {}) {
+    const result = await this.pool.query(
+      `INSERT INTO zl_report_settings (id, enabled, recipients, last_sent_at, updated_at)
+       VALUES (1, $1, $2, $3, now())
+       ON CONFLICT (id) DO UPDATE SET
+         enabled = excluded.enabled,
+         recipients = excluded.recipients,
+         last_sent_at = COALESCE(excluded.last_sent_at, zl_report_settings.last_sent_at),
+         updated_at = now()
+       RETURNING enabled, recipients, last_sent_at, updated_at`,
+      [Boolean(enabled), String(recipients), lastSentAt ? new Date(lastSentAt) : null],
+    );
+    return this.getReportSettings();
+  }
+
+  async markReportSent(at = new Date().toISOString()) {
+    await this.pool.query(
+      `INSERT INTO zl_report_settings (id, enabled, recipients, last_sent_at, updated_at)
+       VALUES (1, FALSE, '', $1, now())
+       ON CONFLICT (id) DO UPDATE SET last_sent_at = excluded.last_sent_at, updated_at = now()`,
+      [new Date(at)],
+    );
+    return this.getReportSettings();
   }
 
   async appendServerEvent(row) {

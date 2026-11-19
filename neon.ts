@@ -12,6 +12,8 @@ export default defineConfig({
         RESEND_FROM: { value: process.env.RESEND_FROM, required: true },
         ZL_ALERT_EMAIL: { value: process.env.ZL_ALERT_EMAIL, required: true },
         ZL_PUBLIC_URL: { value: process.env.ZL_PUBLIC_URL, required: true },
+        ZL_REPORT_SECRET: { value: process.env.ZL_REPORT_SECRET, required: true },
+        ZL_SCHEDULER_SECRET: { value: process.env.ZL_SCHEDULER_SECRET, required: true },
         R2_ACCOUNT_ID: { value: process.env.R2_ACCOUNT_ID, required: true },
         R2_ACCESS_KEY_ID: { value: process.env.R2_ACCESS_KEY_ID, required: true },
         R2_SECRET_ACCESS_KEY: { value: process.env.R2_SECRET_ACCESS_KEY, required: true },
@@ -22,6 +24,14 @@ export default defineConfig({
         ZL_BACKUP_DIR: '/tmp/zledgercraft/backups',
         ZL_PG_POOL_SIZE: '5',
       },
+    },
+  },
+  triggers: {
+    'daily-operations': {
+      type: 'schedule',
+      function: 'zledgercraft',
+      cron: '30 2 * * *',
+      functionPath: '/api/internal/scheduler',
     },
   },
   // Branch policy: per-branch tuning

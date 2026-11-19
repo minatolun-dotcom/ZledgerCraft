@@ -11565,6 +11565,7 @@ function serverUsersPanel({
   serverEventChain,
   serverBackups,
   serverBackupInfo,
+  reportSettings,
   authLoginEvents,
   neonAuth,
   postgres,
@@ -11709,6 +11710,18 @@ function serverUsersPanel({
             .join('')
         : '<tr><td colspan="4" class="muted">No server backups yet.</td></tr>'}</tbody>
     </table></div>
+    <h3 class="section-title">Scheduled reports</h3>
+    <p class="muted small">A signed daily management summary is emailed through Resend after the scheduled backup check. The link is read-only, expires automatically and never exposes the full workspace. ${reportSettings.emailConfigured ? 'Resend is configured.' : 'Resend is not configured on this server, so delivery and manual sends are disabled.'} ${reportSettings.secretConfigured ? '' : 'Set ZL_REPORT_SECRET (or a server password) to sign report links.'}</p>
+    <form id="report-settings-form" class="form-grid">
+      <label class="field inline-field"><input type="checkbox" name="enabled" ${reportSettings.enabled ? 'checked' : ''}> <span>Email the daily summary automatically</span></label>
+      <label class="field"><span>Recipients</span><input name="recipients" maxlength="1000" placeholder="owner@example.com, accounts@example.com" value="${esc(reportSettings.recipients || '')}"><small class="muted">Comma, semicolon or whitespace separated; up to 10 addresses.</small></label>
+      <div class="field form-actions">
+        <button class="btn primary" type="button" data-action="save-report-settings">Save report settings</button>
+        <button class="btn" type="button" data-action="send-report-now">Send now</button>
+        <button class="btn" type="button" data-action="preview-report">Preview signed link</button>
+      </div>
+    </form>
+    <p class="muted small">${reportSettings.lastSentAt ? `Last report sent ${esc(new Date(reportSettings.lastSentAt).toLocaleString('en-IN'))}.` : 'No report has been sent from this workspace yet.'}</p>
     <h3 class="section-title">Recent sign-ins</h3>
     <p class="muted small">A sign-in attempt log is kept on the server. Passwords are never recorded. Signing out an account ends every current session for that account.</p>
     <div class="form-actions"><button class="btn small" type="button" data-action="refresh-auth-logins">Refresh sign-ins</button></div>
@@ -11923,6 +11936,7 @@ function usersPanel() {
       serverEventChain,
       serverBackups,
       serverBackupInfo,
+      reportSettings,
       authLoginEvents,
       neonAuth: Boolean(authInfo?.neonAuth),
       postgres: Boolean(authInfo?.postgres),
@@ -16652,6 +16666,15 @@ let authInfo = null;
 let authAccounts = [];
 let serverBackups = [];
 let serverBackupInfo = { keep: 7, hours: 24, offsite: { configured: false, bucket: '' } };
+let reportSettings = {
+  enabled: false,
+  recipients: '',
+  lastSentAt: null,
+  updatedAt: null,
+  emailConfigured: false,
+  secretConfigured: false,
+  publicUrl: '',
+};
 let authLoginEvents = [];
 let authSessions = [];
 let serverAuditRows = [];
@@ -16793,6 +16816,35 @@ async function refreshServerBackups() {
     }
   } catch {
     serverBackups = [];
+  }
+}
+
+async function refreshReportSettings() {
+  if (!authRequired || authUser?.role !== 'owner') {
+    reportSettings = {
+      enabled: false,
+      recipients: '',
+      lastSentAt: null,
+      updatedAt: null,
+      emailConfigured: false,
+      secretConfigured: false,
+      publicUrl: '',
+    };
+    return;
+  }
+  try {
+    const response = await fetch('/api/reports/settings', { cache: 'no-store' });
+    const payload = await response.json();
+    if (response.ok && payload.ok) {
+      reportSettings = {
+        ...payload.settings,
+        emailConfigured: Boolean(payload.emailConfigured),
+        secretConfigured: Boolean(payload.secretConfigured),
+        publicUrl: payload.publicUrl || '',
+      };
+    }
+  } catch {
+    // Leave the last known settings visible when the server is unreachable.
   }
 }
 
@@ -20460,6 +20512,70 @@ async function handleClick(event) {
         });
       break;
     }
+    case 'save-report-settings': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      const form = document.getElementById('report-settings-form');
+      if (!form) break;
+      fetch('/api/reports/settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          enabled: Boolean(form.elements.enabled?.checked),
+          recipients: form.elements.recipients?.value || '',
+        }),
+      })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not save report settings.');
+          await refreshReportSettings();
+          setFlash('Scheduled report settings saved.');
+          render();
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
+    case 'send-report-now': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      fetch('/api/reports/send', { method: 'POST' })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not send the report.');
+          await refreshReportSettings();
+          setFlash(`Daily summary sent to ${payload.recipients?.length || 0} recipient(s).`);
+          render();
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
+    case 'preview-report': {
+      if (!can('user.manage')) {
+        requirePermission('user.manage');
+        break;
+      }
+      fetch('/api/reports/preview', { method: 'POST' })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not create a report preview.');
+          window.open(payload.url, '_blank', 'noopener');
+        })
+        .catch((error) => {
+          setFlash(error.message, 'warn');
+          render();
+        });
+      break;
+    }
     case 'refresh-server-backups': {
       if (!can('user.manage')) {
         requirePermission('user.manage');
@@ -21384,6 +21500,7 @@ async function startUI() {
   }
   if (authUser?.role === 'owner') await refreshAuthAccounts();
   if (authUser?.role === 'owner') await refreshServerBackups();
+  if (authUser?.role === 'owner') await refreshReportSettings();
   if (authUser?.role === 'owner') await refreshAuthLogins();
   if (authUser?.role === 'owner') await refreshAuthSessions();
   if (authUser?.role === 'owner') await refreshServerAudit();

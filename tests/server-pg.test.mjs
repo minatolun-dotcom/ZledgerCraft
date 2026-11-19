@@ -55,23 +55,24 @@ test(
   { skip: !databaseUrl && 'TEST_DATABASE_URL is not set', timeout: 90000 },
   async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'zledgercraft-pg-'));
+    const env = {
+      ...process.env,
+      HOST: '127.0.0.1',
+      PORT: '0',
+      ZL_AUTH: '1',
+      ZL_OWNER_USER: 'owner',
+      ZL_OWNER_NAME: 'PG Test Owner',
+      ZL_OWNER_PASSWORD: 'correct horse battery',
+      ZL_DATA_DIR: dataDir,
+      ZL_DISABLE_ENV_FILE: '1',
+      DATABASE_URL: databaseUrl,
+      DATABASE_URL_UNPOOLED: '',
+      NEON_AUTH_BASE_URL: '',
+      NEON_AUTH_JWKS_URL: '',
+    };
     const child = spawn(process.execPath, ['serve.mjs'], {
       cwd: appRoot,
-      env: {
-        ...process.env,
-        HOST: '127.0.0.1',
-        PORT: '0',
-        ZL_AUTH: '1',
-        ZL_OWNER_USER: 'owner',
-        ZL_OWNER_NAME: 'PG Test Owner',
-        ZL_OWNER_PASSWORD: 'correct horse battery',
-        ZL_DATA_DIR: dataDir,
-        ZL_DISABLE_ENV_FILE: '1',
-        DATABASE_URL: databaseUrl,
-        DATABASE_URL_UNPOOLED: '',
-        NEON_AUTH_BASE_URL: '',
-        NEON_AUTH_JWKS_URL: '',
-      },
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -148,6 +149,37 @@ test(
       assert.equal(audit.body.chain.ok, true);
       assert.ok(audit.body.chain.checked > 0);
       assert.equal(audit.body.eventChain.ok, true);
+
+      // Rate-limit failures recorded by a second instance must block the first
+      // instance too, because both share the Postgres limiter table.
+      const secondDataDir = mkdtempSync(join(tmpdir(), 'zledgercraft-pg-peer-'));
+      const peer = spawn(process.execPath, ['serve.mjs'], {
+        cwd: appRoot,
+        env: { ...env, ZL_DATA_DIR: secondDataDir },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      try {
+        const peerBase = await waitForServer(peer);
+        const peerClient = client(peerBase);
+        for (let attempt = 1; attempt <= 8; attempt += 1) {
+          const failed = await peerClient.request('/api/auth/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ username: `nobody${attempt}`, password: 'wrong password' }),
+          });
+          assert.equal(failed.status, 401);
+        }
+        const blocked = await owner.request('/api/auth/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ username: 'owner', password: 'correct horse battery' }),
+        });
+        assert.equal(blocked.status, 429, JSON.stringify(blocked.body));
+      } finally {
+        peer.kill('SIGTERM');
+        await new Promise((resolve) => peer.once('exit', resolve));
+        rmSync(secondDataDir, { recursive: true, force: true });
+      }
     } finally {
       child.kill('SIGTERM');
       await new Promise((resolve) => child.once('exit', resolve));

@@ -142,7 +142,8 @@ npx wrangler@latest deploy                # /api/* proxy -> Neon Function
 The function is declared in `neon.ts`; its Web-Request adapter is
 `neon-function.mjs`. `cf-api-worker.mjs` and `wrangler.toml` forward
 `books.lengkhawm.online/api/*` while preserving cookies and setting the
-forwarded host/protocol headers. The Worker and Function are both optional for
+forwarded host/protocol headers plus the real client IP for shared rate limits.
+The Worker and Function are both optional for
 local/LAN use. Cloud infrastructure work and verification are recorded in
 [`docs/CLOUD_INTEGRATION_PLAN.md`](docs/CLOUD_INTEGRATION_PLAN.md).
 
@@ -158,8 +159,9 @@ local-only behaviour.
 stores the workspace as a JSONB document plus revision history, leases and
 hash-chained audit rows. Neon Auth owns email/password credentials; the app maps
 the Neon user to its existing role/company-scope profile and issues its own
-HttpOnly session. Profiles, sessions, login history and account lockout state
-live in Neon Postgres when `DATABASE_URL` is set. The SQLite tables remain the
+HttpOnly session. Profiles, sessions, login history, account lockout and the
+short login/reset source-rate limits live in Neon Postgres when `DATABASE_URL`
+is set, so they are shared by every function instance. The SQLite tables remain the
 local/LAN fallback, and an existing SQLite auth store is copied into an empty
 Postgres auth store on first startup.
 
@@ -185,8 +187,11 @@ password, MFA, lockout and session features.
 **R2 offsite backups**
 
 When configured, every verified SQLite or Postgres JSON snapshot is uploaded
-through R2's S3-compatible API after its local integrity check. A failed upload
-keeps the local snapshot, skips local pruning for that run and can send an alert.
+through R2's S3-compatible API after its local integrity check. The owner backup
+list merges R2 objects with the current instance, so a replacement function
+instance can still list, download and restore an offsite snapshot. A failed
+upload keeps the local snapshot, skips local pruning for that run and can send an
+alert.
 
 ```bash
 R2_ACCOUNT_ID=...
@@ -199,8 +204,9 @@ ZL_ALERT_EMAIL=ops@example.com
 ```
 
 Use an R2 lifecycle rule for retention. The upload is a copy of the verified
-snapshot, not a live database file; download from R2 and restore through the
-existing owner restore flow.
+snapshot, not a live database file. The owner restore flow downloads the R2 copy
+when the local file is unavailable, verifies it and creates a pre-restore backup
+before replacing the books.
 
 **Resend email**
 

@@ -320,11 +320,22 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 ### Stage 4 — Depth and scale
 
 - [x] Inventory: godowns, batches, BOM/manufacturing, orders, transfers — 2026-11-18 (batch/expiry, transfers, orders and production; no physical count, wastage, job work or WIP posting)
-- [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, normalized collection rows, conservative three-way merge (including scoped accounts), revision-checked writes, conflict/reload flow, enforced voucher edit leases, LAN server authentication and company-level scoping done 2026-11-19; Neon Postgres workspace, Postgres profiles/sessions/login state, Postgres JSON backups, Neon Auth login, same-origin auth proxy, Neon Function deployment, Cloudflare Worker API proxy, branch integration test and production smoke test done 2026-11-19; field-level conflict history pending
+- [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, normalized collection rows, conservative three-way merge (including scoped accounts), revision-checked writes, conflict/reload flow, enforced voucher edit leases, LAN server authentication and company-level scoping done 2026-11-19; Neon Postgres workspace, Postgres profiles/sessions/login state, shared Postgres login/reset rate limits, Postgres JSON backups with R2 listing/restore, Neon Auth login, same-origin auth proxy, Neon Function deployment, Cloudflare Worker API proxy, branch integration test and production smoke test done 2026-11-19; field-level conflict history pending
 - [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; Tally batch masters/opening batches, GST/discount stock-line splits, APIs and webhooks pending
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate and Excel export done 2026-11-18; scheduled email and deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-19 — Shared source limits and durable R2 recovery
+
+- Moved short login/reset IP limits from process memory into the shared auth
+  store. SQLite and Postgres use the same options; Postgres instances now block
+  each other's abusers instead of each keeping a separate counter.
+- Added signed R2 list/download/delete support and merged remote objects into
+  the owner backup list. Restore now downloads and verifies an R2 snapshot when
+  the current instance has no local copy.
+- Verification: focused auth/cloud tests pass, including cross-instance
+  Postgres rate limiting and remote-only backup restore.
 
 ### 2026-11-19 — Phase 2: Neon Function and production API
 

@@ -28,14 +28,14 @@ function timestamp(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function loginState(row, now = Date.now()) {
+function loginState(row, now = Date.now(), windowMs = AUTH_LIMITS.loginWindowMs) {
   if (!row) return { blocked: false, count: 0, retryAfterMs: 0 };
   const lockedUntil = timestamp(row.locked_until);
   if (lockedUntil > now) {
     return { blocked: true, count: Number(row.count), retryAfterMs: lockedUntil - now };
   }
   const firstAt = timestamp(row.first_at);
-  if (!firstAt || now - firstAt > AUTH_LIMITS.loginWindowMs) {
+  if (!firstAt || now - firstAt > windowMs) {
     return { blocked: false, count: 0, retryAfterMs: 0 };
   }
   return { blocked: false, count: Number(row.count) || 0, retryAfterMs: 0 };
@@ -538,18 +538,22 @@ export class PostgresAuthStore {
     return { ok: true, removed: Number(result.rowCount) || 0 };
   }
 
-  async loginLimit(key) {
+  async loginLimit(key, options = {}) {
     const result = await this.pool.query('SELECT * FROM zl_auth_login_limits WHERE key = $1', [String(key)]);
-    const state = loginState(result.rows[0]);
+    const windowMs = Number(options.windowMs) || AUTH_LIMITS.loginWindowMs;
+    const state = loginState(result.rows[0], Date.now(), windowMs);
     if (result.rows[0] && !state.blocked && state.count === 0) {
       await this.clearLoginFailures(key);
     }
     return state;
   }
 
-  async recordFailure(key) {
+  async recordFailure(key, options = {}) {
     const now = Date.now();
     const nowText = new Date(now).toISOString();
+    const windowMs = Number(options.windowMs) || AUTH_LIMITS.loginWindowMs;
+    const maxFailures = Number(options.maxFailures) || AUTH_LIMITS.loginMaxFailures;
+    const lockMs = Number(options.lockMs) || AUTH_LIMITS.loginLockMs;
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -564,19 +568,16 @@ export class PostgresAuthStore {
       const row = result.rows[0];
       let count = Number(row.count) || 0;
       const firstAt = timestamp(row.first_at);
-      const first = !firstAt || now - firstAt > AUTH_LIMITS.loginWindowMs ? nowText : row.first_at;
-      if (!firstAt || now - firstAt > AUTH_LIMITS.loginWindowMs) count = 0;
+      const first = !firstAt || now - firstAt > windowMs ? nowText : row.first_at;
+      if (!firstAt || now - firstAt > windowMs) count = 0;
       count += 1;
-      const lockedUntil =
-        count >= AUTH_LIMITS.loginMaxFailures
-          ? new Date(now + AUTH_LIMITS.loginLockMs).toISOString()
-          : null;
+      const lockedUntil = count >= maxFailures ? new Date(now + lockMs).toISOString() : null;
       await client.query(
         'UPDATE zl_auth_login_limits SET count = $1, first_at = $2, locked_until = $3 WHERE key = $4',
         [count, first, lockedUntil, String(key)],
       );
       await client.query('COMMIT');
-      return { blocked: Boolean(lockedUntil), count, retryAfterMs: lockedUntil ? AUTH_LIMITS.loginLockMs : 0 };
+      return { blocked: Boolean(lockedUntil), count, retryAfterMs: lockedUntil ? lockMs : 0 };
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
       throw error;

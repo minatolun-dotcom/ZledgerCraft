@@ -12,8 +12,12 @@ export default {
     const headers = new Headers(request.headers);
     headers.set('x-forwarded-host', incoming.host);
     headers.set('x-forwarded-proto', incoming.protocol.replace(':', ''));
-    const clientIp = request.headers.get('cf-connecting-ip');
-    if (clientIp) headers.set('x-forwarded-for', clientIp);
+    const clientIp = request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip');
+    if (clientIp) {
+      headers.set('x-zl-client-ip', clientIp);
+      headers.set('cf-connecting-ip', clientIp);
+      headers.set('x-forwarded-for', clientIp);
+    }
 
     const response = await fetch(target, {
       method: request.method,

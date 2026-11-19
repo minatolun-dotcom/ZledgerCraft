@@ -32,6 +32,32 @@ function encodeKey(key) {
     .join('/');
 }
 
+function awsEncode(value) {
+  return encodeURIComponent(String(value)).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+function canonicalQuery(query = {}) {
+  return Object.entries(query)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => [awsEncode(key), awsEncode(value)])
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('&');
+}
+
+function xmlText(value) {
+  return String(value ?? '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)));
+}
+
 function signingKey(secret, day, region = REGION, service = SERVICE) {
   const dateKey = hmac(`AWS4${secret}`, day);
   const regionKey = hmac(dateKey, region);
@@ -68,7 +94,8 @@ export function backupObjectKey(name, prefix = DEFAULT_PREFIX, date = new Date()
 export function signedR2Request({
   config,
   method = 'PUT',
-  key,
+  key = '',
+  query = {},
   body = Buffer.alloc(0),
   contentType = 'application/vnd.sqlite3',
   now = new Date(),
@@ -76,7 +103,10 @@ export function signedR2Request({
   if (!config) throw new Error('R2 is not configured.');
   const payload = Buffer.isBuffer(body) ? body : Buffer.from(body ?? '');
   const encodedKey = encodeKey(key);
-  const url = new URL(`${config.endpoint}/${encodeURIComponent(config.bucket)}/${encodedKey}`);
+  const bucketPath = `/${encodeURIComponent(config.bucket)}`;
+  const url = new URL(`${config.endpoint}${bucketPath}${encodedKey ? `/${encodedKey}` : ''}`);
+  const queryString = canonicalQuery(query);
+  if (queryString) url.search = `?${queryString}`;
   const payloadHash = sha256(payload);
   const date = amzDate(now);
   const day = date.slice(0, 8);
@@ -90,7 +120,7 @@ export function signedR2Request({
   const canonicalRequest = [
     method,
     url.pathname,
-    '',
+    queryString,
     `${canonicalHeaders}\n`,
     signedHeaders,
     payloadHash,
@@ -155,6 +185,120 @@ export async function uploadBackup({
     bytes: request.bytes,
     etag: response.headers.get('etag') || '',
   };
+}
+
+export async function listBackupObjects({
+  config,
+  prefix = config?.prefix,
+  fetchImpl = fetch,
+  now = new Date(),
+  maxKeys = 1000,
+}) {
+  if (!config) return [];
+  const cleanPrefix = text(prefix).replace(/^\/+|\/+$/g, '');
+  const request = signedR2Request({
+    config,
+    method: 'GET',
+    query: {
+      'list-type': '2',
+      prefix: [cleanPrefix, 'workspace'].filter(Boolean).join('/') + '/',
+      'max-keys': String(Math.min(1000, Math.max(1, Number(maxKeys) || 1000))),
+    },
+    now,
+  });
+  let response;
+  try {
+    response = await fetchImpl(request.url, {
+      method: 'GET',
+      headers: request.headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw new Error(`R2 list failed: ${error.message || 'network error'}`);
+  }
+  if (!response.ok) {
+    let detail = '';
+    try {
+      detail = (await response.text()).slice(0, 500);
+    } catch {
+      // Keep the status-only error when R2 returns no readable body.
+    }
+    throw new Error(`R2 list failed (${response.status})${detail ? `: ${detail}` : ''}`);
+  }
+  const body = await response.text();
+  return [...body.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)].map((match) => {
+    const block = match[1];
+    const key = xmlText(block.match(/<Key>([\s\S]*?)<\/Key>/)?.[1]);
+    return {
+      key,
+      name: key.split('/').pop(),
+      bytes: Number(xmlText(block.match(/<Size>([\s\S]*?)<\/Size>/)?.[1])) || 0,
+      createdAt: xmlText(block.match(/<LastModified>([\s\S]*?)<\/LastModified>/)?.[1]),
+      etag: xmlText(block.match(/<ETag>([\s\S]*?)<\/ETag>/)?.[1]).replace(/^"|"$/g, ''),
+    };
+  });
+}
+
+export async function downloadBackup({
+  config,
+  key,
+  fetchImpl = fetch,
+  now = new Date(),
+}) {
+  if (!config) throw new Error('R2 is not configured.');
+  if (!key) throw new Error('A backup key is required.');
+  const request = signedR2Request({ config, method: 'GET', key, now });
+  let response;
+  try {
+    response = await fetchImpl(request.url, {
+      method: 'GET',
+      headers: request.headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw new Error(`R2 download failed: ${error.message || 'network error'}`);
+  }
+  if (!response.ok) {
+    let detail = '';
+    try {
+      detail = (await response.text()).slice(0, 500);
+    } catch {
+      // Keep the status-only error when R2 returns no readable body.
+    }
+    throw new Error(`R2 download failed (${response.status})${detail ? `: ${detail}` : ''}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+export async function deleteBackup({
+  config,
+  key,
+  fetchImpl = fetch,
+  now = new Date(),
+}) {
+  if (!config) throw new Error('R2 is not configured.');
+  if (!key) throw new Error('A backup key is required.');
+  const request = signedR2Request({ config, method: 'DELETE', key, now });
+  let response;
+  try {
+    response = await fetchImpl(request.url, {
+      method: 'DELETE',
+      headers: request.headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw new Error(`R2 delete failed: ${error.message || 'network error'}`);
+  }
+  if (!response.ok && response.status !== 404) {
+    let detail = '';
+    try {
+      detail = (await response.text()).slice(0, 500);
+    } catch {
+      // Keep the status-only error when R2 returns no readable body.
+    }
+    throw new Error(`R2 delete failed (${response.status})${detail ? `: ${detail}` : ''}`);
+  }
+  return { ok: true, key };
 }
 
 export const R2_DEFAULTS = Object.freeze({ region: REGION, service: SERVICE });

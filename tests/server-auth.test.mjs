@@ -143,6 +143,22 @@ test('server auth locks repeated failed sign-ins per account and source', () => 
   assert.equal(auth.loginLimit(key).blocked, false);
 });
 
+test('server auth supports shared short source rate-limit windows', () => {
+  const auth = store();
+  const key = 'ip|192.168.1.20';
+  const options = { maxFailures: 8, windowMs: 60_000, lockMs: 60_000 };
+  for (let attempt = 1; attempt <= 7; attempt += 1) {
+    assert.equal(auth.recordFailure(key, options).blocked, false);
+  }
+  const locked = auth.recordFailure(key, options);
+  assert.equal(locked.blocked, true);
+  assert.equal(locked.count, 8);
+  assert.equal(auth.loginLimit(key, options).blocked, true);
+  assert.equal(auth.loginLimit('ip|192.168.1.21', options).blocked, false);
+  auth.clearLoginFailures(key);
+  assert.equal(auth.loginLimit(key, options).blocked, false);
+});
+
 test('server auth protects the last owner and the signed-in account', () => {
   const auth = store();
   const owner = auth.ensureOwner({ username: 'owner', password: 'correct horse' }).user;

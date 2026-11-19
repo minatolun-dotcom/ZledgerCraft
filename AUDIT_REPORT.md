@@ -126,7 +126,7 @@ after the split.
 
 | Location | Finding | Status |
 | --- | --- | --- |
-| `serve.mjs` login map | In-memory `loginAttempts` map could accumulate. | **Fixed:** expired entries are pruned and the map is capped. |
+| `serve.mjs` login map | In-memory `loginAttempts` map could accumulate and was not shared by multiple instances. | **Fixed:** login/reset source limits now use the shared SQLite/Postgres `auth_login_limits` table with expiring windows and locks. |
 | `server-auth.js` | `scryptSync` blocks the event loop during login. | **Open:** strict rate limits reduce exposure; converting to async `scrypt` would ripple through the synchronous auth API. |
 | `serve.mjs` static files | Lexical path validation followed symlinks. | **Fixed:** `realpath` must remain under the app root. |
 | `serve.mjs` 404 | Body reflected `request.url`. | **Fixed:** fixed “Not found” body. |

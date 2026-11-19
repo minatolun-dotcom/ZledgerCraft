@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   backupObjectKey,
+  deleteBackup,
+  downloadBackup,
+  listBackupObjects,
   r2Configuration,
   signedR2Request,
   uploadBackup,
@@ -97,6 +100,58 @@ test('R2 upload reads the verified snapshot and reports the stored object', asyn
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('R2 lists, downloads and deletes durable backup objects', async () => {
+  const requests = [];
+  const listXml = `<?xml version="1.0" encoding="UTF-8"?>
+    <ListBucketResult>
+      <Contents>
+        <Key>zledgercraft/workspace/2026/11/workspace-20261119-120000-manual.json</Key>
+        <LastModified>2026-11-19T12:00:01.000Z</LastModified>
+        <ETag>&quot;etag-1&quot;</ETag>
+        <Size>42</Size>
+      </Contents>
+    </ListBucketResult>`;
+  const fetchImpl = async (url, options) => {
+    requests.push({ url: url.toString(), method: options.method });
+    if (options.method === 'GET' && url.search) {
+      return new Response(listXml, { status: 200 });
+    }
+    if (options.method === 'GET') {
+      return new Response('{"state":{"companies":[]}}', { status: 200 });
+    }
+    return new Response('', { status: 200 });
+  };
+  const listed = await listBackupObjects({ config: r2, fetchImpl });
+  assert.deepEqual(listed, [
+    {
+      key: 'zledgercraft/workspace/2026/11/workspace-20261119-120000-manual.json',
+      name: 'workspace-20261119-120000-manual.json',
+      bytes: 42,
+      createdAt: '2026-11-19T12:00:01.000Z',
+      etag: 'etag-1',
+    },
+  ]);
+  assert.equal(
+    requests[0].url,
+    'https://account.r2.cloudflarestorage.com/books-backups?list-type=2&max-keys=1000&prefix=zledgercraft%2Fworkspace%2F',
+  );
+  assert.match(requests[0].method, /GET/);
+
+  const body = await downloadBackup({
+    config: r2,
+    key: listed[0].key,
+    fetchImpl,
+  });
+  assert.equal(body.toString(), '{"state":{"companies":[]}}');
+  assert.equal(
+    requests[1].url,
+    'https://account.r2.cloudflarestorage.com/books-backups/zledgercraft/workspace/2026/11/workspace-20261119-120000-manual.json',
+  );
+
+  assert.equal((await deleteBackup({ config: r2, key: listed[0].key, fetchImpl })).ok, true);
+  assert.equal(requests[2].method, 'DELETE');
 });
 
 test('R2 upload surfaces an HTTP failure without pretending the backup succeeded', async () => {

@@ -399,3 +399,20 @@ and operate the current server with R2 and Resend enabled.
   register/login/session/workspace passed through the custom domain; the session
   cookie was `Secure` and API responses had HSTS. Test accounts and workspace
   rows were removed, leaving an empty production workspace.
+
+### 2026-11-19 — Phase 2 limit fixes: shared limits and durable backup recovery
+
+- Moved the short source-rate limits out of process memory. `AuthStore` and
+  `PostgresAuthStore` now accept window/max/lock options on the existing
+  `auth_login_limits` table; login uses an eight-failure/minute source bucket
+  and reset requests use a five-request/15-minute bucket. Every function
+  instance reads and writes the same Postgres row, and SQLite/LAN mode uses the
+  same interface. The Worker now forwards the real client address in
+  `x-zl-client-ip`/`cf-connecting-ip`; production testing found that relying on
+  `x-forwarded-for` alone keyed limits to rotating Cloudflare egress addresses.
+- Added R2 `ListObjectsV2`, signed `GET`/`DELETE` helpers, and remote listing,
+  download and restore in the owner backup screen. If a function instance has
+  lost its `/tmp` backup, the list still shows the R2 object and restore
+  downloads and verifies it before the normal pre-restore backup.
+- R2 remains the durable destination; retention is still delegated to a bucket
+  lifecycle rule. Neon Auth still has no MFA and Neon Functions can cold-start.

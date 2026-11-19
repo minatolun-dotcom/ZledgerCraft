@@ -12,7 +12,13 @@ import { PostgresAuthStore } from './server-auth-pg.js';
 import { emailConfiguration, sendBackupFailureEmail, sendPasswordResetEmail } from './server-email.js';
 import { neonAuthConfiguration, neonForgotPassword, neonResetPassword, neonSignIn, neonSignUp } from './server-neon-auth.js';
 import { createPostgresPool, PostgresWorkspaceStore } from './server-pg.js';
-import { backupObjectKey, r2Configuration, uploadBackup } from './server-r2.js';
+import {
+  backupObjectKey,
+  downloadBackup,
+  listBackupObjects,
+  r2Configuration,
+  uploadBackup,
+} from './server-r2.js';
 import { deepEqual, mergeWorkspaceStates, repairVoucherNumbers } from './server-merge.js';
 import { readWorkspaceSnapshot, WorkspaceStore } from './server-workspace.js';
 
@@ -75,8 +81,8 @@ const AUDIT_GENESIS = '0'.repeat(64);
 const r2Config = r2Configuration(process.env);
 const emailConfig = emailConfiguration(process.env);
 const alertEmail = String(process.env.ZL_ALERT_EMAIL || '').trim();
-const loginAttempts = new Map();
-const forgotAttempts = new Map();
+const LOGIN_IP_LIMIT = { maxFailures: 8, windowMs: 60_000, lockMs: 60_000 };
+const FORGOT_IP_LIMIT = { maxFailures: 5, windowMs: 15 * 60_000, lockMs: 15 * 60_000 };
 let workspaceWriteQueue = Promise.resolve();
 let backupTimer = null;
 
@@ -492,7 +498,13 @@ function clientIp(request) {
   const forwarded = String(request.headers['x-forwarded-for'] || '')
     .split(',')[0]
     .trim();
-  return forwarded || request.headers['cf-connecting-ip'] || request.socket.remoteAddress || 'unknown';
+  return (
+    String(request.headers['x-zl-client-ip'] || '').trim() ||
+    forwarded ||
+    request.headers['cf-connecting-ip'] ||
+    request.socket.remoteAddress ||
+    'unknown'
+  );
 }
 
 function allowedClient(address) {
@@ -506,52 +518,21 @@ function allowedClient(address) {
   return allowedNetworks.some((entry) => ((value & entry.mask) >>> 0) === entry.network);
 }
 
-function pruneLoginAttempts(now = Date.now()) {
-  for (const [address, entry] of loginAttempts) {
-    if (entry.reset <= now) loginAttempts.delete(address);
-  }
-  while (loginAttempts.size > 5000) {
-    loginAttempts.delete(loginAttempts.keys().next().value);
-  }
+async function loginBlocked(ip) {
+  if (!auth) return false;
+  return (await auth.loginLimit(`ip|${ip}`, LOGIN_IP_LIMIT)).blocked;
 }
 
-function loginBlocked(ip) {
-  const now = Date.now();
-  pruneLoginAttempts(now);
-  const entry = loginAttempts.get(ip);
-  if (!entry || entry.reset <= now) {
-    loginAttempts.set(ip, { count: 0, reset: now + 60_000 });
-    return false;
-  }
-  return entry.count >= 8;
+async function recordLoginFailure(ip) {
+  if (!auth) return;
+  await auth.recordFailure(`ip|${ip}`, LOGIN_IP_LIMIT);
 }
 
-function recordLoginFailure(ip) {
-  const now = Date.now();
-  const entry = loginAttempts.get(ip) ?? { count: 0, reset: now + 60_000 };
-  entry.count += 1;
-  loginAttempts.set(ip, entry);
-}
-
-function pruneForgotAttempts(now = Date.now()) {
-  for (const [address, entry] of forgotAttempts) {
-    if (entry.reset <= now) forgotAttempts.delete(address);
-  }
-  while (forgotAttempts.size > 5000) {
-    forgotAttempts.delete(forgotAttempts.keys().next().value);
-  }
-}
-
-function forgotBlocked(ip) {
-  const now = Date.now();
-  pruneForgotAttempts(now);
-  const entry = forgotAttempts.get(ip);
-  if (!entry || entry.reset <= now) {
-    forgotAttempts.set(ip, { count: 1, reset: now + 15 * 60_000 });
-    return false;
-  }
-  if (entry.count >= 5) return true;
-  entry.count += 1;
+async function forgotBlocked(ip) {
+  if (!auth) return false;
+  const key = `forgot|${ip}`;
+  if ((await auth.loginLimit(key, FORGOT_IP_LIMIT)).blocked) return true;
+  await auth.recordFailure(key, FORGOT_IP_LIMIT);
   return false;
 }
 
@@ -735,7 +716,7 @@ function backupStamp(date = new Date()) {
   return date.toISOString().replace(/[-:]/g, '').slice(0, 15).replace('T', '-');
 }
 
-async function listServerBackups() {
+async function listLocalServerBackups() {
   let entries;
   try {
     entries = await readdir(backupDir);
@@ -756,6 +737,53 @@ async function listServerBackups() {
     }
   }
   return backups.sort((a, b) => b.name.localeCompare(a.name));
+}
+
+async function listRemoteServerBackups() {
+  if (!r2Config) return [];
+  const extension = postgresStore ? '.json' : '.sqlite';
+  try {
+    const objects = await listBackupObjects({ config: r2Config });
+    return objects
+      .filter((object) => BACKUP_NAME.test(object.name) && object.name.endsWith(extension))
+      .map((object) => ({
+        name: object.name,
+        bytes: object.bytes,
+        createdAt: object.createdAt,
+        offsite: true,
+      }));
+  } catch (error) {
+    console.error(`Could not list R2 backups: ${error.message}`);
+    return [];
+  }
+}
+
+async function listServerBackups() {
+  const local = await listLocalServerBackups();
+  const remote = await listRemoteServerBackups();
+  const merged = new Map(local.map((backup) => [backup.name, backup]));
+  for (const backup of remote) {
+    merged.set(backup.name, { ...merged.get(backup.name), ...backup });
+  }
+  return [...merged.values()].sort((a, b) => b.name.localeCompare(a.name));
+}
+
+async function remoteBackupKey(name) {
+  if (!r2Config) return '';
+  const objects = await listBackupObjects({ config: r2Config });
+  return objects.find((object) => object.name === name)?.key || '';
+}
+
+async function readServerBackupBytes(name) {
+  const target = join(backupDir, name);
+  try {
+    return await readFile(target);
+  } catch (error) {
+    if (error.code !== 'ENOENT' || !r2Config) throw error;
+    const key = await remoteBackupKey(name);
+    if (!key) throw error;
+    return downloadBackup({ config: r2Config, key });
+  }
 }
 
 async function createServerBackup(reason = 'manual') {
@@ -795,7 +823,7 @@ async function createServerBackup(reason = 'manual') {
     const info = await stat(target);
     const offsite = await uploadVerifiedBackup(name, target);
     if (!offsite || offsite.ok) {
-      const backups = await listServerBackups();
+      const backups = await listLocalServerBackups();
       for (const old of backups.slice(backupKeep)) {
         await unlink(join(backupDir, old.name)).catch(() => {});
       }
@@ -831,7 +859,7 @@ async function createServerBackup(reason = 'manual') {
   // Keep older local copies when an offsite upload failed, so a transient R2
   // outage does not reduce the number of surviving copies.
   if (!offsite || offsite.ok) {
-    const backups = await listServerBackups();
+    const backups = await listLocalServerBackups();
     for (const old of backups.slice(backupKeep)) {
       await unlink(join(backupDir, old.name)).catch(() => {});
     }
@@ -1070,7 +1098,7 @@ async function handleAuthApi(request, response, url) {
       return;
     }
     const ip = clientIp(request);
-    if (forgotBlocked(ip)) {
+    if (await forgotBlocked(ip)) {
       json(response, 429, { ok: false, error: 'Too many reset requests. Wait a few minutes and try again.' });
       return;
     }
@@ -1158,7 +1186,7 @@ async function handleAuthApi(request, response, url) {
       return;
     }
     const ip = clientIp(request);
-    if (loginBlocked(ip)) {
+    if (await loginBlocked(ip)) {
       json(response, 429, { ok: false, error: 'Too many sign-in attempts. Wait a minute and try again.' });
       return;
     }
@@ -1193,7 +1221,7 @@ async function handleAuthApi(request, response, url) {
           ip,
           userAgent: request.headers['user-agent'] || '',
         });
-        recordLoginFailure(ip);
+        await recordLoginFailure(ip);
         await auth.recordFailure(limitKey);
         json(response, 401, { ok: false, error: 'Incorrect email or password.' });
         return;
@@ -1239,7 +1267,7 @@ async function handleAuthApi(request, response, url) {
         ip,
         userAgent: request.headers['user-agent'] || '',
       });
-      recordLoginFailure(ip);
+      await recordLoginFailure(ip);
       await auth.recordFailure(limitKey);
       json(response, 401, { ok: false, error: 'Incorrect username or password.' });
       return;
@@ -1877,7 +1905,16 @@ async function handleWorkspaceApi(request, response, url) {
 
 async function readVerifiedBackup(name) {
   const target = join(backupDir, name);
-  const info = await stat(target);
+  let info;
+  try {
+    info = await stat(target);
+  } catch (error) {
+    if (error.code !== 'ENOENT' || !r2Config) throw error;
+    const body = await readServerBackupBytes(name);
+    await mkdir(backupDir, { recursive: true, mode: 0o700 });
+    await writeFile(target, body, { mode: 0o600 });
+    info = await stat(target);
+  }
   if (!info.isFile()) throw new Error('Backup not found.');
   if (name.endsWith('.json')) {
     const saved = JSON.parse(await readFile(target, 'utf8'));
@@ -2018,7 +2055,7 @@ async function handleBackupApi(request, response, url) {
       return;
     }
     try {
-      const body = await readFile(join(backupDir, name));
+      const body = await readServerBackupBytes(name);
       response.writeHead(200, {
         'content-type': name.endsWith('.json') ? 'application/json; charset=utf-8' : 'application/vnd.sqlite3',
         'content-disposition': `attachment; filename="${name}"`,

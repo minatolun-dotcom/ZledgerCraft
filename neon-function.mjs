@@ -16,7 +16,7 @@ function nodeRequest(request, body) {
     headers,
     socket: {
       remoteAddress:
-        forwarded || headers['cf-connecting-ip'] || headers['x-real-ip'] || 'unknown',
+        headers['x-zl-client-ip'] || forwarded || headers['cf-connecting-ip'] || headers['x-real-ip'] || 'unknown',
     },
     async *[Symbol.asyncIterator]() {
       if (body.length) yield body;

@@ -610,27 +610,30 @@ export class AuthStore {
     return { ok: true, removed: Number(result.changes) || 0 };
   }
 
-  loginLimit(key) {
+  loginLimit(key, options = {}) {
     const row = this.stmts.loginLimit.get(String(key));
     if (!row) return { blocked: false, count: 0, retryAfterMs: 0 };
     const now = Date.now();
+    const windowMs = Number(options.windowMs) || LOGIN_WINDOW_MS;
     const lockedUntil = row.locked_until ? Date.parse(row.locked_until) : 0;
     if (lockedUntil > now) return { blocked: true, count: Number(row.count), retryAfterMs: lockedUntil - now };
     const firstAt = Date.parse(row.first_at);
-    if (!Number.isFinite(firstAt) || now - firstAt > LOGIN_WINDOW_MS) {
+    if (!Number.isFinite(firstAt) || now - firstAt > windowMs) {
       this.stmts.deleteLoginLimit.run(String(key));
       return { blocked: false, count: 0, retryAfterMs: 0 };
     }
     return { blocked: false, count: Number(row.count) || 0, retryAfterMs: 0 };
   }
 
-  recordFailure(key) {
-    const current = this.loginLimit(key);
+  recordFailure(key, options = {}) {
+    const current = this.loginLimit(key, options);
     const now = new Date();
     const count = current.count + 1;
-    const lockedUntil = count >= LOGIN_MAX_FAILURES ? new Date(now.getTime() + LOGIN_LOCK_MS).toISOString() : null;
+    const maxFailures = Number(options.maxFailures) || LOGIN_MAX_FAILURES;
+    const lockMs = Number(options.lockMs) || LOGIN_LOCK_MS;
+    const lockedUntil = count >= maxFailures ? new Date(now.getTime() + lockMs).toISOString() : null;
     this.stmts.saveLoginLimit.run(String(key), count, now.toISOString(), lockedUntil);
-    return { blocked: Boolean(lockedUntil), count, retryAfterMs: lockedUntil ? LOGIN_LOCK_MS : 0 };
+    return { blocked: Boolean(lockedUntil), count, retryAfterMs: lockedUntil ? lockMs : 0 };
   }
 
   clearLoginFailures(key) {

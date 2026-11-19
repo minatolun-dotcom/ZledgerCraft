@@ -141,6 +141,7 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         ZL_PUBLIC_URL: 'https://books.example.com',
         ZL_REPORT_SECRET: 'report-test-secret',
         ZL_SCHEDULER_SECRET: 'scheduler-test-secret',
+        ZL_ALERT_EMAIL: 'ops@example.com',
         RESEND_API_KEY: 're_test',
         RESEND_API_URL: `http://127.0.0.1:${resend.port}/emails`,
         RESEND_FROM: 'Books <books@example.com>',
@@ -178,6 +179,22 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         assert.equal(configured.status, 200, JSON.stringify(configured.body));
         assert.equal(configured.body.settings.enabled, true);
 
+        failNext = true;
+        const failedSchedule = await fetch(`${base}/api/internal/scheduler`, {
+          method: 'POST',
+          headers: { authorization: 'Bearer scheduler-test-secret' },
+        });
+        assert.equal(failedSchedule.status, 200);
+        const failedScheduleBody = await failedSchedule.json();
+        assert.match(failedScheduleBody.reportError, /simulated Resend outage/);
+        assert.ok(failedScheduleBody.backup?.name);
+        assert.equal(emails.length, 1);
+        assert.deepEqual(emails[0].to, ['ops@example.com']);
+        assert.equal(emails[0].subject, 'ZledgerCraft scheduled report failed');
+        assert.match(emails[0].text, /simulated Resend outage/);
+        const afterScheduleFailure = await owner.request('/api/reports/settings');
+        assert.match(afterScheduleFailure.body.settings.lastError, /simulated Resend outage/);
+
         const preview = await owner.request('/api/reports/preview', { method: 'POST' });
         assert.equal(preview.status, 200, JSON.stringify(preview.body));
         const path = new URL(preview.body.url).pathname + new URL(preview.body.url).search;
@@ -189,11 +206,11 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
 
         const sent = await owner.request('/api/reports/send', { method: 'POST' });
         assert.equal(sent.status, 200, JSON.stringify(sent.body));
-        assert.equal(emails.length, 1);
-        assert.deepEqual(emails[0].to, ['owner@example.com']);
-        assert.match(emails[0].subject, /ZledgerCraft daily summary/);
-        assert.match(emails[0].text, /Report Books/);
-        assert.match(emails[0].text, /api\/reports\/daily\?token=/);
+        assert.equal(emails.length, 2);
+        assert.deepEqual(emails[1].to, ['owner@example.com']);
+        assert.match(emails[1].subject, /ZledgerCraft daily summary/);
+        assert.match(emails[1].text, /Report Books/);
+        assert.match(emails[1].text, /api\/reports\/daily\?token=/);
         const afterSend = await owner.request('/api/reports/settings');
         assert.ok(afterSend.body.settings.lastAttemptAt);
         assert.equal(afterSend.body.settings.lastError, '');
@@ -207,7 +224,6 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         assert.equal(manuallyScheduled.status, 200);
         const manuallyScheduledBody = await manuallyScheduled.json();
         assert.equal(manuallyScheduledBody.report, 'already-sent');
-        assert.ok(manuallyScheduledBody.backup?.name);
         const scheduled = await fetch(`${base}/api/internal/scheduler`, {
           method: 'POST',
           headers: { 'x-neon-trigger-invocation-id': 'test-invocation' },

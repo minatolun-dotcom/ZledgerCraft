@@ -177,7 +177,9 @@ Status: **complete 2026-11-19 — daily signed management summary by Resend, dri
 - [x] Use Resend for delivery. Owners configure enabled/recipients under
   Companies → Server accounts; “Send now” and “Preview signed link” are
   available without waiting for the schedule. The panel also shows the last
-  successful send and the latest attempt error, persisted in both stores.
+  successful send and the latest attempt error, persisted in both stores. A
+  failed scheduled report also emails the configured `ZL_ALERT_EMAIL` once per
+  UTC day.
 - [x] Do not run a full dump inside a free Cloudflare Worker cron. The trigger
   runs in the Neon Function (Node 24), not a Worker; only a small summary is
   built and mailed.
@@ -287,7 +289,7 @@ feature without breaking local development or the single-file build.
 | Postgres report settings | pass | Neon branch test saves and rereads report settings through `zl_report_settings` |
 | Production scheduler | pass | Bearer-authenticated `POST /api/internal/scheduler` returned 200 with a verified daily backup and `report: "disabled"`; trigger is enabled for 02:30 UTC |
 | Live report delivery | pass at Resend acceptance | Production scheduler sent the daily summary to `minatolun@gmail.com` and Resend accepted it; the temporary `zl_report_settings` row was removed. The send-only API key cannot read delivery status |
-| Report attempt status | pass | `tests/server-reports-api.test.mjs` verifies the last attempt on success and a persisted Resend outage error; owner panel renders both |
+| Report attempt status and failure alert | pass | `tests/server-reports-api.test.mjs` verifies the last attempt on success, a persisted Resend outage error and the failure email to `ops@example.com`; owner panel renders both |
 
 ## Progress log
 
@@ -461,3 +463,5 @@ and operate the current server with R2 and Resend enabled.
 - Persisted each report attempt's time and error (`last_attempt_at`,
   `last_error`) and surfaced the latest failure in the owner panel. Existing
   SQLite/Postgres tables are migrated in place.
+- A failed scheduled report now alerts `ZL_ALERT_EMAIL` through Resend once per
+  UTC day; manual sends remain visible in the owner panel without paging.

@@ -340,9 +340,11 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - Persisted report attempt time/error in SQLite and Postgres and surfaced the
   latest failure beside the owner report controls; live production delivery was
   accepted by Resend for the test recipient.
+- A failed scheduled report now sends one Resend alert per UTC day to the
+  configured operations address.
 - Verification: report unit and API tests pass, including signed-link retrieval,
-  Resend payload and outage error, scheduler authorization and Postgres
-  settings persistence.
+  Resend payload, outage error and failure alert, scheduler authorization and
+  Postgres settings persistence.
 
 ### 2026-11-19 — Shared source limits and durable R2 recovery
 

@@ -98,6 +98,7 @@ const signingSecret = reportSecret(process.env);
 const reportTtl = reportTtlMs(process.env);
 let workspaceWriteQueue = Promise.resolve();
 let backupTimer = null;
+let lastReportAlertDate = '';
 
 let DatabaseSync = null;
 let sqliteBackup = null;
@@ -1061,6 +1062,27 @@ async function sendDailyReport(options = {}) {
   }
 }
 
+async function sendReportFailureAlert(reportError) {
+  if (!alertEmail || !emailConfig) return;
+  const day = new Date().toISOString().slice(0, 10);
+  if (lastReportAlertDate === day) return;
+  await sendEmail(
+    {
+      to: alertEmail,
+      subject: 'ZledgerCraft scheduled report failed',
+      text: [
+        `The scheduled ZledgerCraft daily report could not be sent at ${new Date().toISOString()}.`,
+        '',
+        reportError,
+        '',
+        'The report remains enabled and will be retried on the next scheduler run. Open Companies → Server accounts to review the recipients and latest attempt.',
+      ].join('\n'),
+    },
+    emailConfig,
+  );
+  lastReportAlertDate = day;
+}
+
 async function runScheduledJobs() {
   let backup = null;
   let backupError = '';
@@ -1077,6 +1099,11 @@ async function runScheduledJobs() {
   } catch (error) {
     reportError = error.message || 'Scheduled report failed.';
     console.error(`Scheduled report failed: ${reportError}`);
+    try {
+      await sendReportFailureAlert(reportError);
+    } catch (alertError) {
+      console.error(`Scheduled report failure alert failed: ${alertError.message || 'unknown error'}`);
+    }
   }
   return {
     ok: !backupError && !reportError,

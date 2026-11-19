@@ -275,6 +275,10 @@ test('read-only API tokens authenticate, scope to books and revoke', { timeout: 
     assert.equal(limited.status, 429);
     assert.equal(limited.headers.get('x-ratelimit-remaining'), '0');
     assert.ok(Number(limited.headers.get('retry-after')) > 0);
+    const usageTokens = (await owner.request('/api/auth/api-tokens')).body.tokens;
+    const rateUsage = usageTokens.find((entry) => entry.name === 'Rate test');
+    assert.ok(rateUsage.requests24h >= 121, JSON.stringify(rateUsage));
+    assert.ok(rateUsage.requests1h >= 121, JSON.stringify(rateUsage));
 
     assert.equal((await owner.request(`/api/auth/api-tokens/${created.body.apiToken.id}`, { method: 'DELETE' })).status, 200);
     const revoked = await fetch(`${base}/api/v1/companies`, { headers: authHeaders });

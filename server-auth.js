@@ -373,6 +373,14 @@ export class AuthStore {
         ON CONFLICT(token_id, window_start) DO UPDATE SET count = count + 1
       `),
       readApiRate: this.db.prepare('SELECT count FROM auth_api_rate_limits WHERE token_id = ? AND window_start = ?'),
+      apiTokenUsage: this.db.prepare(`
+        SELECT token_id,
+          SUM(CASE WHEN window_start >= ? THEN count ELSE 0 END) AS day_count,
+          SUM(CASE WHEN window_start >= ? THEN count ELSE 0 END) AS hour_count
+        FROM auth_api_rate_limits
+        WHERE window_start >= ?
+        GROUP BY token_id
+      `),
       pruneApiRates: this.db.prepare('DELETE FROM auth_api_rate_limits WHERE window_start < ?'),
       deleteUser: this.db.prepare('DELETE FROM auth_users WHERE id = ?'),
       insertSession: this.db.prepare(`
@@ -797,7 +805,7 @@ export class AuthStore {
     const resetAt = Math.floor(now / windowMs) * windowMs + windowMs;
     this.stmts.bumpApiRate.run(String(tokenId), windowStart);
     const count = Number(this.stmts.readApiRate.get(String(tokenId), windowStart)?.count ?? 1);
-    this.stmts.pruneApiRates.run(new Date(resetAt - windowMs * 2).toISOString());
+    this.stmts.pruneApiRates.run(new Date(now - 24 * 60 * 60 * 1000).toISOString());
     return {
       allowed: count <= max,
       limit: max,
@@ -807,7 +815,19 @@ export class AuthStore {
   }
 
   listApiTokens() {
-    return this.stmts.listApiTokens.all().map(publicApiToken);
+    const now = Date.now();
+    const dayStart = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    const hourStart = new Date(now - 60 * 60 * 1000).toISOString();
+    const usage = new Map(
+      this.stmts.apiTokenUsage.all(dayStart, hourStart, dayStart).map((row) => [
+        row.token_id,
+        { requests24h: Number(row.day_count) || 0, requests1h: Number(row.hour_count) || 0 },
+      ]),
+    );
+    return this.stmts.listApiTokens.all().map((row) => ({
+      ...publicApiToken(row),
+      ...(usage.get(row.id) ?? { requests24h: 0, requests1h: 0 }),
+    }));
   }
 
   verifyApiToken(token) {

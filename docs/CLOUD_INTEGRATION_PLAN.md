@@ -260,6 +260,16 @@ Status: **complete 2026-11-19**
   bypass it. Accountants cannot change the threshold, and the API company
   payload exposes it for integrations.
 
+### Phase 8 — API usage visibility
+
+Status: **complete 2026-11-19**
+
+- [x] Keep the shared per-minute API rate rows for 24 hours and aggregate them
+  per token. The owner token panel shows request counts for the last 24 hours
+  and current hour, so an integration's activity is visible without adding a
+  second request-log table. Counts are usage history only; request paths,
+  response codes and IP addresses are not stored.
+
 ## Environment variables
 
 Phase 1 uses the following optional variables. Missing values disable the
@@ -374,6 +384,7 @@ feature without breaking local development or the single-file build.
 | Scoped API tokens and shared limits | pass | API integration test filters listed companies and rejects out-of-scope ids; SQLite/PG limiter tables enforce the per-token window, and the Neon branch test shares a limit across two server instances |
 | Concurrent merge history | pass | Merge tests assert changed field paths and overlapping fields; the server API test verifies a `workspace.merge` audit event for an accepted stale save |
 | Approval thresholds | pass | Store tests cover the threshold predicate and validation; the server API test allows a below-threshold accountant posting and rejects one at the threshold, while the existing all-voucher policy still blocks direct posting |
+| API usage counts | pass | SQLite API test asserts 24-hour and one-hour counts after the rate-limit loop; the Neon branch test reads counts from Postgres after three shared-limit requests |
 
 ## Progress log
 
@@ -574,6 +585,10 @@ and operate the current server with R2 and Resend enabled.
 - Remaining approvals limits: there is no multi-level approval matrix, and
   concurrent pending-queue merges rely on the normal workspace conflict flow
   rather than a dedicated merge.
+- Added Phase 8 API usage visibility: per-token rate rows are retained for 24
+  hours and aggregated into 24-hour and current-hour request counts in the
+  owner token panel. The counts use the existing SQLite/Postgres limiter table
+  and do not store request paths, response codes or addresses.
 - Added Phase 7 approval thresholds: a company can require approval only at
   or above a configured amount while `0` keeps the old all-voucher rule. The
   submission UI uses the threshold, the server recomputes debit totals and

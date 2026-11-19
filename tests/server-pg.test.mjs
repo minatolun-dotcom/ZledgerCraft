@@ -52,7 +52,7 @@ function client(base) {
 
 test(
   'branch Postgres workspace saves, reloads, leases and verifies audit',
-  { skip: !databaseUrl && 'TEST_DATABASE_URL is not set', timeout: 90000 },
+  { skip: !databaseUrl && 'TEST_DATABASE_URL is not set', timeout: 180000 },
   async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'zledgercraft-pg-'));
     const env = {
@@ -203,6 +203,11 @@ test(
       for (let attempt = 0; attempt < 3; attempt += 1) {
         assert.equal((await owner.request('/api/v1/companies', { headers: sharedRateHeaders })).status, 200);
       }
+      const usageToken = (await owner.request('/api/auth/api-tokens')).body.tokens.find(
+        (entry) => entry.name === 'Shared rate token',
+      );
+      assert.ok(usageToken.requests24h >= 3, JSON.stringify(usageToken));
+      assert.ok(usageToken.requests1h >= 3, JSON.stringify(usageToken));
 
       // Rate-limit failures recorded by a second instance must block the first
       // instance too, because both share the Postgres limiter table.

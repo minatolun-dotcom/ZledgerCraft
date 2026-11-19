@@ -259,7 +259,8 @@ Read-only API tokens**. A token is shown once and stored as a SHA-256 hash in
 SQLite or Postgres; it carries only the `books:read` scope, can be restricted to
 selected companies, is limited to 120 requests per minute per token, and can be
 revoked immediately. Limit counters are stored in SQLite/Postgres, so every
-server instance sees the same budget. Send a token as
+server instance sees the same budget; the owner panel shows each token's
+request counts for the last 24 hours and current hour. Send a token as
 `Authorization: Bearer <token>` to the versioned endpoints:
 
 - `GET /api/v1/companies`

@@ -705,7 +705,7 @@ export class PostgresAuthStore {
     );
     const count = Number(result.rows[0]?.count ?? 1);
     await this.pool.query('DELETE FROM zl_auth_api_rate_limits WHERE window_start < $1', [
-      new Date(resetAt - windowMs * 2).toISOString(),
+      new Date(now - 24 * 60 * 60 * 1000).toISOString(),
     ]);
     return {
       allowed: count <= max,
@@ -716,8 +716,31 @@ export class PostgresAuthStore {
   }
 
   async listApiTokens() {
-    const result = await this.pool.query('SELECT * FROM zl_auth_api_tokens ORDER BY created_at DESC');
-    return result.rows.map(publicApiToken);
+    const now = Date.now();
+    const dayStart = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    const hourStart = new Date(now - 60 * 60 * 1000).toISOString();
+    const [result, usage] = await Promise.all([
+      this.pool.query('SELECT * FROM zl_auth_api_tokens ORDER BY created_at DESC'),
+      this.pool.query(
+        `SELECT token_id,
+           SUM(CASE WHEN window_start >= $1 THEN count ELSE 0 END)::int AS day_count,
+           SUM(CASE WHEN window_start >= $2 THEN count ELSE 0 END)::int AS hour_count
+         FROM zl_auth_api_rate_limits
+         WHERE window_start >= $1
+         GROUP BY token_id`,
+        [dayStart, hourStart],
+      ),
+    ]);
+    const usageById = new Map(
+      usage.rows.map((row) => [
+        row.token_id,
+        { requests24h: Number(row.day_count) || 0, requests1h: Number(row.hour_count) || 0 },
+      ]),
+    );
+    return result.rows.map((row) => ({
+      ...publicApiToken(row),
+      ...(usageById.get(row.id) ?? { requests24h: 0, requests1h: 0 }),
+    }));
   }
 
   async verifyApiToken(token) {

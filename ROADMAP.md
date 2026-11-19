@@ -327,6 +327,13 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 ## Progress log
 
+### 2026-11-19 — Phase 8: API usage visibility
+
+- API token rows retain rate-limit windows for 24 hours and aggregate them into
+  request counts for the last 24 hours and current hour.
+- The owner token panel shows both counts, making integration activity visible
+  without storing request paths or response bodies.
+
 ### 2026-11-19 — Phase 7: approval thresholds
 
 - Companies can keep approval for every staff voucher (`0`) or require it only

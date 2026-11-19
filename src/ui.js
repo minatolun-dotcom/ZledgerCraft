@@ -36,6 +36,7 @@ import {
   addVoucher,
   autoMatchBank,
   allocationsAgainst,
+  approvePendingVoucher,
   billLabel,
   clearBankStatement,
   closeFinancialYear,
@@ -53,6 +54,7 @@ import {
   deleteGodown,
   deleteGstRate,
   deleteOrder,
+  deletePendingVoucher,
   deleteGroup,
   deletePayHead,
   deletePayrollRun,
@@ -86,6 +88,7 @@ import {
   rateForCurrency,
   reopenFinancialYear,
   recordAudit,
+  rejectPendingVoucher,
   round2,
   runPayroll,
   saveBankStatement,
@@ -364,6 +367,7 @@ export const ROLE_PERMISSIONS = {
     'data.restore',
     'user.manage',
     'recon.write',
+    'voucher.approve',
   ],
   accountant: ['voucher.write', 'voucher.delete', 'master.write', 'master.delete', 'recon.write'],
   viewer: [],
@@ -1220,6 +1224,10 @@ export async function openAlter(voucherId) {
   const voucher = active.vouchers.find((item) => item.id === voucherId);
   if (!voucher) {
     setFlash('Voucher not found.', 'warn');
+    return false;
+  }
+  if (active.approvalsRequired && authRequired && authUser?.role !== 'owner') {
+    setFlash('Owner approval is required before staff can alter posted vouchers.', 'warn');
     return false;
   }
   if (!(await acquireRecordLease('voucher', voucher.id))) return false;
@@ -2381,7 +2389,11 @@ export async function handleSubmit(event) {
     }
     const data = new FormData(form);
     const previousName = active.name;
-    const result = updateCompany(active, { name: data.get('name'), fyStart: data.get('fyStart') });
+    const result = updateCompany(active, {
+      name: data.get('name'),
+      fyStart: data.get('fyStart'),
+      requireApproval: data.get('requireApproval') === 'on',
+    });
     if (!result.ok) {
       showFormError(result.error, 'company-error');
       return;
@@ -3063,8 +3075,15 @@ export async function handleSubmit(event) {
       requirePermission('voucher.write');
       return;
     }
-    const input = readVoucherForm();
     const editingId = view.editId;
+    const pendingApproval = Boolean(active.approvalsRequired && authRequired && authUser?.role !== 'owner' && !editingId);
+    const input = {
+      ...readVoucherForm(),
+      pending: pendingApproval,
+      submittedBy: authUser
+        ? { id: authUser.id, username: authUser.username, name: authUser.name }
+        : { id: 'local', username: 'local', name: 'Local user' },
+    };
     const result = editingId ? updateVoucher(active, editingId, input) : addVoucher(active, input);
     if (!result.ok) {
       showFormError(result.error);
@@ -3083,6 +3102,11 @@ export async function handleSubmit(event) {
     if (workspaceMode && workspaceSaveError) return;
     await releaseActiveLease();
     draft = null;
+    if (result.pending) {
+      setFlash(`${voucherLabel(result.voucher.type)} submitted for owner approval.`);
+      navigate('vouchers');
+      return;
+    }
     setFlash(
       `${voucherLabel(result.voucher.type)} ${result.voucher.no} ${editingId ? 'updated' : 'accepted'}.`,
     );
@@ -4546,6 +4570,11 @@ async function handleClick(event) {
       captureDraft();
       const active = company();
       if (!active) break;
+      if (active.approvalsRequired && authRequired && authUser?.role !== 'owner') {
+        setFlash('Owner approval is required before staff can delete posted vouchers.', 'warn');
+        render();
+        break;
+      }
       const settled = allocationsAgainst(active, trigger.dataset.id);
       if (settled.size > 0) {
         setFlash('This bill is settled by other vouchers. Remove those allocations first.', 'warn');
@@ -4566,6 +4595,75 @@ async function handleClick(event) {
       persist();
       setFlash(removed ? 'Voucher deleted.' : 'Voucher not found.');
       navigate('daybook');
+      break;
+    }
+    case 'approve-pending-voucher': {
+      if (!can('voucher.approve')) {
+        requirePermission('voucher.approve');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const result = approvePendingVoucher(active, trigger.dataset.id, currentProfile() || {});
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit(
+        'voucher.approve',
+        `Approved ${voucherAuditLabel(result.voucher)} for posting.`,
+        active,
+        `${result.voucher.type} ${result.voucher.no}`,
+      );
+      persist();
+      setFlash(`${voucherLabel(result.voucher.type)} ${result.voucher.no} approved and posted.`);
+      render();
+      break;
+    }
+    case 'reject-pending-voucher': {
+      if (!can('voucher.approve')) {
+        requirePermission('voucher.approve');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const note = window.prompt('Reason for rejecting this voucher (optional):', '');
+      if (note === null) break;
+      const result = rejectPendingVoucher(active, trigger.dataset.id, currentProfile() || {}, note);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit(
+        'voucher.reject',
+        `Rejected a submitted ${voucherLabel(result.voucher.type)}${note.trim() ? `: ${note.trim()}` : '.'}`,
+        active,
+        voucherLabel(result.voucher.type),
+      );
+      persist();
+      setFlash('Voucher rejected. It was not posted to the books.');
+      render();
+      break;
+    }
+    case 'delete-pending-voucher': {
+      if (!can('voucher.approve')) {
+        requirePermission('voucher.approve');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      if (!window.confirm('Remove this rejected voucher from the approval queue?')) break;
+      const result = deletePendingVoucher(active, trigger.dataset.id);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      persist();
+      setFlash('Rejected voucher removed from the queue.');
+      render();
       break;
     }
     case 'add-line': {

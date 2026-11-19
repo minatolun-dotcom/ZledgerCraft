@@ -4575,6 +4575,8 @@ function createCompany(name, fyStart) {
     groups: [],
     ledgers: [],
     vouchers: [],
+    pendingVouchers: [],
+    approvalsRequired: false,
     counters: {},
     bankReconciliations: {},
     costCategories: [],
@@ -5190,8 +5192,9 @@ function addVoucher(company, input) {
   if (!checked.ok) return checked;
 
   company.counters = company.counters ?? {};
-  const sequence = (company.counters[type] ?? 0) + 1;
-  company.counters[type] = sequence;
+  const pending = Boolean(input.pending);
+  const sequence = pending ? null : (company.counters[type] ?? 0) + 1;
+  if (!pending) company.counters[type] = sequence;
 
   const voucher = {
     id: uid('vch'),
@@ -5213,8 +5216,69 @@ function addVoucher(company, input) {
   if (checked.instrument) voucher.instrument = checked.instrument;
   if (checked.gst) voucher.gst = checked.gst;
   if (checked.tds) voucher.tds = checked.tds;
+  if (pending) {
+    const submittedBy = input.submittedBy && typeof input.submittedBy === 'object'
+      ? {
+          id: String(input.submittedBy.id ?? ''),
+          username: String(input.submittedBy.username ?? ''),
+          name: String(input.submittedBy.name ?? ''),
+        }
+      : { id: 'local', username: 'local', name: 'Local user' };
+    voucher.status = 'pending';
+    voucher.submittedBy = submittedBy;
+    voucher.submittedAt = new Date().toISOString();
+    company.pendingVouchers = company.pendingVouchers ?? [];
+    company.pendingVouchers.push(voucher);
+    return { ok: true, voucher, pending: true };
+  }
+  if (input.submittedBy) voucher.submittedBy = input.submittedBy;
+  if (input.approval) voucher.approval = input.approval;
   company.vouchers.push(voucher);
   return { ok: true, voucher };
+}
+
+function approvePendingVoucher(company, voucherId, actor = {}) {
+  const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
+  if (!pending) return { ok: false, error: 'Pending voucher not found.' };
+  if (pending.status !== 'pending') return { ok: false, error: 'This voucher has already been decided.' };
+  if (actor.id && pending.submittedBy?.id && actor.id === pending.submittedBy.id) {
+    return { ok: false, error: 'You cannot approve a voucher you submitted.' };
+  }
+  const result = addVoucher(company, {
+    ...pending,
+    pending: false,
+    submittedBy: pending.submittedBy,
+    approval: {
+      status: 'approved',
+      approvedBy: { id: actor.id || '', username: actor.username || '', name: actor.name || '' },
+      approvedAt: new Date().toISOString(),
+    },
+  });
+  if (!result.ok) return result;
+  company.pendingVouchers = (company.pendingVouchers ?? []).filter((voucher) => voucher.id !== voucherId);
+  return { ok: true, voucher: result.voucher };
+}
+
+function rejectPendingVoucher(company, voucherId, actor = {}, note = '') {
+  const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
+  if (!pending) return { ok: false, error: 'Pending voucher not found.' };
+  if (pending.status !== 'pending') return { ok: false, error: 'This voucher has already been decided.' };
+  if (actor.id && pending.submittedBy?.id && actor.id === pending.submittedBy.id) {
+    return { ok: false, error: 'You cannot reject a voucher you submitted.' };
+  }
+  pending.status = 'rejected';
+  pending.rejectedBy = { id: actor.id || '', username: actor.username || '', name: actor.name || '' };
+  pending.rejectedAt = new Date().toISOString();
+  pending.rejectionNote = String(note || '').trim().slice(0, 400);
+  return { ok: true, voucher: pending };
+}
+
+function deletePendingVoucher(company, voucherId) {
+  const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
+  if (!pending) return { ok: false, error: 'Pending voucher not found.' };
+  if (pending.status === 'pending') return { ok: false, error: 'Approve or reject the voucher before removing it.' };
+  company.pendingVouchers = (company.pendingVouchers ?? []).filter((voucher) => voucher.id !== voucherId);
+  return { ok: true };
 }
 
 function updateVoucher(company, voucherId, input) {
@@ -6023,6 +6087,9 @@ function updateCompany(company, input) {
   }
 
   company.name = name;
+  if (input.requireApproval !== undefined) {
+    company.approvalsRequired = Boolean(input.requireApproval);
+  }
   return { ok: true, company };
 }
 
@@ -11518,6 +11585,8 @@ const AUDIT_ACTION_LABELS = {
   'voucher.create': 'Voucher created',
   'voucher.update': 'Voucher altered',
   'voucher.delete': 'Voucher deleted',
+  'voucher.approve': 'Voucher approved',
+  'voucher.reject': 'Voucher rejected',
   'year.add': 'Financial year added',
   'year.close': 'Financial year closed',
   'year.reopen': 'Financial year reopened',
@@ -12070,6 +12139,7 @@ function companiesScreen() {
                   <input name="fyStart" type="date" value="${esc(editingCompany.years?.[0]?.start ?? editingCompany.fyStart)}" required>
                 </label>`
               : `<input type="hidden" name="fyStart" value="${esc(editingCompany.fyStart)}">`}
+            <label class="field inline-field"><input type="checkbox" name="requireApproval" ${editingCompany.approvalsRequired ? 'checked' : ''}> <span>Require owner approval for staff vouchers</span></label>
             <div class="field form-actions">
               <button class="btn primary" type="submit">Save company</button>
               <button class="btn ghost" type="button" data-action="cancel-company-edit">Cancel</button>
@@ -12503,6 +12573,45 @@ function mastersScreen() {
     )}`;
 }
 
+function pendingVouchersPanel(active) {
+  const pending = active.pendingVouchers ?? [];
+  if (!active.approvalsRequired && !pending.length) return '';
+  const rows = pending
+    .slice()
+    .reverse()
+    .map((voucher) => {
+      const own = Boolean(authUser?.id && voucher.submittedBy?.id === authUser.id);
+      const pendingStatus = voucher.status === 'pending';
+      return `<tr>
+        <td>${esc(dateLabel(voucher.date))}</td>
+        <td><strong>${esc(voucherLabel(voucher.type))}</strong><br><span class="muted small">${esc(voucher.narration || 'No narration')}</span></td>
+        <td class="num">${money(voucher.total)}</td>
+        <td>${esc(voucher.submittedBy?.name || voucher.submittedBy?.username || 'Unknown')}</td>
+        <td>${pendingStatus ? 'Pending' : 'Rejected'}${voucher.rejectionNote ? `<br><span class="muted small">${esc(voucher.rejectionNote)}</span>` : ''}</td>
+        <td class="row-actions">${
+          pendingStatus
+            ? can('voucher.approve')
+              ? own
+                ? '<span class="muted small">Awaiting another owner</span>'
+                : `<button class="btn small primary" type="button" data-action="approve-pending-voucher" data-id="${esc(voucher.id)}">Approve</button>
+                   <button class="btn small danger" type="button" data-action="reject-pending-voucher" data-id="${esc(voucher.id)}">Reject</button>`
+              : '<span class="muted small">Awaiting owner</span>'
+            : can('voucher.approve')
+              ? `<button class="btn small" type="button" data-action="delete-pending-voucher" data-id="${esc(voucher.id)}">Remove</button>`
+              : ''
+        }</td>
+      </tr>`;
+    })
+    .join('');
+  return panel(
+    `Voucher approvals <span class="count">${pending.filter((voucher) => voucher.status === 'pending').length}</span>`,
+    `<p class="muted small">${active.approvalsRequired ? 'Staff vouchers wait here until an owner approves them; only approved vouchers post to the books.' : 'Approval is currently off, but previously submitted vouchers still need a decision.'}</p>
+    ${pending.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact"><thead><tr><th>Date</th><th>Voucher</th><th class="num">Amount</th><th>Submitted by</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : '<p class="muted">No vouchers are waiting for approval.</p>'}`,
+  );
+}
+
 function vouchersScreen() {
   if (!company()) return emptyCompanyScreen('Vouchers');
   const active = company();
@@ -12524,6 +12633,7 @@ function vouchersScreen() {
       </div>
       <div class="type-grid inline">${cards}</div>
     </div>
+    ${pendingVouchersPanel(active)}
     ${panel(
       'Recent vouchers',
       recent.length
@@ -16789,6 +16899,7 @@ const ROLE_PERMISSIONS = {
     'data.restore',
     'user.manage',
     'recon.write',
+    'voucher.approve',
   ],
   accountant: ['voucher.write', 'voucher.delete', 'master.write', 'master.delete', 'recon.write'],
   viewer: [],
@@ -17645,6 +17756,10 @@ async function openAlter(voucherId) {
   const voucher = active.vouchers.find((item) => item.id === voucherId);
   if (!voucher) {
     setFlash('Voucher not found.', 'warn');
+    return false;
+  }
+  if (active.approvalsRequired && authRequired && authUser?.role !== 'owner') {
+    setFlash('Owner approval is required before staff can alter posted vouchers.', 'warn');
     return false;
   }
   if (!(await acquireRecordLease('voucher', voucher.id))) return false;
@@ -18806,7 +18921,11 @@ async function handleSubmit(event) {
     }
     const data = new FormData(form);
     const previousName = active.name;
-    const result = updateCompany(active, { name: data.get('name'), fyStart: data.get('fyStart') });
+    const result = updateCompany(active, {
+      name: data.get('name'),
+      fyStart: data.get('fyStart'),
+      requireApproval: data.get('requireApproval') === 'on',
+    });
     if (!result.ok) {
       showFormError(result.error, 'company-error');
       return;
@@ -19488,8 +19607,15 @@ async function handleSubmit(event) {
       requirePermission('voucher.write');
       return;
     }
-    const input = readVoucherForm();
     const editingId = view.editId;
+    const pendingApproval = Boolean(active.approvalsRequired && authRequired && authUser?.role !== 'owner' && !editingId);
+    const input = {
+      ...readVoucherForm(),
+      pending: pendingApproval,
+      submittedBy: authUser
+        ? { id: authUser.id, username: authUser.username, name: authUser.name }
+        : { id: 'local', username: 'local', name: 'Local user' },
+    };
     const result = editingId ? updateVoucher(active, editingId, input) : addVoucher(active, input);
     if (!result.ok) {
       showFormError(result.error);
@@ -19508,6 +19634,11 @@ async function handleSubmit(event) {
     if (workspaceMode && workspaceSaveError) return;
     await releaseActiveLease();
     draft = null;
+    if (result.pending) {
+      setFlash(`${voucherLabel(result.voucher.type)} submitted for owner approval.`);
+      navigate('vouchers');
+      return;
+    }
     setFlash(
       `${voucherLabel(result.voucher.type)} ${result.voucher.no} ${editingId ? 'updated' : 'accepted'}.`,
     );
@@ -20971,6 +21102,11 @@ async function handleClick(event) {
       captureDraft();
       const active = company();
       if (!active) break;
+      if (active.approvalsRequired && authRequired && authUser?.role !== 'owner') {
+        setFlash('Owner approval is required before staff can delete posted vouchers.', 'warn');
+        render();
+        break;
+      }
       const settled = allocationsAgainst(active, trigger.dataset.id);
       if (settled.size > 0) {
         setFlash('This bill is settled by other vouchers. Remove those allocations first.', 'warn');
@@ -20991,6 +21127,75 @@ async function handleClick(event) {
       persist();
       setFlash(removed ? 'Voucher deleted.' : 'Voucher not found.');
       navigate('daybook');
+      break;
+    }
+    case 'approve-pending-voucher': {
+      if (!can('voucher.approve')) {
+        requirePermission('voucher.approve');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const result = approvePendingVoucher(active, trigger.dataset.id, currentProfile() || {});
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit(
+        'voucher.approve',
+        `Approved ${voucherAuditLabel(result.voucher)} for posting.`,
+        active,
+        `${result.voucher.type} ${result.voucher.no}`,
+      );
+      persist();
+      setFlash(`${voucherLabel(result.voucher.type)} ${result.voucher.no} approved and posted.`);
+      render();
+      break;
+    }
+    case 'reject-pending-voucher': {
+      if (!can('voucher.approve')) {
+        requirePermission('voucher.approve');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const note = window.prompt('Reason for rejecting this voucher (optional):', '');
+      if (note === null) break;
+      const result = rejectPendingVoucher(active, trigger.dataset.id, currentProfile() || {}, note);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit(
+        'voucher.reject',
+        `Rejected a submitted ${voucherLabel(result.voucher.type)}${note.trim() ? `: ${note.trim()}` : '.'}`,
+        active,
+        voucherLabel(result.voucher.type),
+      );
+      persist();
+      setFlash('Voucher rejected. It was not posted to the books.');
+      render();
+      break;
+    }
+    case 'delete-pending-voucher': {
+      if (!can('voucher.approve')) {
+        requirePermission('voucher.approve');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      if (!window.confirm('Remove this rejected voucher from the approval queue?')) break;
+      const result = deletePendingVoucher(active, trigger.dataset.id);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      persist();
+      setFlash('Rejected voucher removed from the queue.');
+      render();
       break;
     }
     case 'add-line': {

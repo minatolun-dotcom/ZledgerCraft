@@ -44,8 +44,8 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 
 **Recommended next work:** follow the free-path order in
 [KNOWN_LIMITS.md § Remaining limits and free paths](KNOWN_LIMITS.md#remaining-limits-and-free-paths):
-Voucher approvals, app-level encryption, incremental master-column promotion,
-APIs/webhooks and statutory integrations. The SQLite/LAN per-account 2FA policy
+App-level encryption, incremental master-column promotion, APIs/webhooks and
+statutory integrations. Voucher approvals, the SQLite/LAN per-account 2FA policy
 and branded PDF reports are now complete.
 
 Working now:
@@ -267,7 +267,7 @@ Status: **Done**, **Partial**, **Missing**.
 
 | Feature | Status |
 | --- | --- |
-| Login, users, roles and company-level permissions | Partial — LAN server accounts, passwords, sessions, TOTP MFA with recovery codes, session management, lockout, optional IP allowlisting, owner/accountant/viewer enforcement, company-level scoping and optional Resend forgot-password links are done; browser-only mode still has no login |
+| Login, users, roles and company-level permissions | Partial — LAN server accounts, passwords, sessions, TOTP MFA with recovery codes, a per-account 2FA requirement, per-company voucher approvals, session management, lockout, optional IP allowlisting, owner/accountant/viewer enforcement, company-level scoping and optional Resend forgot-password links are done; browser-only mode still has no login |
 | Encryption/vault protection | Missing |
 | Immutable audit/edit log | Done (Stage 1, local append-only; not cryptographic) |
 | Backend database instead of browser storage | Partial — local SQLite with normalized company/ledger/voucher/line tables, a row table for every remaining company collection, atomic revisioned saves and automatic legacy migration; no offsite persistence |
@@ -326,6 +326,15 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-19 — Phase 4B: voucher approvals
+
+- Added a per-company owner-approval policy and a separate pending-voucher
+  queue, so unapproved staff vouchers never enter posted books or reports.
+- Owners approve or reject with attribution; proposers cannot decide their own
+  vouchers. The server blocks accountant direct posting while approvals are on.
+- Pending vouchers cannot yet be edited in place or merged with a dedicated
+  queue policy; the normal workspace conflict flow applies.
 
 ### 2026-11-19 — Phase 4A: per-account MFA requirement (SQLite/LAN)
 

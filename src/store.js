@@ -2267,6 +2267,8 @@ export function createCompany(name, fyStart) {
     groups: [],
     ledgers: [],
     vouchers: [],
+    pendingVouchers: [],
+    approvalsRequired: false,
     counters: {},
     bankReconciliations: {},
     costCategories: [],
@@ -2882,8 +2884,9 @@ export function addVoucher(company, input) {
   if (!checked.ok) return checked;
 
   company.counters = company.counters ?? {};
-  const sequence = (company.counters[type] ?? 0) + 1;
-  company.counters[type] = sequence;
+  const pending = Boolean(input.pending);
+  const sequence = pending ? null : (company.counters[type] ?? 0) + 1;
+  if (!pending) company.counters[type] = sequence;
 
   const voucher = {
     id: uid('vch'),
@@ -2905,8 +2908,69 @@ export function addVoucher(company, input) {
   if (checked.instrument) voucher.instrument = checked.instrument;
   if (checked.gst) voucher.gst = checked.gst;
   if (checked.tds) voucher.tds = checked.tds;
+  if (pending) {
+    const submittedBy = input.submittedBy && typeof input.submittedBy === 'object'
+      ? {
+          id: String(input.submittedBy.id ?? ''),
+          username: String(input.submittedBy.username ?? ''),
+          name: String(input.submittedBy.name ?? ''),
+        }
+      : { id: 'local', username: 'local', name: 'Local user' };
+    voucher.status = 'pending';
+    voucher.submittedBy = submittedBy;
+    voucher.submittedAt = new Date().toISOString();
+    company.pendingVouchers = company.pendingVouchers ?? [];
+    company.pendingVouchers.push(voucher);
+    return { ok: true, voucher, pending: true };
+  }
+  if (input.submittedBy) voucher.submittedBy = input.submittedBy;
+  if (input.approval) voucher.approval = input.approval;
   company.vouchers.push(voucher);
   return { ok: true, voucher };
+}
+
+export function approvePendingVoucher(company, voucherId, actor = {}) {
+  const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
+  if (!pending) return { ok: false, error: 'Pending voucher not found.' };
+  if (pending.status !== 'pending') return { ok: false, error: 'This voucher has already been decided.' };
+  if (actor.id && pending.submittedBy?.id && actor.id === pending.submittedBy.id) {
+    return { ok: false, error: 'You cannot approve a voucher you submitted.' };
+  }
+  const result = addVoucher(company, {
+    ...pending,
+    pending: false,
+    submittedBy: pending.submittedBy,
+    approval: {
+      status: 'approved',
+      approvedBy: { id: actor.id || '', username: actor.username || '', name: actor.name || '' },
+      approvedAt: new Date().toISOString(),
+    },
+  });
+  if (!result.ok) return result;
+  company.pendingVouchers = (company.pendingVouchers ?? []).filter((voucher) => voucher.id !== voucherId);
+  return { ok: true, voucher: result.voucher };
+}
+
+export function rejectPendingVoucher(company, voucherId, actor = {}, note = '') {
+  const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
+  if (!pending) return { ok: false, error: 'Pending voucher not found.' };
+  if (pending.status !== 'pending') return { ok: false, error: 'This voucher has already been decided.' };
+  if (actor.id && pending.submittedBy?.id && actor.id === pending.submittedBy.id) {
+    return { ok: false, error: 'You cannot reject a voucher you submitted.' };
+  }
+  pending.status = 'rejected';
+  pending.rejectedBy = { id: actor.id || '', username: actor.username || '', name: actor.name || '' };
+  pending.rejectedAt = new Date().toISOString();
+  pending.rejectionNote = String(note || '').trim().slice(0, 400);
+  return { ok: true, voucher: pending };
+}
+
+export function deletePendingVoucher(company, voucherId) {
+  const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
+  if (!pending) return { ok: false, error: 'Pending voucher not found.' };
+  if (pending.status === 'pending') return { ok: false, error: 'Approve or reject the voucher before removing it.' };
+  company.pendingVouchers = (company.pendingVouchers ?? []).filter((voucher) => voucher.id !== voucherId);
+  return { ok: true };
 }
 
 export function updateVoucher(company, voucherId, input) {
@@ -3715,6 +3779,9 @@ export function updateCompany(company, input) {
   }
 
   company.name = name;
+  if (input.requireApproval !== undefined) {
+    company.approvalsRequired = Boolean(input.requireApproval);
+  }
   return { ok: true, company };
 }
 

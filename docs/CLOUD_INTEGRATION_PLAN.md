@@ -187,7 +187,7 @@ Status: **complete 2026-11-19 — daily signed management summary by Resend, dri
 
 ### Phase 4 — Approvals and access controls
 
-Status: **in progress (4A complete 2026-11-19)**
+Status: **in progress (4A and 4B complete 2026-11-19)**
 
 - [x] **4A. Per-account MFA policy (SQLite/LAN).** Accounts can be marked
   `require_mfa` after TOTP enrollment. Sign-in refuses an account that requires
@@ -196,10 +196,13 @@ Status: **in progress (4A complete 2026-11-19)**
   lockout. This is enforced by the SQLite `AuthStore` and exposed in the owner
   account panel; the policy is unavailable in Neon Managed Auth mode, which has
   no TOTP support. The route returns `501` there.
-- [ ] **4B. Voucher approval workflow.** Add draft/pending/approved/rejected
-  states, proposer/approver attribution, “cannot approve your own voucher”,
-  reporting treatment and owner queue. This needs a separate accounting-state
-  migration.
+- [x] **4B. Voucher approval workflow.** A company can require owner approval
+  for staff vouchers. Pending submissions are stored separately from posted
+  vouchers, so they never affect ledgers, reports or inventory until approved.
+  Owners approve (assigning the real voucher number) or reject with a note;
+  proposers cannot decide their own voucher. The server rejects accountant
+  attempts to add posted vouchers or alter existing submissions while the
+  policy is on. The voucher screen shows the approval queue and status.
 - [ ] **4C. Read-only API and OpenAPI contract.** Hashed bearer tokens, scopes,
   versioned read endpoints and rate limits.
 
@@ -285,7 +288,7 @@ feature without breaking local development or the single-file build.
 | Phase 1 engine tests | pass | `node --test tests/` passed 219 with one conditional branch-test skip |
 | R2 upload tests | pass | `tests/server-cloud.test.mjs`, `tests/server-cloud-api.test.mjs` |
 | Resend/reset tests | pass | `tests/server-auth.test.mjs`, `tests/server-cloud-api.test.mjs` |
-| Pages build output | pass | `tests/build.test.mjs`; both documents are 844.4 kB |
+| Pages build output | pass | `tests/build.test.mjs`; both documents are 853.4 kB |
 | Browser regression | pass | Chromium and Firefox: 117 core + 105 advanced + 7 render + 9 login/reset + 6 axe screens + workspace merge |
 | Neon Auth sign-in | pass | Test Neon user signed in through `/api/auth/login`; owner profile created, `/api/auth/me` returned the session and the browser rendered the Gateway |
 | Neon Postgres workspace | pass | SQLite workspace copied to Neon; saves advanced revisions; meta read returned `storage: "postgres"`; lease acquire/release and hash-chained audit verified |
@@ -313,6 +316,7 @@ feature without breaking local development or the single-file build.
 | Report history | pass | API test checks sent/failed rows, source and recipients; Neon branch test exercises the Postgres history table |
 | Backup history | pass | Server API and Neon branch tests create a backup and verify the stored history row, source, name and status |
 | Per-account MFA policy | pass (SQLite/LAN) | Auth unit and server API tests cover requiring enrolled MFA, blocking disable, owner UI state and audit; Neon returns 501 |
+| Voucher approvals | pass | Store tests prove pending vouchers do not post or affect reports; server API test rejects accountant direct posting while approvals are on |
 
 ## Progress log
 
@@ -500,3 +504,10 @@ and operate the current server with R2 and Resend enabled.
   enrolled TOTP for an account, disable is blocked while required, and recovery
   clears both MFA and the requirement. Neon Managed Auth remains unable to
   enforce TOTP, so the route returns 501 there.
+- Added Phase 4B voucher approvals: a per-company owner-approval policy, a
+  separate pending queue, approve/reject/remove actions, proposer/approver
+  attribution, self-approval blocking and server-side prevention of accountant
+  direct posting. Pending vouchers never enter the posted books.
+- Remaining 4B limits: pending submissions cannot be edited in place, there is
+  no multi-level approval matrix, and concurrent pending-queue merges rely on
+  the normal workspace conflict flow rather than a dedicated merge.

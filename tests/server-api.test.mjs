@@ -733,6 +733,63 @@ test('server API authenticates, shares one workspace and enforces roles', { time
       ['voucher_a', 'voucher_b'],
     );
 
+    const approvalBase = await owner.request('/api/workspace');
+    const approvalState = structuredClone(approvalBase.body.state);
+    approvalState.companies[0].approvalsRequired = true;
+    approvalState.companies[0].pendingVouchers = [];
+    assert.equal(
+      (
+        await owner.request('/api/workspace', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ baseRev: approvalBase.body.rev, state: approvalState }),
+        })
+      ).status,
+      200,
+    );
+    const accounts = await owner.request('/api/auth/users');
+    const booksId = accounts.body.users.find((entry) => entry.username === 'books')?.id;
+    assert.ok(booksId);
+    const pendingBase = await accountant.request('/api/workspace');
+    const pendingState = structuredClone(pendingBase.body.state);
+    pendingState.companies[0].pendingVouchers = [
+      {
+        id: 'pending_one',
+        type: 'Payment',
+        no: null,
+        date: '2026-04-12',
+        total: 30,
+        lines: [],
+        status: 'pending',
+        submittedBy: { id: booksId, username: 'books', name: 'Books' },
+        submittedAt: '2026-04-12T00:00:00.000Z',
+      },
+    ];
+    const pendingSaved = await accountant.request('/api/workspace', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ baseRev: pendingBase.body.rev, state: pendingState }),
+    });
+    assert.equal(pendingSaved.status, 200, JSON.stringify(pendingSaved.body));
+
+    const directBase = await accountant.request('/api/workspace');
+    const directState = structuredClone(directBase.body.state);
+    directState.companies[0].vouchers.push({
+      id: 'voucher_bypass',
+      type: 'Payment',
+      no: 9,
+      date: '2026-04-12',
+      total: 30,
+      lines: [],
+    });
+    const bypass = await accountant.request('/api/workspace', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ baseRev: directBase.body.rev, state: directState }),
+    });
+    assert.equal(bypass.status, 403);
+    assert.match(bypass.body.error, /approved by an owner/i);
+
     assert.equal((await owner.request('/api/auth/logout', { method: 'POST' })).status, 200);
     assert.equal((await owner.request('/api/auth/me')).body.user, null);
   } finally {

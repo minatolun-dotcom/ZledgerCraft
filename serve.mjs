@@ -1334,7 +1334,7 @@ async function handleReportApi(request, response, url, pathname) {
   response.end();
 }
 
-function accountantWriteError(previous, next) {
+function accountantWriteError(previous, next, user = null) {
   if (!previous) return '';
   if (JSON.stringify(previous.users ?? []) !== JSON.stringify(next.users ?? [])) {
     return 'Only an owner can change user profiles.';
@@ -1351,6 +1351,31 @@ function accountantWriteError(previous, next) {
       (entry.years ?? []).map((year) => `${year.id}:${year.start}:${year.end}:${Boolean(year.closed)}`).join('|');
     if (yearSignature(old) !== yearSignature(company)) {
       return 'Only an owner can add, close or reopen financial years.';
+    }
+    if (Boolean(old.approvalsRequired) !== Boolean(company.approvalsRequired)) {
+      return 'Only an owner can change voucher approval policy.';
+    }
+    if (company.approvalsRequired) {
+      if (!deepEqual(old.vouchers ?? [], company.vouchers ?? [])) {
+        return 'Vouchers must be approved by an owner before they post to the books.';
+      }
+      const oldPending = new Map((old.pendingVouchers ?? []).map((voucher) => [voucher.id, voucher]));
+      const nextPending = new Map((company.pendingVouchers ?? []).map((voucher) => [voucher.id, voucher]));
+      for (const [id, voucher] of oldPending) {
+        const nextVoucher = nextPending.get(id);
+        if (!nextVoucher || !deepEqual(voucher, nextVoucher)) {
+          return 'Only an owner can change or remove submitted vouchers.';
+        }
+      }
+      for (const [id, voucher] of nextPending) {
+        if (oldPending.has(id)) continue;
+        if (voucher.status !== 'pending' || voucher.submittedBy?.id !== user?.id) {
+          return 'Submitted vouchers must be pending and carry your account.';
+        }
+        if ((company.vouchers ?? []).some((posted) => posted.id === id)) {
+          return 'A submitted voucher cannot reuse a posted voucher id.';
+        }
+      }
     }
   }
   const oldAudit = previous.audit ?? [];
@@ -1465,7 +1490,7 @@ async function writeWorkspace(state, baseRev, user, leaseToken = '') {
         const serialized = JSON.stringify(merged.state);
         const written = await workspaceStore.write(merged.state, Number(current.rev), {
           updatedAt,
-          validate: accountantWriteError,
+          validate: (before, after) => accountantWriteError(before, after, user),
           afterWrite: afterWrite(serialized),
         });
         if (written.conflict || written.forbidden) return written;
@@ -1483,7 +1508,7 @@ async function writeWorkspace(state, baseRev, user, leaseToken = '') {
     const serialized = JSON.stringify(state);
     return workspaceStore.write(state, baseRev, {
       updatedAt,
-      validate: user.role === 'owner' ? null : accountantWriteError,
+      validate: user.role === 'owner' ? null : (before, after) => accountantWriteError(before, after, user),
       afterWrite: afterWrite(serialized),
     });
   }

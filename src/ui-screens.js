@@ -564,6 +564,7 @@ export function companiesScreen() {
                   <input name="fyStart" type="date" value="${esc(editingCompany.years?.[0]?.start ?? editingCompany.fyStart)}" required>
                 </label>`
               : `<input type="hidden" name="fyStart" value="${esc(editingCompany.fyStart)}">`}
+            <label class="field inline-field"><input type="checkbox" name="requireApproval" ${editingCompany.approvalsRequired ? 'checked' : ''}> <span>Require owner approval for staff vouchers</span></label>
             <div class="field form-actions">
               <button class="btn primary" type="submit">Save company</button>
               <button class="btn ghost" type="button" data-action="cancel-company-edit">Cancel</button>
@@ -997,6 +998,45 @@ export function mastersScreen() {
     )}`;
 }
 
+function pendingVouchersPanel(active) {
+  const pending = active.pendingVouchers ?? [];
+  if (!active.approvalsRequired && !pending.length) return '';
+  const rows = pending
+    .slice()
+    .reverse()
+    .map((voucher) => {
+      const own = Boolean(authUser?.id && voucher.submittedBy?.id === authUser.id);
+      const pendingStatus = voucher.status === 'pending';
+      return `<tr>
+        <td>${esc(dateLabel(voucher.date))}</td>
+        <td><strong>${esc(voucherLabel(voucher.type))}</strong><br><span class="muted small">${esc(voucher.narration || 'No narration')}</span></td>
+        <td class="num">${money(voucher.total)}</td>
+        <td>${esc(voucher.submittedBy?.name || voucher.submittedBy?.username || 'Unknown')}</td>
+        <td>${pendingStatus ? 'Pending' : 'Rejected'}${voucher.rejectionNote ? `<br><span class="muted small">${esc(voucher.rejectionNote)}</span>` : ''}</td>
+        <td class="row-actions">${
+          pendingStatus
+            ? can('voucher.approve')
+              ? own
+                ? '<span class="muted small">Awaiting another owner</span>'
+                : `<button class="btn small primary" type="button" data-action="approve-pending-voucher" data-id="${esc(voucher.id)}">Approve</button>
+                   <button class="btn small danger" type="button" data-action="reject-pending-voucher" data-id="${esc(voucher.id)}">Reject</button>`
+              : '<span class="muted small">Awaiting owner</span>'
+            : can('voucher.approve')
+              ? `<button class="btn small" type="button" data-action="delete-pending-voucher" data-id="${esc(voucher.id)}">Remove</button>`
+              : ''
+        }</td>
+      </tr>`;
+    })
+    .join('');
+  return panel(
+    `Voucher approvals <span class="count">${pending.filter((voucher) => voucher.status === 'pending').length}</span>`,
+    `<p class="muted small">${active.approvalsRequired ? 'Staff vouchers wait here until an owner approves them; only approved vouchers post to the books.' : 'Approval is currently off, but previously submitted vouchers still need a decision.'}</p>
+    ${pending.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact"><thead><tr><th>Date</th><th>Voucher</th><th class="num">Amount</th><th>Submitted by</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : '<p class="muted">No vouchers are waiting for approval.</p>'}`,
+  );
+}
+
 export function vouchersScreen() {
   if (!company()) return emptyCompanyScreen('Vouchers');
   const active = company();
@@ -1018,6 +1058,7 @@ export function vouchersScreen() {
       </div>
       <div class="type-grid inline">${cards}</div>
     </div>
+    ${pendingVouchersPanel(active)}
     ${panel(
       'Recent vouchers',
       recent.length

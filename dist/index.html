@@ -535,6 +535,27 @@ kbd {
   min-width: 220px;
 }
 
+.revision-history {
+  margin-top: 0.4rem;
+  max-width: 28rem;
+}
+
+.revision-history summary {
+  cursor: pointer;
+  color: var(--accent, inherit);
+  font-size: 0.8rem;
+}
+
+.revision-entry {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.revision-entry ul {
+  margin: 0.2rem 0 0;
+  padding-left: 1.1rem;
+}
+
 .field.inline-field {
   flex-direction: row;
   align-items: center;
@@ -5273,10 +5294,50 @@ function rejectPendingVoucher(company, voucherId, actor = {}, note = '') {
   return { ok: true, voucher: pending };
 }
 
+function pendingRevisionChanges(before, after) {
+  const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const changes = [];
+  const add = (field, label, from, to) => {
+    if (!same(from, to)) changes.push({ field, label, from, to });
+  };
+  add('type', 'Voucher type', before.type, after.type);
+  add('date', 'Date', before.date, after.date);
+  add('narration', 'Narration', before.narration, after.narration);
+  add('total', 'Amount', before.total, after.total);
+  add('lines', 'Ledger lines', before.lines, after.lines);
+  add('items', 'Stock items', before.items, after.items);
+  const addBlock = (field, label) => {
+    if (!same(before[field], after[field])) changes.push({ field, label, from: null, to: null });
+  };
+  addBlock('bill', 'Bill details');
+  addBlock('instrument', 'Instrument');
+  addBlock('gst', 'GST details');
+  addBlock('tds', 'TDS/TCS details');
+  add('currency', 'Currency', before.currency, after.currency);
+  return changes;
+}
+
+function pendingVoucherFields(voucher) {
+  return {
+    type: voucher.type,
+    date: voucher.date,
+    narration: voucher.narration ?? '',
+    total: voucher.total,
+    lines: voucher.lines ?? [],
+    items: voucher.items ?? [],
+    bill: voucher.bill ?? null,
+    instrument: voucher.instrument ?? null,
+    gst: voucher.gst ?? null,
+    tds: voucher.tds ?? null,
+    currency: voucher.currencyCode ?? 'INR',
+  };
+}
+
 function updatePendingVoucher(company, voucherId, input = {}, actor = {}) {
   const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
   if (!pending) return { ok: false, error: 'Pending voucher not found.' };
   if (pending.status !== 'pending') return { ok: false, error: 'Only a pending voucher can be edited.' };
+  const beforeFields = pendingVoucherFields(pending);
   if (!actor.id || pending.submittedBy?.id !== actor.id) {
     return { ok: false, error: 'Only the person who submitted this voucher can edit it.' };
   }
@@ -5302,6 +5363,19 @@ function updatePendingVoucher(company, voucherId, input = {}, actor = {}) {
   if (checked.gst) pending.gst = checked.gst;
   if (checked.tds) pending.tds = checked.tds;
   pending.editedAt = new Date().toISOString();
+  const changes = pendingRevisionChanges(beforeFields, pendingVoucherFields(pending));
+  if (changes.length) {
+    pending.revisions = pending.revisions ?? [];
+    pending.revisions.push({
+      at: pending.editedAt,
+      by: {
+        id: String(actor.id ?? ''),
+        username: String(actor.username ?? ''),
+        name: String(actor.name ?? ''),
+      },
+      changes,
+    });
+  }
   return { ok: true, voucher: pending, pending: true };
 }
 
@@ -12663,6 +12737,46 @@ function mastersScreen() {
     )}`;
 }
 
+function pendingRevisionValue(change) {
+  const text = (value) => (value === null || value === undefined || value === '' ? '—' : String(value));
+  if (change.field === 'type') return voucherLabel(change.from);
+  if (change.field === 'total') return `${money(change.from)} → ${money(change.to)}`;
+  if (change.field === 'lines') {
+    const lines = (value) =>
+      Array.isArray(value) && value.length
+        ? value.map((line) => `${ledgerNameById(line.ledgerId) || line.ledgerId} ${line.side} ${money(line.amount)}`).join(' · ')
+        : 'No lines';
+    return `${lines(change.from)} → ${lines(change.to)}`;
+  }
+  if (change.field === 'items') {
+    const count = (value) => `${Array.isArray(value) ? value.length : 0} item(s)`;
+    return `${count(change.from)} → ${count(change.to)}`;
+  }
+  if (change.from === null && change.to === null) return 'Details changed';
+  if (change.field === 'currency') return `${text(change.from)} → ${text(change.to)}`;
+  return `${text(change.from)} → ${text(change.to)}`;
+}
+
+function pendingRevisionHistory(voucher) {
+  const revisions = Array.isArray(voucher.revisions) ? voucher.revisions : [];
+  if (!revisions.length) return '';
+  const rows = revisions
+    .slice()
+    .reverse()
+    .map((revision) => {
+      const changes = (revision.changes ?? [])
+        .map((change) => `<li>${esc(change.label || change.field)}: ${esc(pendingRevisionValue(change))}</li>`)
+        .join('');
+      return `<div class="revision-entry">
+        <strong>${esc(new Date(revision.at).toLocaleString('en-IN'))}</strong>
+        <span class="muted"> · ${esc(revision.by?.name || revision.by?.username || 'Unknown')}</span>
+        <ul>${changes || '<li>No field changes recorded.</li>'}</ul>
+      </div>`;
+    })
+    .join('');
+  return `<details class="revision-history"><summary>${revisions.length} revision(s)</summary>${rows}</details>`;
+}
+
 function pendingVouchersPanel(active) {
   const pending = active.pendingVouchers ?? [];
   if (!active.approvalsRequired && !pending.length) return '';
@@ -12677,7 +12791,7 @@ function pendingVouchersPanel(active) {
         <td><strong>${esc(voucherLabel(voucher.type))}</strong><br><span class="muted small">${esc(voucher.narration || 'No narration')}</span></td>
         <td class="num">${money(voucher.total)}</td>
         <td>${esc(voucher.submittedBy?.name || voucher.submittedBy?.username || 'Unknown')}</td>
-        <td>${pendingStatus ? 'Pending' : 'Rejected'}${voucher.rejectionNote ? `<br><span class="muted small">${esc(voucher.rejectionNote)}</span>` : ''}</td>
+        <td>${pendingStatus ? 'Pending' : 'Rejected'}${voucher.rejectionNote ? `<br><span class="muted small">${esc(voucher.rejectionNote)}</span>` : ''}${pendingRevisionHistory(voucher)}</td>
         <td class="row-actions">${
           pendingStatus
             ? own

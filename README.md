@@ -72,9 +72,10 @@ A company can require owner approval for vouchers entered by staff. Enable
 **Require owner approval for staff vouchers** while editing the company. Staff
 vouchers then wait in the Voucher approvals queue and do not post to ledgers,
 reports or inventory until an owner approves them. The submitter can revise a
-pending voucher or withdraw it before a decision; the server accepts only the
-original submitter's pending edits and rejects changes to another person's
-submission. Owners can approve (which assigns the real voucher number) or reject
+pending voucher or withdraw it before a decision; each revision records the
+changed fields and old/new values, shown in a collapsible history for the owner.
+The server accepts only the original submitter's pending edits and rejects
+changes to another person's submission or earlier revision history. Owners can approve (which assigns the real voucher number) or reject
 with a note; proposers cannot decide their own vouchers, and the server blocks
 accountant attempts to post directly or alter existing submissions while the
 policy is on.

@@ -341,7 +341,9 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
   a voucher number before approval, and still blocks edits to another person's
   submission.
 - Revised pending vouchers remain outside posted books and reports until an
-  owner approves them. The queue records the revision time.
+  owner approves them. Each revision stores changed fields with old/new values
+  and editor attribution; the queue shows a collapsible history and the server
+  rejects rewriting earlier entries.
 
 ### 2026-11-19 — Phase 5A: scoped API tokens and shared limits
 

@@ -782,12 +782,30 @@ test('server API authenticates, shares one workspace and enforces roles', { time
     const reviseState = structuredClone(reviseBase.body.state);
     reviseState.companies[0].pendingVouchers[0].narration = 'Corrected before approval';
     reviseState.companies[0].pendingVouchers[0].total = 35;
+    reviseState.companies[0].pendingVouchers[0].revisions = [
+      {
+        at: '2026-04-12T01:00:00.000Z',
+        by: { id: booksId, username: 'books', name: 'Books' },
+        changes: [{ field: 'narration', label: 'Narration', from: '', to: 'Corrected before approval' }],
+      },
+    ];
     const revised = await accountant.request('/api/workspace', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ baseRev: reviseBase.body.rev, state: reviseState }),
     });
     assert.equal(revised.status, 200, JSON.stringify(revised.body));
+
+    const rewriteBase = await accountant.request('/api/workspace');
+    const rewriteState = structuredClone(rewriteBase.body.state);
+    rewriteState.companies[0].pendingVouchers[0].revisions[0].changes[0].to = 'Rewritten history';
+    const rewritten = await accountant.request('/api/workspace', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ baseRev: rewriteBase.body.rev, state: rewriteState }),
+    });
+    assert.equal(rewritten.status, 403);
+    assert.match(rewritten.body.error, /revision history/i);
 
     const foreignBase = await owner.request('/api/workspace');
     const foreignState = structuredClone(foreignBase.body.state);

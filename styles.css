@@ -527,6 +527,27 @@ kbd {
   min-width: 220px;
 }
 
+.revision-history {
+  margin-top: 0.4rem;
+  max-width: 28rem;
+}
+
+.revision-history summary {
+  cursor: pointer;
+  color: var(--accent, inherit);
+  font-size: 0.8rem;
+}
+
+.revision-entry {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.revision-entry ul {
+  margin: 0.2rem 0 0;
+  padding-left: 1.1rem;
+}
+
 .field.inline-field {
   flex-direction: row;
   align-items: center;

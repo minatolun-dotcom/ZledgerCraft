@@ -2965,10 +2965,50 @@ export function rejectPendingVoucher(company, voucherId, actor = {}, note = '') 
   return { ok: true, voucher: pending };
 }
 
+function pendingRevisionChanges(before, after) {
+  const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const changes = [];
+  const add = (field, label, from, to) => {
+    if (!same(from, to)) changes.push({ field, label, from, to });
+  };
+  add('type', 'Voucher type', before.type, after.type);
+  add('date', 'Date', before.date, after.date);
+  add('narration', 'Narration', before.narration, after.narration);
+  add('total', 'Amount', before.total, after.total);
+  add('lines', 'Ledger lines', before.lines, after.lines);
+  add('items', 'Stock items', before.items, after.items);
+  const addBlock = (field, label) => {
+    if (!same(before[field], after[field])) changes.push({ field, label, from: null, to: null });
+  };
+  addBlock('bill', 'Bill details');
+  addBlock('instrument', 'Instrument');
+  addBlock('gst', 'GST details');
+  addBlock('tds', 'TDS/TCS details');
+  add('currency', 'Currency', before.currency, after.currency);
+  return changes;
+}
+
+function pendingVoucherFields(voucher) {
+  return {
+    type: voucher.type,
+    date: voucher.date,
+    narration: voucher.narration ?? '',
+    total: voucher.total,
+    lines: voucher.lines ?? [],
+    items: voucher.items ?? [],
+    bill: voucher.bill ?? null,
+    instrument: voucher.instrument ?? null,
+    gst: voucher.gst ?? null,
+    tds: voucher.tds ?? null,
+    currency: voucher.currencyCode ?? 'INR',
+  };
+}
+
 export function updatePendingVoucher(company, voucherId, input = {}, actor = {}) {
   const pending = (company.pendingVouchers ?? []).find((voucher) => voucher.id === voucherId);
   if (!pending) return { ok: false, error: 'Pending voucher not found.' };
   if (pending.status !== 'pending') return { ok: false, error: 'Only a pending voucher can be edited.' };
+  const beforeFields = pendingVoucherFields(pending);
   if (!actor.id || pending.submittedBy?.id !== actor.id) {
     return { ok: false, error: 'Only the person who submitted this voucher can edit it.' };
   }
@@ -2994,6 +3034,19 @@ export function updatePendingVoucher(company, voucherId, input = {}, actor = {})
   if (checked.gst) pending.gst = checked.gst;
   if (checked.tds) pending.tds = checked.tds;
   pending.editedAt = new Date().toISOString();
+  const changes = pendingRevisionChanges(beforeFields, pendingVoucherFields(pending));
+  if (changes.length) {
+    pending.revisions = pending.revisions ?? [];
+    pending.revisions.push({
+      at: pending.editedAt,
+      by: {
+        id: String(actor.id ?? ''),
+        username: String(actor.username ?? ''),
+        name: String(actor.name ?? ''),
+      },
+      changes,
+    });
+  }
   return { ok: true, voucher: pending, pending: true };
 }
 

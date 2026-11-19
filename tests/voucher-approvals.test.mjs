@@ -124,6 +124,13 @@ test('submitters can revise or withdraw their own pending voucher', () => {
   assert.equal(company.pendingVouchers[0].narration, 'Corrected before approval');
   assert.equal(company.pendingVouchers[0].submittedAt, submittedAt);
   assert.ok(company.pendingVouchers[0].editedAt);
+  assert.equal(company.pendingVouchers[0].revisions.length, 1);
+  assert.equal(company.pendingVouchers[0].revisions[0].by.id, submittedBy.id);
+  const changedFields = company.pendingVouchers[0].revisions[0].changes.map((change) => change.field);
+  assert.ok(changedFields.includes('date'));
+  assert.ok(changedFields.includes('narration'));
+  assert.ok(changedFields.includes('total'));
+  assert.ok(changedFields.includes('lines'));
   assert.equal(dayBook(company).length, 0);
 
   const approved = approvePendingVoucher(company, submitted.voucher.id, {

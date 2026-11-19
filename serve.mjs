@@ -1391,6 +1391,14 @@ function accountantWriteError(previous, next, user = null) {
         if (!ownPending) {
           return 'Only the submitter can edit a pending voucher.';
         }
+        const oldRevisions = Array.isArray(voucher.revisions) ? voucher.revisions : [];
+        const nextRevisions = Array.isArray(nextVoucher.revisions) ? nextVoucher.revisions : [];
+        if (!deepEqual(nextRevisions.slice(0, oldRevisions.length), oldRevisions)) {
+          return 'Pending voucher revision history cannot be rewritten.';
+        }
+        if (nextRevisions.slice(oldRevisions.length).some((revision) => revision?.by?.id !== user?.id)) {
+          return 'Pending voucher revisions must be attributed to you.';
+        }
         if (nextVoucher.id !== id) {
           return 'A pending voucher must keep its id.';
         }

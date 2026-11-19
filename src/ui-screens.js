@@ -1001,6 +1001,46 @@ export function mastersScreen() {
     )}`;
 }
 
+function pendingRevisionValue(change) {
+  const text = (value) => (value === null || value === undefined || value === '' ? '—' : String(value));
+  if (change.field === 'type') return voucherLabel(change.from);
+  if (change.field === 'total') return `${money(change.from)} → ${money(change.to)}`;
+  if (change.field === 'lines') {
+    const lines = (value) =>
+      Array.isArray(value) && value.length
+        ? value.map((line) => `${ledgerNameById(line.ledgerId) || line.ledgerId} ${line.side} ${money(line.amount)}`).join(' · ')
+        : 'No lines';
+    return `${lines(change.from)} → ${lines(change.to)}`;
+  }
+  if (change.field === 'items') {
+    const count = (value) => `${Array.isArray(value) ? value.length : 0} item(s)`;
+    return `${count(change.from)} → ${count(change.to)}`;
+  }
+  if (change.from === null && change.to === null) return 'Details changed';
+  if (change.field === 'currency') return `${text(change.from)} → ${text(change.to)}`;
+  return `${text(change.from)} → ${text(change.to)}`;
+}
+
+function pendingRevisionHistory(voucher) {
+  const revisions = Array.isArray(voucher.revisions) ? voucher.revisions : [];
+  if (!revisions.length) return '';
+  const rows = revisions
+    .slice()
+    .reverse()
+    .map((revision) => {
+      const changes = (revision.changes ?? [])
+        .map((change) => `<li>${esc(change.label || change.field)}: ${esc(pendingRevisionValue(change))}</li>`)
+        .join('');
+      return `<div class="revision-entry">
+        <strong>${esc(new Date(revision.at).toLocaleString('en-IN'))}</strong>
+        <span class="muted"> · ${esc(revision.by?.name || revision.by?.username || 'Unknown')}</span>
+        <ul>${changes || '<li>No field changes recorded.</li>'}</ul>
+      </div>`;
+    })
+    .join('');
+  return `<details class="revision-history"><summary>${revisions.length} revision(s)</summary>${rows}</details>`;
+}
+
 function pendingVouchersPanel(active) {
   const pending = active.pendingVouchers ?? [];
   if (!active.approvalsRequired && !pending.length) return '';
@@ -1015,7 +1055,7 @@ function pendingVouchersPanel(active) {
         <td><strong>${esc(voucherLabel(voucher.type))}</strong><br><span class="muted small">${esc(voucher.narration || 'No narration')}</span></td>
         <td class="num">${money(voucher.total)}</td>
         <td>${esc(voucher.submittedBy?.name || voucher.submittedBy?.username || 'Unknown')}</td>
-        <td>${pendingStatus ? 'Pending' : 'Rejected'}${voucher.rejectionNote ? `<br><span class="muted small">${esc(voucher.rejectionNote)}</span>` : ''}</td>
+        <td>${pendingStatus ? 'Pending' : 'Rejected'}${voucher.rejectionNote ? `<br><span class="muted small">${esc(voucher.rejectionNote)}</span>` : ''}${pendingRevisionHistory(voucher)}</td>
         <td class="row-actions">${
           pendingStatus
             ? own

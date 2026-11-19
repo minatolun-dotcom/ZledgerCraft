@@ -337,8 +337,12 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - Declared a Neon Function Trigger (`30 2 * * *` UTC) that runs the daily backup
   check and report delivery; local/LAN servers use an hourly due check.
 - Resend delivers the summary; no full workspace dump is built in a Worker cron.
+- Persisted report attempt time/error in SQLite and Postgres and surfaced the
+  latest failure beside the owner report controls; live production delivery was
+  accepted by Resend for the test recipient.
 - Verification: report unit and API tests pass, including signed-link retrieval,
-  Resend payload, scheduler authorization and Postgres settings persistence.
+  Resend payload and outage error, scheduler authorization and Postgres
+  settings persistence.
 
 ### 2026-11-19 — Shared source limits and durable R2 recovery
 

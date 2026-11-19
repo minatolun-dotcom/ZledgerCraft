@@ -161,9 +161,18 @@ if (DatabaseSync) {
       enabled INTEGER NOT NULL DEFAULT 0,
       recipients TEXT NOT NULL DEFAULT '',
       last_sent_at TEXT,
+      last_attempt_at TEXT,
+      last_error TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL
     );
   `);
+  const reportColumns = db.prepare('PRAGMA table_info(report_settings)').all();
+  if (!reportColumns.some((column) => column.name === 'last_attempt_at')) {
+    db.exec('ALTER TABLE report_settings ADD COLUMN last_attempt_at TEXT');
+  }
+  if (!reportColumns.some((column) => column.name === 'last_error')) {
+    db.exec("ALTER TABLE report_settings ADD COLUMN last_error TEXT NOT NULL DEFAULT ''");
+  }
   const auditColumns = db.prepare('PRAGMA table_info(workspace_audit)').all();
   if (!auditColumns.some((column) => column.name === 'prev_hash')) {
     db.exec("ALTER TABLE workspace_audit ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''");
@@ -921,14 +930,16 @@ function scheduleServerBackupCheck() {
 
 async function readReportSettings() {
   if (postgresStore) return postgresStore.getReportSettings();
-  if (!db) return { enabled: false, recipients: '', lastSentAt: null, updatedAt: null };
+  if (!db) return { enabled: false, recipients: '', lastSentAt: null, lastAttemptAt: null, lastError: '', updatedAt: null };
   const row = db
-    .prepare('SELECT enabled, recipients, last_sent_at, updated_at FROM report_settings WHERE id = 1')
+    .prepare('SELECT enabled, recipients, last_sent_at, last_attempt_at, last_error, updated_at FROM report_settings WHERE id = 1')
     .get();
   return {
     enabled: Boolean(row?.enabled),
     recipients: row?.recipients || '',
     lastSentAt: row?.last_sent_at || null,
+    lastAttemptAt: row?.last_attempt_at || null,
+    lastError: row?.last_error || '',
     updatedAt: row?.updated_at || null,
   };
 }
@@ -947,6 +958,23 @@ async function writeReportSettings({ enabled = false, recipients = '', lastSentA
        last_sent_at = COALESCE(excluded.last_sent_at, report_settings.last_sent_at),
        updated_at = excluded.updated_at`,
   ).run(enabled ? 1 : 0, String(recipients), lastSentAt, new Date().toISOString());
+  return readReportSettings();
+}
+
+async function recordReportAttempt({ sent = false, error = '' } = {}) {
+  const at = new Date().toISOString();
+  if (postgresStore) return postgresStore.recordReportAttempt({ sent, error, at });
+  if (!db) return null;
+  db.prepare(
+    `INSERT INTO report_settings
+       (id, enabled, recipients, last_sent_at, last_attempt_at, last_error, updated_at)
+     VALUES (1, 0, '', ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       last_sent_at = CASE WHEN ? THEN excluded.last_sent_at ELSE report_settings.last_sent_at END,
+       last_attempt_at = excluded.last_attempt_at,
+       last_error = excluded.last_error,
+       updated_at = excluded.updated_at`,
+  ).run(sent ? at : null, at, String(error).slice(0, 500), at, sent ? 1 : 0);
   return readReportSettings();
 }
 
@@ -989,7 +1017,7 @@ async function latestBackupForReport() {
   }
 }
 
-async function sendDailyReport({ force = false, request = null } = {}) {
+async function sendDailyReportOnce({ force = false, request = null } = {}) {
   const settings = await readReportSettings();
   if (!force && !settings.enabled) return { skipped: 'disabled' };
   if (!force && settings.lastSentAt?.slice(0, 10) === new Date().toISOString().slice(0, 10)) {
@@ -1014,11 +1042,7 @@ async function sendDailyReport({ force = false, request = null } = {}) {
     },
     emailConfig,
   );
-  await writeReportSettings({
-    enabled: settings.enabled,
-    recipients: settings.recipients,
-    lastSentAt: new Date().toISOString(),
-  });
+  await recordReportAttempt({ sent: true }).catch(() => {});
   appendServerEvent(
     { id: 'system', username: 'scheduler', role: 'owner' },
     'report.send',
@@ -1026,6 +1050,15 @@ async function sendDailyReport({ force = false, request = null } = {}) {
     `${report.companies.length} company(ies)`,
   );
   return { sent: true, recipients: parsed.recipients, report, url: signed.url, expiresAt: signed.expiresAt };
+}
+
+async function sendDailyReport(options = {}) {
+  try {
+    return await sendDailyReportOnce(options);
+  } catch (error) {
+    await recordReportAttempt({ sent: false, error: error.message || 'Report delivery failed.' }).catch(() => {});
+    throw error;
+  }
 }
 
 async function runScheduledJobs() {

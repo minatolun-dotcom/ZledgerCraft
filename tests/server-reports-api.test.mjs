@@ -116,11 +116,19 @@ const state = {
 
 test('owner can configure, preview and send a signed daily report', { timeout: 30000 }, async () => {
   const emails = [];
+  let failNext = false;
   const resend = await mockHttp((request, response) => {
     const chunks = [];
     request.on('data', (chunk) => chunks.push(chunk));
     request.on('end', () => {
-      emails.push(JSON.parse(Buffer.concat(chunks).toString()));
+      const payload = JSON.parse(Buffer.concat(chunks).toString());
+      if (failNext) {
+        failNext = false;
+        response.writeHead(500, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ message: 'simulated Resend outage' }));
+        return;
+      }
+      emails.push(payload);
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ id: 'email_report_1' }));
     });
@@ -158,6 +166,7 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         const initial = await owner.request('/api/reports/settings');
         assert.equal(initial.status, 200, JSON.stringify(initial.body));
         assert.equal(initial.body.settings.enabled, false);
+        assert.equal(initial.body.settings.lastError, '');
         assert.equal(initial.body.emailConfigured, true);
         assert.equal(initial.body.secretConfigured, true);
 
@@ -185,6 +194,9 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         assert.match(emails[0].subject, /ZledgerCraft daily summary/);
         assert.match(emails[0].text, /Report Books/);
         assert.match(emails[0].text, /api\/reports\/daily\?token=/);
+        const afterSend = await owner.request('/api/reports/settings');
+        assert.ok(afterSend.body.settings.lastAttemptAt);
+        assert.equal(afterSend.body.settings.lastError, '');
 
         const unauthorized = await fetch(`${base}/api/internal/scheduler`, { method: 'POST' });
         assert.equal(unauthorized.status, 401);
@@ -203,6 +215,13 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         assert.equal(scheduled.status, 200);
         const scheduledBody = await scheduled.json();
         assert.equal(scheduledBody.report, 'already-sent');
+
+        failNext = true;
+        const failed = await owner.request('/api/reports/send', { method: 'POST' });
+        assert.equal(failed.status, 503, JSON.stringify(failed.body));
+        const afterFailure = await owner.request('/api/reports/settings');
+        assert.match(afterFailure.body.settings.lastError, /simulated Resend outage/);
+        assert.ok(afterFailure.body.settings.lastAttemptAt);
       },
     );
   } finally {

@@ -115,8 +115,12 @@ export class PostgresWorkspaceStore {
         enabled BOOLEAN NOT NULL DEFAULT FALSE,
         recipients TEXT NOT NULL DEFAULT '',
         last_sent_at TIMESTAMPTZ,
+        last_attempt_at TIMESTAMPTZ,
+        last_error TEXT NOT NULL DEFAULT '',
         updated_at TIMESTAMPTZ NOT NULL
       );
+      ALTER TABLE zl_report_settings ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ;
+      ALTER TABLE zl_report_settings ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
     `);
   }
 
@@ -420,16 +424,18 @@ export class PostgresWorkspaceStore {
 
   async getReportSettings() {
     const result = await this.pool.query(
-      'SELECT enabled, recipients, last_sent_at, updated_at FROM zl_report_settings WHERE id = 1',
+      'SELECT enabled, recipients, last_sent_at, last_attempt_at, last_error, updated_at FROM zl_report_settings WHERE id = 1',
     );
     if (!result.rowCount) {
-      return { enabled: false, recipients: '', lastSentAt: null, updatedAt: null };
+      return { enabled: false, recipients: '', lastSentAt: null, lastAttemptAt: null, lastError: '', updatedAt: null };
     }
     const row = result.rows[0];
     return {
       enabled: Boolean(row.enabled),
       recipients: row.recipients || '',
       lastSentAt: row.last_sent_at ? new Date(row.last_sent_at).toISOString() : null,
+      lastAttemptAt: row.last_attempt_at ? new Date(row.last_attempt_at).toISOString() : null,
+      lastError: row.last_error || '',
       updatedAt: new Date(row.updated_at).toISOString(),
     };
   }
@@ -449,12 +455,17 @@ export class PostgresWorkspaceStore {
     return this.getReportSettings();
   }
 
-  async markReportSent(at = new Date().toISOString()) {
+  async recordReportAttempt({ sent = false, error = '', at = new Date().toISOString() } = {}) {
     await this.pool.query(
-      `INSERT INTO zl_report_settings (id, enabled, recipients, last_sent_at, updated_at)
-       VALUES (1, FALSE, '', $1, now())
-       ON CONFLICT (id) DO UPDATE SET last_sent_at = excluded.last_sent_at, updated_at = now()`,
-      [new Date(at)],
+      `INSERT INTO zl_report_settings
+         (id, enabled, recipients, last_sent_at, last_attempt_at, last_error, updated_at)
+       VALUES (1, FALSE, '', $1, $1, $2, now())
+       ON CONFLICT (id) DO UPDATE SET
+         last_sent_at = CASE WHEN $3 THEN $1 ELSE zl_report_settings.last_sent_at END,
+         last_attempt_at = $1,
+         last_error = $2,
+         updated_at = now()`,
+      [new Date(at), String(error).slice(0, 500), Boolean(sent)],
     );
     return this.getReportSettings();
   }

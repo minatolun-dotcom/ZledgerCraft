@@ -181,7 +181,8 @@ export function serverUsersPanel({
         <button class="btn" type="button" data-action="preview-report">Preview signed link</button>
       </div>
     </form>
-    <p class="muted small">${reportSettings.lastSentAt ? `Last report sent ${esc(new Date(reportSettings.lastSentAt).toLocaleString('en-IN'))}.` : 'No report has been sent from this workspace yet.'}</p>
+    <p class="muted small">${reportSettings.lastSentAt ? `Last successful report: ${esc(new Date(reportSettings.lastSentAt).toLocaleString('en-IN'))}.` : 'No report has been delivered from this workspace yet.'}</p>
+    ${reportSettings.lastError ? `<p class="muted small"><strong>Last report attempt failed${reportSettings.lastAttemptAt ? ` ${esc(new Date(reportSettings.lastAttemptAt).toLocaleString('en-IN'))}` : ''}:</strong> ${esc(reportSettings.lastError)}</p>` : ''}
     <h3 class="section-title">Recent sign-ins</h3>
     <p class="muted small">A sign-in attempt log is kept on the server. Passwords are never recorded. Signing out an account ends every current session for that account.</p>
     <div class="form-actions"><button class="btn small" type="button" data-action="refresh-auth-logins">Refresh sign-ins</button></div>

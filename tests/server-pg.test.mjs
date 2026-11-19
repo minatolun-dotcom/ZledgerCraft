@@ -156,6 +156,12 @@ test(
       assert.equal(savedSettings.body.settings.enabled, true);
       const rereadSettings = await owner.request('/api/reports/settings');
       assert.equal(rereadSettings.body.settings.recipients, 'owner@example.com');
+      const failedSend = await owner.request('/api/reports/send', { method: 'POST' });
+      assert.equal(failedSend.status, 503, JSON.stringify(failedSend.body));
+      const reportHistory = await owner.request('/api/reports/settings');
+      assert.equal(reportHistory.body.history[0].status, 'failed');
+      assert.equal(reportHistory.body.history[0].source, 'manual');
+      assert.equal(reportHistory.body.history[0].recipients, 'owner@example.com');
 
       const audit = await owner.request('/api/server-audit');
       assert.equal(audit.status, 200, JSON.stringify(audit.body));

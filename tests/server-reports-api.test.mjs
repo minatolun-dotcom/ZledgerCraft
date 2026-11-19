@@ -195,6 +195,9 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         assert.equal(emails[0].attachments, undefined);
         const afterScheduleFailure = await owner.request('/api/reports/settings');
         assert.match(afterScheduleFailure.body.settings.lastError, /simulated Resend outage/);
+        assert.equal(afterScheduleFailure.body.history[0].status, 'failed');
+        assert.equal(afterScheduleFailure.body.history[0].source, 'scheduled');
+        assert.equal(afterScheduleFailure.body.history[0].recipients, 'owner@example.com');
 
         const preview = await owner.request('/api/reports/preview', { method: 'POST' });
         assert.equal(preview.status, 200, JSON.stringify(preview.body));
@@ -220,6 +223,9 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         const afterSend = await owner.request('/api/reports/settings');
         assert.ok(afterSend.body.settings.lastAttemptAt);
         assert.equal(afterSend.body.settings.lastError, '');
+        assert.equal(afterSend.body.history[0].status, 'sent');
+        assert.equal(afterSend.body.history[0].source, 'manual');
+        assert.equal(afterSend.body.history[0].recipients, 'owner@example.com');
 
         const unauthorized = await fetch(`${base}/api/internal/scheduler`, { method: 'POST' });
         assert.equal(unauthorized.status, 401);
@@ -244,6 +250,9 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         const afterFailure = await owner.request('/api/reports/settings');
         assert.match(afterFailure.body.settings.lastError, /simulated Resend outage/);
         assert.ok(afterFailure.body.settings.lastAttemptAt);
+        assert.equal(afterFailure.body.history[0].status, 'failed');
+        assert.equal(afterFailure.body.history[0].source, 'manual');
+        assert.match(afterFailure.body.history[0].error, /simulated Resend outage/);
       },
     );
   } finally {

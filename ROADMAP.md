@@ -343,6 +343,8 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - A failed scheduled report now sends one Resend alert per UTC day to the
   configured operations address.
 - Added a dependency-free branded PDF summary and attached it to report emails.
+- Added recent report-attempt history with source, recipients, result and error,
+  retained in SQLite/Postgres and shown in the owner panel.
 - Verification: report unit and API tests pass, including signed-link retrieval,
   Resend payload, outage error and failure alert, scheduler authorization and
   Postgres settings persistence.

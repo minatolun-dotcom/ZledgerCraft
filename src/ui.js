@@ -288,6 +288,7 @@ export let reportSettings = {
   lastSentAt: null,
   lastAttemptAt: null,
   lastError: '',
+  history: [],
   updatedAt: null,
   emailConfigured: false,
   secretConfigured: false,
@@ -458,6 +459,7 @@ async function refreshReportSettings() {
     if (response.ok && payload.ok) {
       reportSettings = {
         ...payload.settings,
+        history: Array.isArray(payload.history) ? payload.history : [],
         emailConfigured: Boolean(payload.emailConfigured),
         secretConfigured: Boolean(payload.secretConfigured),
         publicUrl: payload.publicUrl || '',

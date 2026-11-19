@@ -218,8 +218,9 @@ attachment and a signed, read-only link that expires after seven days by
 default. The link renders a small HTML summary; it does not expose a workspace
 dump or require a login.
 Owners can also send immediately or preview the signed link. The panel keeps
-the last successful send and the latest delivery error so a Resend outage is
-visible without checking server logs. A failed scheduled report also emails
+the last successful send, the latest delivery error and the ten most recent
+attempts with source, recipients and result, so a Resend outage is visible
+without checking server logs. A failed scheduled report also emails
 `ZL_ALERT_EMAIL` once per UTC day when Resend is configured. Set
 `ZL_REPORT_SECRET` for a stable signing key and `ZL_REPORT_TTL_HOURS` to change
 the default lifetime. Without Resend or a signing secret, scheduled reports are

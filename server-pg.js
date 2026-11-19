@@ -121,6 +121,15 @@ export class PostgresWorkspaceStore {
       );
       ALTER TABLE zl_report_settings ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ;
       ALTER TABLE zl_report_settings ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
+      CREATE TABLE IF NOT EXISTS zl_report_attempts (
+        id BIGSERIAL PRIMARY KEY,
+        at TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'manual',
+        recipients TEXT NOT NULL DEFAULT '',
+        error TEXT NOT NULL DEFAULT ''
+      );
+      CREATE INDEX IF NOT EXISTS zl_report_attempts_at ON zl_report_attempts(at DESC);
     `);
   }
 
@@ -455,7 +464,7 @@ export class PostgresWorkspaceStore {
     return this.getReportSettings();
   }
 
-  async recordReportAttempt({ sent = false, error = '', at = new Date().toISOString() } = {}) {
+  async recordReportAttempt({ sent = false, error = '', at = new Date().toISOString(), source = 'manual', recipients = [] } = {}) {
     await this.pool.query(
       `INSERT INTO zl_report_settings
          (id, enabled, recipients, last_sent_at, last_attempt_at, last_error, updated_at)
@@ -467,7 +476,32 @@ export class PostgresWorkspaceStore {
          updated_at = now()`,
       [new Date(at), String(error).slice(0, 500), Boolean(sent)],
     );
+    await this.pool.query(
+      `INSERT INTO zl_report_attempts (at, status, source, recipients, error)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [new Date(at), sent ? 'sent' : 'failed', String(source), (Array.isArray(recipients) ? recipients : []).join(', '), String(error).slice(0, 500)],
+    );
+    await this.pool.query(
+      `DELETE FROM zl_report_attempts
+       WHERE id NOT IN (SELECT id FROM zl_report_attempts ORDER BY id DESC LIMIT 50)`,
+    );
     return this.getReportSettings();
+  }
+
+  async getReportHistory(limit = 10) {
+    const result = await this.pool.query(
+      `SELECT id, at, status, source, recipients, error
+       FROM zl_report_attempts ORDER BY id DESC LIMIT $1`,
+      [Math.max(1, Math.min(50, Number(limit) || 10))],
+    );
+    return result.rows.map((row) => ({
+      id: String(row.id),
+      at: new Date(row.at).toISOString(),
+      status: row.status,
+      source: row.source,
+      recipients: row.recipients || '',
+      error: row.error || '',
+    }));
   }
 
   async appendServerEvent(row) {

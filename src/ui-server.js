@@ -183,6 +183,24 @@ export function serverUsersPanel({
     </form>
     <p class="muted small">${reportSettings.lastSentAt ? `Last successful report: ${esc(new Date(reportSettings.lastSentAt).toLocaleString('en-IN'))}.` : 'No report has been delivered from this workspace yet.'}</p>
     ${reportSettings.lastError ? `<p class="muted small"><strong>Last report attempt failed${reportSettings.lastAttemptAt ? ` ${esc(new Date(reportSettings.lastAttemptAt).toLocaleString('en-IN'))}` : ''}:</strong> ${esc(reportSettings.lastError)}</p>` : ''}
+    <h3 class="section-title">Recent report attempts</h3>
+    <div class="table-scroll" tabindex="0"><table class="data-table compact">
+      <thead><tr><th>Time</th><th>Source</th><th>Result</th><th>Recipients</th><th>Error</th></tr></thead>
+      <tbody>${reportSettings.history?.length
+        ? reportSettings.history
+            .slice(0, 10)
+            .map(
+              (attempt) => `<tr>
+                <td>${esc(new Date(attempt.at).toLocaleString('en-IN'))}</td>
+                <td>${esc(attempt.source || 'manual')}</td>
+                <td>${attempt.status === 'sent' ? 'Sent' : 'Failed'}</td>
+                <td>${esc(attempt.recipients || '-')}</td>
+                <td>${esc(attempt.error || '-')}</td>
+              </tr>`,
+            )
+            .join('')
+        : '<tr><td colspan="5" class="muted">No report attempts yet.</td></tr>'}</tbody>
+    </table></div>
     <h3 class="section-title">Recent sign-ins</h3>
     <p class="muted small">A sign-in attempt log is kept on the server. Passwords are never recorded. Signing out an account ends every current session for that account.</p>
     <div class="form-actions"><button class="btn small" type="button" data-action="refresh-auth-logins">Refresh sign-ins</button></div>

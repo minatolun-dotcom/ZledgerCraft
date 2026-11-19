@@ -178,9 +178,9 @@ Status: **complete 2026-11-19 — daily signed management summary by Resend, dri
   Companies → Server accounts; “Send now” and “Preview signed link” are
   available without waiting for the schedule. The email carries a branded PDF
   summary generated without a PDF dependency. The panel also shows the last
-  successful send and the latest attempt error, persisted in both stores. A
-  failed scheduled report also emails the configured `ZL_ALERT_EMAIL` once per
-  UTC day.
+  successful send, the latest attempt error and the ten most recent attempts,
+  persisted in both stores. A failed scheduled report also emails the
+  configured `ZL_ALERT_EMAIL` once per UTC day.
 - [x] Do not run a full dump inside a free Cloudflare Worker cron. The trigger
   runs in the Neon Function (Node 24), not a Worker; only a small summary is
   built and mailed.
@@ -267,7 +267,7 @@ feature without breaking local development or the single-file build.
 | Phase 1 engine tests | pass | `node --test tests/` passed 219 with one conditional branch-test skip |
 | R2 upload tests | pass | `tests/server-cloud.test.mjs`, `tests/server-cloud-api.test.mjs` |
 | Resend/reset tests | pass | `tests/server-auth.test.mjs`, `tests/server-cloud-api.test.mjs` |
-| Pages build output | pass | `tests/build.test.mjs`; both documents are 840.8 kB |
+| Pages build output | pass | `tests/build.test.mjs`; both documents are 841.8 kB |
 | Browser regression | pass | Chromium and Firefox: 117 core + 105 advanced + 7 render + 9 login/reset + 6 axe screens + workspace merge |
 | Neon Auth sign-in | pass | Test Neon user signed in through `/api/auth/login`; owner profile created, `/api/auth/me` returned the session and the browser rendered the Gateway |
 | Neon Postgres workspace | pass | SQLite workspace copied to Neon; saves advanced revisions; meta read returned `storage: "postgres"`; lease acquire/release and hash-chained audit verified |
@@ -292,6 +292,7 @@ feature without breaking local development or the single-file build.
 | Live report delivery | pass at Resend acceptance | Production scheduler sent the daily summary to `minatolun@gmail.com` and Resend accepted it; the temporary `zl_report_settings` row was removed. The send-only API key cannot read delivery status |
 | Report attempt status and failure alert | pass | `tests/server-reports-api.test.mjs` verifies the last attempt on success, a persisted Resend outage error and the failure email to `ops@example.com`; owner panel renders both |
 | Branded PDF attachment | pass | `tests/server-pdf.test.mjs` covers A4 output and multi-page reports; `tests/server-reports-api.test.mjs` verifies the Resend attachment and PDF signature |
+| Report history | pass | API test checks sent/failed rows, source and recipients; Neon branch test exercises the Postgres history table |
 
 ## Progress log
 
@@ -469,3 +470,6 @@ and operate the current server with R2 and Resend enabled.
   UTC day; manual sends remain visible in the owner panel without paging.
 - Added `server-pdf.js`, a dependency-free A4 PDF writer for the branded daily
   summary, and attached the PDF to report emails through Resend.
+- Added `report_attempts`/`zl_report_attempts` with the latest 50 attempts and
+  exposed the ten newest, including source, recipients, status and error, in the
+  owner report panel.

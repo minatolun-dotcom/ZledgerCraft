@@ -167,6 +167,15 @@ if (DatabaseSync) {
       last_error TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS report_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      recipients TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS report_attempts_at ON report_attempts(at DESC);
   `);
   const reportColumns = db.prepare('PRAGMA table_info(report_settings)').all();
   if (!reportColumns.some((column) => column.name === 'last_attempt_at')) {
@@ -963,9 +972,10 @@ async function writeReportSettings({ enabled = false, recipients = '', lastSentA
   return readReportSettings();
 }
 
-async function recordReportAttempt({ sent = false, error = '' } = {}) {
+async function recordReportAttempt({ sent = false, error = '', source = 'manual', recipients = [] } = {}) {
   const at = new Date().toISOString();
-  if (postgresStore) return postgresStore.recordReportAttempt({ sent, error, at });
+  const recipientList = Array.isArray(recipients) ? recipients.join(', ') : String(recipients || '');
+  if (postgresStore) return postgresStore.recordReportAttempt({ sent, error, at, source, recipients });
   if (!db) return null;
   db.prepare(
     `INSERT INTO report_settings
@@ -977,7 +987,29 @@ async function recordReportAttempt({ sent = false, error = '' } = {}) {
        last_error = excluded.last_error,
        updated_at = excluded.updated_at`,
   ).run(sent ? at : null, at, String(error).slice(0, 500), at, sent ? 1 : 0);
+  db.prepare(
+    'INSERT INTO report_attempts (at, status, source, recipients, error) VALUES (?, ?, ?, ?, ?)',
+  ).run(at, sent ? 'sent' : 'failed', String(source), recipientList, String(error).slice(0, 500));
+  db.prepare(
+    'DELETE FROM report_attempts WHERE id NOT IN (SELECT id FROM report_attempts ORDER BY id DESC LIMIT 50)',
+  ).run();
   return readReportSettings();
+}
+
+async function readReportHistory(limit = 10) {
+  if (postgresStore) return postgresStore.getReportHistory(limit);
+  if (!db) return [];
+  return db
+    .prepare('SELECT id, at, status, source, recipients, error FROM report_attempts ORDER BY id DESC LIMIT ?')
+    .all(Math.max(1, Math.min(50, Number(limit) || 10)))
+    .map((row) => ({
+      id: String(row.id),
+      at: row.at,
+      status: row.status,
+      source: row.source,
+      recipients: row.recipients || '',
+      error: row.error || '',
+    }));
 }
 
 function reportBaseUrl(request = null) {
@@ -1019,7 +1051,7 @@ async function latestBackupForReport() {
   }
 }
 
-async function sendDailyReportOnce({ force = false, request = null } = {}) {
+async function sendDailyReportOnce({ force = false, request = null, source = 'manual' } = {}) {
   const settings = await readReportSettings();
   if (!force && !settings.enabled) return { skipped: 'disabled' };
   if (!force && settings.lastSentAt?.slice(0, 10) === new Date().toISOString().slice(0, 10)) {
@@ -1052,7 +1084,7 @@ async function sendDailyReportOnce({ force = false, request = null } = {}) {
     },
     emailConfig,
   );
-  await recordReportAttempt({ sent: true }).catch(() => {});
+  await recordReportAttempt({ sent: true, source, recipients: parsed.recipients }).catch(() => {});
   appendServerEvent(
     { id: 'system', username: 'scheduler', role: 'owner' },
     'report.send',
@@ -1066,7 +1098,19 @@ async function sendDailyReport(options = {}) {
   try {
     return await sendDailyReportOnce(options);
   } catch (error) {
-    await recordReportAttempt({ sent: false, error: error.message || 'Report delivery failed.' }).catch(() => {});
+    let recipients = [];
+    try {
+      const attempted = normalizeRecipients((await readReportSettings()).recipients);
+      if (attempted.ok) recipients = attempted.recipients;
+    } catch {
+      // Keep the history row even if settings are unavailable.
+    }
+    await recordReportAttempt({
+      sent: false,
+      error: error.message || 'Report delivery failed.',
+      source: options.source || 'manual',
+      recipients,
+    }).catch(() => {});
     throw error;
   }
 }
@@ -1104,7 +1148,7 @@ async function runScheduledJobs() {
   let report = null;
   let reportError = '';
   try {
-    report = await sendDailyReport({ force: false });
+    report = await sendDailyReport({ force: false, source: 'scheduled' });
   } catch (error) {
     reportError = error.message || 'Scheduled report failed.';
     console.error(`Scheduled report failed: ${reportError}`);
@@ -1168,6 +1212,7 @@ async function handleReportApi(request, response, url, pathname) {
     json(response, 200, {
       ok: true,
       settings,
+      history: await readReportHistory(10),
       emailConfigured: Boolean(emailConfig),
       secretConfigured: Boolean(signingSecret),
       publicUrl: reportBaseUrl(request),
@@ -1217,7 +1262,7 @@ async function handleReportApi(request, response, url, pathname) {
       return;
     }
     try {
-      const result = await sendDailyReport({ force: true, request });
+      const result = await sendDailyReport({ force: true, request, source: 'manual' });
       json(response, 200, { ok: true, ...result });
     } catch (error) {
       json(response, 503, { ok: false, error: error.message || 'Could not send the report.' });

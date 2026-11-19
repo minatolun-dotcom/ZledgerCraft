@@ -224,7 +224,7 @@ disabled.
 ```bash
 ZL_REPORT_SECRET=...           # stable HMAC key for report links
 ZL_REPORT_TTL_HOURS=168        # optional; 1–720
-ZL_SCHEDULER_SECRET=...        # optional manual scheduler credential
+ZL_SCHEDULER_SECRET=...        # optional manual scheduler credential (Bearer token)
 ```
 
 **Resend email**

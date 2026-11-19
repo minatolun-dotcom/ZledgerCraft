@@ -220,8 +220,8 @@ feature without breaking local development or the single-file build.
   report links and falls back to `DATABASE_URL` or the owner password)
 - `ZL_REPORT_TTL_HOURS` (optional; default 168, clamped to 1–720)
 - `ZL_SCHEDULER_SECRET` (required by `neon.ts` for the Function; lets a manual
-  caller authenticate to `/api/internal/scheduler`; Neon trigger deliveries use
-  `x-neon-trigger-invocation-id`)
+  caller authenticate to `/api/internal/scheduler` with `Authorization: Bearer`;
+  Neon trigger deliveries use `x-neon-trigger-invocation-id`)
 
 ### Cloudflare Worker
 
@@ -284,6 +284,7 @@ feature without breaking local development or the single-file build.
 | Scheduled report links | pass | `tests/server-reports.test.mjs` covers signing, tamper/expiry rejection, recipient validation and summary calculation |
 | Report delivery and scheduler | pass | `tests/server-reports-api.test.mjs` covers owner settings, signed preview/download, Resend payload and authenticated scheduler backup/`already-sent` |
 | Postgres report settings | pass | Neon branch test saves and rereads report settings through `zl_report_settings` |
+| Production scheduler | pass | Bearer-authenticated `POST /api/internal/scheduler` returned 200 with a verified daily backup and `report: "disabled"`; trigger is enabled for 02:30 UTC |
 
 ## Progress log
 
@@ -447,7 +448,7 @@ and operate the current server with R2 and Resend enabled.
 - Added the public signed report route at `/api/reports/daily`; no session is
   required, but the token must be valid and unexpired.
 - Added `/api/internal/scheduler`, guarded by the Neon trigger invocation
-  header or an optional `ZL_SCHEDULER_SECRET`. It runs the daily backup check
+  header or a `ZL_SCHEDULER_SECRET` Bearer token. It runs the daily backup check
   and sends the report once per UTC day when enabled.
 - Declared the `daily-operations` Neon Function Trigger at `30 2 * * *`; local
   servers use an hourly timer with the same due logic. No Cloudflare Worker

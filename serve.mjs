@@ -1056,7 +1056,7 @@ async function runScheduledJobs() {
 
 function schedulerAuthorized(request) {
   const configured = String(process.env.ZL_SCHEDULER_SECRET || '');
-  const supplied = String(request.headers['x-zl-scheduler-secret'] || '');
+  const supplied = /^Bearer\s+(.+)$/i.exec(String(request.headers.authorization || ''))?.[1] || '';
   if (configured && supplied) {
     const expected = Buffer.from(configured);
     const actual = Buffer.from(supplied);

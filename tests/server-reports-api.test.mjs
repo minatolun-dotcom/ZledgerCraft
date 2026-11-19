@@ -132,6 +132,7 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         ZL_OWNER_PASSWORD: 'correct horse battery',
         ZL_PUBLIC_URL: 'https://books.example.com',
         ZL_REPORT_SECRET: 'report-test-secret',
+        ZL_SCHEDULER_SECRET: 'scheduler-test-secret',
         RESEND_API_KEY: 're_test',
         RESEND_API_URL: `http://127.0.0.1:${resend.port}/emails`,
         RESEND_FROM: 'Books <books@example.com>',
@@ -187,6 +188,14 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
 
         const unauthorized = await fetch(`${base}/api/internal/scheduler`, { method: 'POST' });
         assert.equal(unauthorized.status, 401);
+        const manuallyScheduled = await fetch(`${base}/api/internal/scheduler`, {
+          method: 'POST',
+          headers: { authorization: 'Bearer scheduler-test-secret' },
+        });
+        assert.equal(manuallyScheduled.status, 200);
+        const manuallyScheduledBody = await manuallyScheduled.json();
+        assert.equal(manuallyScheduledBody.report, 'already-sent');
+        assert.ok(manuallyScheduledBody.backup?.name);
         const scheduled = await fetch(`${base}/api/internal/scheduler`, {
           method: 'POST',
           headers: { 'x-neon-trigger-invocation-id': 'test-invocation' },
@@ -194,7 +203,6 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         assert.equal(scheduled.status, 200);
         const scheduledBody = await scheduled.json();
         assert.equal(scheduledBody.report, 'already-sent');
-        assert.ok(scheduledBody.backup?.name);
       },
     );
   } finally {

@@ -213,9 +213,10 @@ before replacing the books.
 Owners can enable a daily management summary under **Companies → Server
 accounts → Scheduled reports**. It is sent through Resend after the daily backup
 check, either from the local server timer or from the Neon Function schedule
-trigger (`30 2 * * *` UTC). Each email contains the summary and a signed,
-read-only link that expires after seven days by default. The link renders a
-small HTML summary; it does not expose a workspace dump or require a login.
+trigger (`30 2 * * *` UTC). Each email contains the summary, a branded PDF
+attachment and a signed, read-only link that expires after seven days by
+default. The link renders a small HTML summary; it does not expose a workspace
+dump or require a login.
 Owners can also send immediately or preview the signed link. The panel keeps
 the last successful send and the latest delivery error so a Resend outage is
 visible without checking server logs. A failed scheduled report also emails

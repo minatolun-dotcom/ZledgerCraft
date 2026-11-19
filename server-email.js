@@ -35,7 +35,7 @@ export function emailConfiguration(env = process.env) {
 }
 
 export async function sendEmail(
-  { to, subject, text: bodyText, html },
+  { to, subject, text: bodyText, html, attachments = [] },
   config,
   { fetchImpl = fetch, timeoutMs = 15_000 } = {},
 ) {
@@ -58,6 +58,17 @@ export async function sendEmail(
         subject,
         text: bodyText,
         ...(html ? { html } : {}),
+        ...(Array.isArray(attachments) && attachments.length
+          ? {
+              attachments: attachments
+                .filter((item) => item?.filename && item?.content)
+                .map((item) => ({
+                  filename: item.filename,
+                  content: item.content,
+                  ...(item.content_type ? { content_type: item.content_type } : {}),
+                })),
+            }
+          : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });

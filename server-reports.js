@@ -211,7 +211,7 @@ export function reportText(report, { url = '', expiresAt = '' } = {}) {
   } else {
     lines.push('Latest backup: none created today.');
   }
-  lines.push('', 'This is a management summary, not a statutory report.');
+  lines.push('', 'This is a management summary, not a statutory report.', 'A branded PDF summary is attached.');
   if (url) lines.push('', `Open the signed report (expires ${expiresAt}):`, url);
   return lines.join('\n');
 }

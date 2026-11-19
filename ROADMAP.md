@@ -260,7 +260,7 @@ Status: **Done**, **Partial**, **Missing**.
 | Stock ageing, godown, reorder and price-list reports | Partial — godown and batch balance reports exist; no stock ageing, reorder or price-list reports |
 | Audit trail report | Done (Stage 1) |
 | Charts, trends and forecasts | Partial — monthly sales/purchase chart and a three-month run-rate; no seasonality, growth or statistical forecasts |
-| Excel, branded PDF and scheduled email reports | Partial — Excel export and Resend scheduled daily summaries exist; branded PDF and deeper forecasts are missing |
+| Excel, branded PDF and scheduled email reports | Partial — Excel export, Resend scheduled daily summaries and a branded PDF attachment exist; deeper forecasts are missing |
 | Custom print-layout designer | Missing |
 
 ### Security, platform and operations — Missing
@@ -323,7 +323,7 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [x] Inventory: godowns, batches, BOM/manufacturing, orders, transfers — 2026-11-18 (batch/expiry, transfers, orders and production; no physical count, wastage, job work or WIP posting)
 - [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, normalized collection rows, conservative three-way merge (including scoped accounts), revision-checked writes, conflict/reload flow, enforced voucher edit leases, LAN server authentication and company-level scoping done 2026-11-19; Neon Postgres workspace, Postgres profiles/sessions/login state, shared Postgres login/reset rate limits, Postgres JSON backups with R2 listing/restore, Neon Auth login, same-origin auth proxy, Neon Function deployment, Cloudflare Worker API proxy, branch integration test and production smoke test done 2026-11-19; field-level conflict history pending
 - [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; Tally batch masters/opening batches, GST/discount stock-line splits, APIs and webhooks pending
-- [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export and Resend scheduled daily summaries done 2026-11-19; branded PDF and deeper forecasts pending
+- [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
 
@@ -342,6 +342,7 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
   accepted by Resend for the test recipient.
 - A failed scheduled report now sends one Resend alert per UTC day to the
   configured operations address.
+- Added a dependency-free branded PDF summary and attached it to report emails.
 - Verification: report unit and API tests pass, including signed-link retrieval,
   Resend payload, outage error and failure alert, scheduler authorization and
   Postgres settings persistence.

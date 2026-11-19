@@ -32,6 +32,7 @@ import {
   reportTtlMs,
   verifyReportToken,
 } from './server-reports.js';
+import { buildReportPdf } from './server-pdf.js';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const port = Number(process.env.PORT ?? 4173);
@@ -1034,12 +1035,20 @@ async function sendDailyReportOnce({ force = false, request = null } = {}) {
     backup: await latestBackupForReport(),
     recipients: parsed.recipients,
   });
+  const pdf = buildReportPdf(report);
   await sendEmail(
     {
       to: parsed.recipients,
       subject: reportSubject(report),
       text: reportText(report, signed),
       html: reportHtml(report, signed),
+      attachments: [
+        {
+          filename: `zledgercraft-daily-${report.generatedDate}.pdf`,
+          content: pdf.toString('base64'),
+          content_type: 'application/pdf',
+        },
+      ],
     },
     emailConfig,
   );

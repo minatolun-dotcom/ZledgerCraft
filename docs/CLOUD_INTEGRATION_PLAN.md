@@ -176,7 +176,8 @@ Status: **complete 2026-11-19 — daily signed management summary by Resend, dri
   Local/LAN servers use an hourly in-process scheduler with the same due check.
 - [x] Use Resend for delivery. Owners configure enabled/recipients under
   Companies → Server accounts; “Send now” and “Preview signed link” are
-  available without waiting for the schedule. The panel also shows the last
+  available without waiting for the schedule. The email carries a branded PDF
+  summary generated without a PDF dependency. The panel also shows the last
   successful send and the latest attempt error, persisted in both stores. A
   failed scheduled report also emails the configured `ZL_ALERT_EMAIL` once per
   UTC day.
@@ -290,6 +291,7 @@ feature without breaking local development or the single-file build.
 | Production scheduler | pass | Bearer-authenticated `POST /api/internal/scheduler` returned 200 with a verified daily backup and `report: "disabled"`; trigger is enabled for 02:30 UTC |
 | Live report delivery | pass at Resend acceptance | Production scheduler sent the daily summary to `minatolun@gmail.com` and Resend accepted it; the temporary `zl_report_settings` row was removed. The send-only API key cannot read delivery status |
 | Report attempt status and failure alert | pass | `tests/server-reports-api.test.mjs` verifies the last attempt on success, a persisted Resend outage error and the failure email to `ops@example.com`; owner panel renders both |
+| Branded PDF attachment | pass | `tests/server-pdf.test.mjs` covers A4 output and multi-page reports; `tests/server-reports-api.test.mjs` verifies the Resend attachment and PDF signature |
 
 ## Progress log
 
@@ -465,3 +467,5 @@ and operate the current server with R2 and Resend enabled.
   SQLite/Postgres tables are migrated in place.
 - A failed scheduled report now alerts `ZL_ALERT_EMAIL` through Resend once per
   UTC day; manual sends remain visible in the owner panel without paging.
+- Added `server-pdf.js`, a dependency-free A4 PDF writer for the branded daily
+  summary, and attached the PDF to report emails through Resend.

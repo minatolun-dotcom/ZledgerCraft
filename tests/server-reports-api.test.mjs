@@ -192,6 +192,7 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         assert.deepEqual(emails[0].to, ['ops@example.com']);
         assert.equal(emails[0].subject, 'ZledgerCraft scheduled report failed');
         assert.match(emails[0].text, /simulated Resend outage/);
+        assert.equal(emails[0].attachments, undefined);
         const afterScheduleFailure = await owner.request('/api/reports/settings');
         assert.match(afterScheduleFailure.body.settings.lastError, /simulated Resend outage/);
 
@@ -211,6 +212,11 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         assert.match(emails[1].subject, /ZledgerCraft daily summary/);
         assert.match(emails[1].text, /Report Books/);
         assert.match(emails[1].text, /api\/reports\/daily\?token=/);
+        assert.match(emails[1].text, /branded PDF summary is attached/);
+        assert.equal(emails[1].attachments.length, 1);
+        assert.match(emails[1].attachments[0].filename, /^zledgercraft-daily-\d{4}-\d{2}-\d{2}\.pdf$/);
+        assert.equal(emails[1].attachments[0].content_type, 'application/pdf');
+        assert.match(Buffer.from(emails[1].attachments[0].content, 'base64').toString('latin1'), /^%PDF-1\.4/);
         const afterSend = await owner.request('/api/reports/settings');
         assert.ok(afterSend.body.settings.lastAttemptAt);
         assert.equal(afterSend.body.settings.lastError, '');

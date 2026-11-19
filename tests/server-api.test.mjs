@@ -873,6 +873,54 @@ test('server API authenticates, shares one workspace and enforces roles', { time
     assert.equal(bypass.status, 403);
     assert.match(bypass.body.error, /approved by an owner/i);
 
+    const thresholdBase = await owner.request('/api/workspace');
+    const thresholdState = structuredClone(thresholdBase.body.state);
+    thresholdState.companies[0].approvalThreshold = 100;
+    assert.equal(
+      (
+        await owner.request('/api/workspace', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ baseRev: thresholdBase.body.rev, state: thresholdState }),
+        })
+      ).status,
+      200,
+    );
+    const smallBase = await accountant.request('/api/workspace');
+    const smallState = structuredClone(smallBase.body.state);
+    smallState.companies[0].vouchers.push({
+      id: 'voucher_small',
+      type: 'Payment',
+      no: 10,
+      date: '2026-04-13',
+      total: 50,
+      lines: [{ ledgerId: 'missing_ledger', side: 'Dr', amount: 50 }],
+    });
+    const small = await accountant.request('/api/workspace', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ baseRev: smallBase.body.rev, state: smallState }),
+    });
+    assert.equal(small.status, 200, JSON.stringify(small.body));
+
+    const thresholdHitBase = await accountant.request('/api/workspace');
+    const thresholdHitState = structuredClone(thresholdHitBase.body.state);
+    thresholdHitState.companies[0].vouchers.push({
+      id: 'voucher_at_threshold',
+      type: 'Payment',
+      no: 11,
+      date: '2026-04-13',
+      total: 100,
+      lines: [{ ledgerId: 'missing_ledger', side: 'Dr', amount: 100 }],
+    });
+    const thresholdHit = await accountant.request('/api/workspace', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ baseRev: thresholdHitBase.body.rev, state: thresholdHitState }),
+    });
+    assert.equal(thresholdHit.status, 403);
+    assert.match(thresholdHit.body.error, /approved by an owner/i);
+
     assert.equal((await owner.request('/api/auth/logout', { method: 'POST' })).status, 200);
     assert.equal((await owner.request('/api/auth/me')).body.user, null);
   } finally {

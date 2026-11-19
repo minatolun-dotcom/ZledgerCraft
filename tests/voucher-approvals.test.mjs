@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   addVoucher,
+  approvalRequiredForAmount,
   approvePendingVoucher,
   createCompany,
   deletePendingVoucher,
@@ -156,8 +157,30 @@ test('submitters can revise or withdraw their own pending voucher', () => {
 test('company approval policy is explicit and defaults off', () => {
   const company = makeCompany();
   assert.equal(company.approvalsRequired, false);
+  assert.equal(company.approvalThreshold, 0);
+  assert.equal(approvalRequiredForAmount(company, 500), false);
   updateCompany(company, { name: company.name, fyStart: company.fyStart, requireApproval: true });
   assert.equal(company.approvalsRequired, true);
+  assert.equal(approvalRequiredForAmount(company, 0), true);
+  const threshold = updateCompany(company, {
+    name: company.name,
+    fyStart: company.fyStart,
+    requireApproval: true,
+    approvalThreshold: 5000,
+  });
+  assert.equal(threshold.ok, true, threshold.error);
+  assert.equal(company.approvalThreshold, 5000);
+  assert.equal(approvalRequiredForAmount(company, 4999.99), false);
+  assert.equal(approvalRequiredForAmount(company, 5000), true);
+  assert.equal(
+    updateCompany(company, {
+      name: company.name,
+      fyStart: company.fyStart,
+      requireApproval: true,
+      approvalThreshold: -1,
+    }).ok,
+    false,
+  );
   updateCompany(company, { name: company.name, fyStart: company.fyStart, requireApproval: false });
   assert.equal(company.approvalsRequired, false);
 });

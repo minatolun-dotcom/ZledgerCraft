@@ -2553,6 +2553,19 @@ function yearForDate(company, iso) {
 }
 
 /** Adds the single year used by older companies, and syncs the selected year. */
+function normalizeApprovals(company) {
+  company.approvalsRequired = Boolean(company.approvalsRequired);
+  const threshold = Number(company.approvalThreshold);
+  company.approvalThreshold = Number.isFinite(threshold) && threshold > 0 ? round2(threshold) : 0;
+  return company;
+}
+
+function approvalRequiredForAmount(company, amount) {
+  if (!company?.approvalsRequired) return false;
+  const threshold = Math.max(0, Number(company.approvalThreshold) || 0);
+  return round2(Number(amount) || 0) >= threshold;
+}
+
 function seedYears(company) {
   if (!Array.isArray(company.years) || company.years.length === 0) {
     company.years = [
@@ -3048,6 +3061,7 @@ function loadState() {
   parsed.version = SCHEMA_VERSION;
   parsed.companies = parsed.companies.filter((company) => company && Array.isArray(company.ledgers));
   for (const company of parsed.companies) {
+    normalizeApprovals(company);
     seedYears(company);
     seedInventoryMasters(company);
   }
@@ -4598,6 +4612,7 @@ function createCompany(name, fyStart) {
     vouchers: [],
     pendingVouchers: [],
     approvalsRequired: false,
+    approvalThreshold: 0,
     counters: {},
     bankReconciliations: {},
     costCategories: [],
@@ -6207,6 +6222,13 @@ function updateCompany(company, input) {
   if (input.requireApproval !== undefined) {
     company.approvalsRequired = Boolean(input.requireApproval);
   }
+  if (input.approvalThreshold !== undefined) {
+    const threshold = Number(input.approvalThreshold);
+    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1_000_000_000_000) {
+      return { ok: false, error: 'Approval threshold must be zero or a positive amount.' };
+    }
+    company.approvalThreshold = round2(threshold);
+  }
   return { ok: true, company };
 }
 
@@ -7210,6 +7232,7 @@ function importState(json) {
       })),
       counters,
     };
+    normalizeApprovals(mapped);
     seedYears(mapped);
     seedInventoryMasters(mapped);
     normalizeCostMasters(mapped);
@@ -7714,8 +7737,10 @@ function dashboard(company) {
   const payable = outstanding(company, { side: 'payable', asOn: company.fyEnd });
 
   const now = new Date();
+  const localDate = (date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  const today = now.toISOString().slice(0, 10);
+  const today = localDate(now);
   const from = monthStart < company.fyStart ? company.fyStart : monthStart;
   const to = today > company.fyEnd ? company.fyEnd : today;
   let salesThisMonth = 0;
@@ -12304,6 +12329,7 @@ function companiesScreen() {
                 </label>`
               : `<input type="hidden" name="fyStart" value="${esc(editingCompany.fyStart)}">`}
             <label class="field inline-field"><input type="checkbox" name="requireApproval" ${editingCompany.approvalsRequired ? 'checked' : ''}> <span>Require owner approval for staff vouchers</span></label>
+            <label class="field"><span>Approval threshold</span><input type="number" name="approvalThreshold" min="0" step="0.01" value="${Number(editingCompany.approvalThreshold) || 0}"><small class="muted">Staff vouchers of this amount or more wait for approval. Use 0 to require approval for every staff voucher.</small></label>
             <div class="field form-actions">
               <button class="btn primary" type="submit">Save company</button>
               <button class="btn ghost" type="button" data-action="cancel-company-edit">Cancel</button>
@@ -12811,7 +12837,11 @@ function pendingVouchersPanel(active) {
     .join('');
   return panel(
     `Voucher approvals <span class="count">${pending.filter((voucher) => voucher.status === 'pending').length}</span>`,
-    `<p class="muted small">${active.approvalsRequired ? 'Staff vouchers wait here until an owner approves them; only approved vouchers post to the books.' : 'Approval is currently off, but previously submitted vouchers still need a decision.'}</p>
+    `<p class="muted small">${active.approvalsRequired
+      ? Number(active.approvalThreshold) > 0
+        ? `Staff vouchers of ${money(active.approvalThreshold)} or more wait here until an owner approves them; smaller vouchers post directly.`
+        : 'All staff vouchers wait here until an owner approves them; only approved vouchers post to the books.'
+      : 'Approval is currently off, but previously submitted vouchers still need a decision.'}</p>
     ${pending.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact"><thead><tr><th>Date</th><th>Voucher</th><th class="num">Amount</th><th>Submitted by</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
       : '<p class="muted">No vouchers are waiting for approval.</p>'}`,
@@ -19209,6 +19239,7 @@ async function handleSubmit(event) {
       name: data.get('name'),
       fyStart: data.get('fyStart'),
       requireApproval: data.get('requireApproval') === 'on',
+      approvalThreshold: data.get('approvalThreshold'),
     });
     if (!result.ok) {
       showFormError(result.error, 'company-error');
@@ -19893,11 +19924,17 @@ async function handleSubmit(event) {
     }
     const editingId = view.editId;
     const pendingEdit = Boolean(view.pendingEdit && editingId);
+    const submitted = readVoucherForm();
+    const submittedTotal = round2(
+      submitted.lines
+        .filter((line) => line.side === 'Dr')
+        .reduce((sum, line) => sum + (parseAmount(line.amount) ?? 0), 0),
+    );
     const pendingApproval = Boolean(
-      active.approvalsRequired && authRequired && authUser?.role !== 'owner' && !editingId,
+      !editingId && authRequired && authUser?.role !== 'owner' && approvalRequiredForAmount(active, submittedTotal),
     );
     const input = {
-      ...readVoucherForm(),
+      ...submitted,
       pending: pendingEdit || pendingApproval,
       submittedBy: authUser
         ? { id: authUser.id, username: authUser.username, name: authUser.name }

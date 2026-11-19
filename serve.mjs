@@ -1353,6 +1353,14 @@ async function handleReportApi(request, response, url, pathname) {
   response.end();
 }
 
+function postedVoucherTotal(voucher) {
+  let total = 0;
+  for (const line of voucher?.lines ?? []) {
+    if (line?.side === 'Dr') total += Number(line.amount) || 0;
+  }
+  return Math.round(total * 100) / 100;
+}
+
 function accountantWriteError(previous, next, user = null) {
   if (!previous) return '';
   if (JSON.stringify(previous.users ?? []) !== JSON.stringify(next.users ?? [])) {
@@ -1374,9 +1382,25 @@ function accountantWriteError(previous, next, user = null) {
     if (Boolean(old.approvalsRequired) !== Boolean(company.approvalsRequired)) {
       return 'Only an owner can change voucher approval policy.';
     }
+    const oldThreshold = Math.max(0, Number(old.approvalThreshold) || 0);
+    const nextThreshold = Math.max(0, Number(company.approvalThreshold) || 0);
+    if (oldThreshold !== nextThreshold) {
+      return 'Only an owner can change the voucher approval threshold.';
+    }
     if (company.approvalsRequired) {
-      if (!deepEqual(old.vouchers ?? [], company.vouchers ?? [])) {
-        return 'Vouchers must be approved by an owner before they post to the books.';
+      const oldVouchers = old.vouchers ?? [];
+      const nextVouchers = company.vouchers ?? [];
+      if (
+        oldVouchers.length > nextVouchers.length ||
+        !deepEqual(nextVouchers.slice(0, oldVouchers.length), oldVouchers)
+      ) {
+        return 'Only an owner can alter posted vouchers while approvals are on.';
+      }
+      for (const voucher of nextVouchers.slice(oldVouchers.length)) {
+        const total = postedVoucherTotal(voucher);
+        if (!(total > 0) || total >= oldThreshold - 0.005) {
+          return 'Vouchers of this amount must be approved by an owner before they post to the books.';
+        }
       }
       const oldPending = new Map((old.pendingVouchers ?? []).map((voucher) => [voucher.id, voucher]));
       const nextPending = new Map((company.pendingVouchers ?? []).map((voucher) => [voucher.id, voucher]));
@@ -2462,6 +2486,16 @@ async function handleWorkspaceApi(request, response, url) {
         json(response, 400, { ok: false, error: 'Workspace state must contain companies.' });
         return;
       }
+      if (
+        body.state.companies.some((company) => {
+          if (company?.approvalThreshold === undefined) return false;
+          const threshold = Number(company.approvalThreshold);
+          return !Number.isFinite(threshold) || threshold < 0;
+        })
+      ) {
+        json(response, 400, { ok: false, error: 'Approval thresholds must be zero or a positive amount.' });
+        return;
+      }
       const baseRev = Number(body.baseRev);
       if (!Number.isInteger(baseRev) || baseRev < 0) {
         json(response, 400, { ok: false, error: 'A workspace base revision is required.' });
@@ -2782,6 +2816,7 @@ function openApiDocument(request) {
             fyEnd: { type: 'string', format: 'date' },
             currency: { type: 'string' },
             approvalsRequired: { type: 'boolean' },
+            approvalThreshold: { type: 'number' },
             counts: {
               type: 'object',
               properties: {
@@ -3001,6 +3036,7 @@ async function handlePublicApi(request, response, url, pathname) {
     fyEnd: company.fyEnd ?? null,
     currency: company.currency ?? '',
     approvalsRequired: Boolean(company.approvalsRequired),
+    approvalThreshold: Math.max(0, Number(company.approvalThreshold) || 0),
     counts: {
       ledgers: (company.ledgers ?? []).length,
       vouchers: (company.vouchers ?? []).length,

@@ -327,6 +327,14 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 ## Progress log
 
+### 2026-11-19 — Phase 7: approval thresholds
+
+- Companies can keep approval for every staff voucher (`0`) or require it only
+  at or above a configured amount; smaller vouchers post directly.
+- The submission UI applies the threshold and the server recomputes voucher
+  totals, rejects direct postings at or above it, and blocks accountants from
+  changing the policy. The API company payload exposes the threshold.
+
 ### 2026-11-19 — Phase 6: multi-user merge visibility
 
 - Accepted stale saves now record a hash-chained `workspace.merge` event with

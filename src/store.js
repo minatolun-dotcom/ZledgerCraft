@@ -224,6 +224,19 @@ export function yearForDate(company, iso) {
 }
 
 /** Adds the single year used by older companies, and syncs the selected year. */
+export function normalizeApprovals(company) {
+  company.approvalsRequired = Boolean(company.approvalsRequired);
+  const threshold = Number(company.approvalThreshold);
+  company.approvalThreshold = Number.isFinite(threshold) && threshold > 0 ? round2(threshold) : 0;
+  return company;
+}
+
+export function approvalRequiredForAmount(company, amount) {
+  if (!company?.approvalsRequired) return false;
+  const threshold = Math.max(0, Number(company.approvalThreshold) || 0);
+  return round2(Number(amount) || 0) >= threshold;
+}
+
 export function seedYears(company) {
   if (!Array.isArray(company.years) || company.years.length === 0) {
     company.years = [
@@ -719,6 +732,7 @@ export function loadState() {
   parsed.version = SCHEMA_VERSION;
   parsed.companies = parsed.companies.filter((company) => company && Array.isArray(company.ledgers));
   for (const company of parsed.companies) {
+    normalizeApprovals(company);
     seedYears(company);
     seedInventoryMasters(company);
   }
@@ -2269,6 +2283,7 @@ export function createCompany(name, fyStart) {
     vouchers: [],
     pendingVouchers: [],
     approvalsRequired: false,
+    approvalThreshold: 0,
     counters: {},
     bankReconciliations: {},
     costCategories: [],
@@ -3878,6 +3893,13 @@ export function updateCompany(company, input) {
   if (input.requireApproval !== undefined) {
     company.approvalsRequired = Boolean(input.requireApproval);
   }
+  if (input.approvalThreshold !== undefined) {
+    const threshold = Number(input.approvalThreshold);
+    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1_000_000_000_000) {
+      return { ok: false, error: 'Approval threshold must be zero or a positive amount.' };
+    }
+    company.approvalThreshold = round2(threshold);
+  }
   return { ok: true, company };
 }
 
@@ -4881,6 +4903,7 @@ export function importState(json) {
       })),
       counters,
     };
+    normalizeApprovals(mapped);
     seedYears(mapped);
     seedInventoryMasters(mapped);
     normalizeCostMasters(mapped);

@@ -247,6 +247,19 @@ Status: **complete 2026-11-19**
   values and original document numbers are still not retained, and the event is
   capped to the five paths per side shown in the audit row.
 
+### Phase 7 — Approval thresholds
+
+Status: **complete 2026-11-19**
+
+- [x] A company can set an optional staff-voucher approval threshold alongside
+  the approval policy. `0` keeps the existing rule that every staff voucher
+  waits for an owner; a positive amount lets smaller vouchers post directly
+  while vouchers at or above it enter the pending queue. The UI decides on
+  submission and the server independently recomputes the debit total and
+  rejects direct postings at or above the threshold, so a forged client cannot
+  bypass it. Accountants cannot change the threshold, and the API company
+  payload exposes it for integrations.
+
 ## Environment variables
 
 Phase 1 uses the following optional variables. Missing values disable the
@@ -360,6 +373,7 @@ feature without breaking local development or the single-file build.
 | Voucher approvals | pass | Store tests prove pending vouchers do not post or affect reports and record revision changes; server API test rejects accountant direct posting, edits to another submitter's pending voucher and rewritten revision history, while allowing the submitter to revise and withdraw |
 | Scoped API tokens and shared limits | pass | API integration test filters listed companies and rejects out-of-scope ids; SQLite/PG limiter tables enforce the per-token window, and the Neon branch test shares a limit across two server instances |
 | Concurrent merge history | pass | Merge tests assert changed field paths and overlapping fields; the server API test verifies a `workspace.merge` audit event for an accepted stale save |
+| Approval thresholds | pass | Store tests cover the threshold predicate and validation; the server API test allows a below-threshold accountant posting and rejects one at the threshold, while the existing all-voucher policy still blocks direct posting |
 
 ## Progress log
 
@@ -560,6 +574,11 @@ and operate the current server with R2 and Resend enabled.
 - Remaining approvals limits: there is no multi-level approval matrix, and
   concurrent pending-queue merges rely on the normal workspace conflict flow
   rather than a dedicated merge.
+- Added Phase 7 approval thresholds: a company can require approval only at
+  or above a configured amount while `0` keeps the old all-voucher rule. The
+  submission UI uses the threshold, the server recomputes debit totals and
+  rejects direct accountant postings at or above it, accountants cannot change
+  it, and the read-only company payload exposes it.
 - Added Phase 6 merge visibility: a successful stale-save merge now appends
   a hash-chained `workspace.merge` server event. The event lists field paths
   submitted by the client, changed on the server, and set identically by both

@@ -568,6 +568,7 @@ export function companiesScreen() {
                 </label>`
               : `<input type="hidden" name="fyStart" value="${esc(editingCompany.fyStart)}">`}
             <label class="field inline-field"><input type="checkbox" name="requireApproval" ${editingCompany.approvalsRequired ? 'checked' : ''}> <span>Require owner approval for staff vouchers</span></label>
+            <label class="field"><span>Approval threshold</span><input type="number" name="approvalThreshold" min="0" step="0.01" value="${Number(editingCompany.approvalThreshold) || 0}"><small class="muted">Staff vouchers of this amount or more wait for approval. Use 0 to require approval for every staff voucher.</small></label>
             <div class="field form-actions">
               <button class="btn primary" type="submit">Save company</button>
               <button class="btn ghost" type="button" data-action="cancel-company-edit">Cancel</button>
@@ -1075,7 +1076,11 @@ function pendingVouchersPanel(active) {
     .join('');
   return panel(
     `Voucher approvals <span class="count">${pending.filter((voucher) => voucher.status === 'pending').length}</span>`,
-    `<p class="muted small">${active.approvalsRequired ? 'Staff vouchers wait here until an owner approves them; only approved vouchers post to the books.' : 'Approval is currently off, but previously submitted vouchers still need a decision.'}</p>
+    `<p class="muted small">${active.approvalsRequired
+      ? Number(active.approvalThreshold) > 0
+        ? `Staff vouchers of ${money(active.approvalThreshold)} or more wait here until an owner approves them; smaller vouchers post directly.`
+        : 'All staff vouchers wait here until an owner approves them; only approved vouchers post to the books.'
+      : 'Approval is currently off, but previously submitted vouchers still need a decision.'}</p>
     ${pending.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact"><thead><tr><th>Date</th><th>Voucher</th><th class="num">Amount</th><th>Submitted by</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
       : '<p class="muted">No vouchers are waiting for approval.</p>'}`,

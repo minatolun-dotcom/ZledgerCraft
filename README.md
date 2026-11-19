@@ -69,8 +69,11 @@ support TOTP/MFA on the managed branch.
 **Voucher approvals**
 
 A company can require owner approval for vouchers entered by staff. Enable
-**Require owner approval for staff vouchers** while editing the company. Staff
-vouchers then wait in the Voucher approvals queue and do not post to ledgers,
+**Require owner approval for staff vouchers** while editing the company. An
+approval threshold of `0` keeps the rule for every staff voucher; a positive
+amount lets smaller vouchers post directly while vouchers at or above it wait
+for approval. The server recomputes the amount and rejects direct postings at
+or above the threshold. Staff vouchers then wait in the Voucher approvals queue and do not post to ledgers,
 reports or inventory until an owner approves them. The submitter can revise a
 pending voucher or withdraw it before a decision; each revision records the
 changed fields and old/new values, shown in a collapsible history for the owner.

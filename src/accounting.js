@@ -478,8 +478,10 @@ export function dashboard(company) {
   const payable = outstanding(company, { side: 'payable', asOn: company.fyEnd });
 
   const now = new Date();
+  const localDate = (date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  const today = now.toISOString().slice(0, 10);
+  const today = localDate(now);
   const from = monthStart < company.fyStart ? company.fyStart : monthStart;
   const to = today > company.fyEnd ? company.fyEnd : today;
   let salesThisMonth = 0;

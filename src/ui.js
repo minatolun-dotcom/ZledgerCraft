@@ -36,6 +36,7 @@ import {
   addVoucher,
   autoMatchBank,
   allocationsAgainst,
+  approvalRequiredForAmount,
   approvePendingVoucher,
   billLabel,
   clearBankStatement,
@@ -2470,6 +2471,7 @@ export async function handleSubmit(event) {
       name: data.get('name'),
       fyStart: data.get('fyStart'),
       requireApproval: data.get('requireApproval') === 'on',
+      approvalThreshold: data.get('approvalThreshold'),
     });
     if (!result.ok) {
       showFormError(result.error, 'company-error');
@@ -3154,11 +3156,17 @@ export async function handleSubmit(event) {
     }
     const editingId = view.editId;
     const pendingEdit = Boolean(view.pendingEdit && editingId);
+    const submitted = readVoucherForm();
+    const submittedTotal = round2(
+      submitted.lines
+        .filter((line) => line.side === 'Dr')
+        .reduce((sum, line) => sum + (parseAmount(line.amount) ?? 0), 0),
+    );
     const pendingApproval = Boolean(
-      active.approvalsRequired && authRequired && authUser?.role !== 'owner' && !editingId,
+      !editingId && authRequired && authUser?.role !== 'owner' && approvalRequiredForAmount(active, submittedTotal),
     );
     const input = {
-      ...readVoucherForm(),
+      ...submitted,
       pending: pendingEdit || pendingApproval,
       submittedBy: authUser
         ? { id: authUser.id, username: authUser.username, name: authUser.name }

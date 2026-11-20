@@ -100,6 +100,7 @@ import {
   payrollLedgers,
   payrollMonthEnd,
   postBankAdjustment,
+  postDueRecurringVouchers,
   postForexRevaluation,
   postOverdueInterest,
   postRecurringVoucher,
@@ -5309,6 +5310,30 @@ async function handleClick(event) {
       prepareDraft(template.type, { ...template, date: template.nextDate });
       navigate('voucherNew', { type: template.type });
       setFlash(`Prefilled "${template.name}". Review and accept it.`, 'ok');
+      break;
+    }
+
+    case 'post-due-recurring': {
+      if (!requirePermission('voucher.write')) break;
+      const active = company();
+      if (!active || !window.confirm('Post every recurring template that is due and advance its next date?')) break;
+      const result = postDueRecurringVouchers(active);
+      if (result.posted) {
+        logAudit(
+          'recurring.postDue',
+          `Posted ${result.posted} due recurring voucher${result.posted === 1 ? '' : 's'}; ${result.blocked} blocked for approval.`,
+          active,
+          'recurring',
+        );
+        persist();
+      }
+      const message = [
+        `${result.posted} posted`,
+        result.blocked ? `${result.blocked} need manual approval` : '',
+        result.errors.length ? result.errors[0] : '',
+      ].filter(Boolean).join(' · ');
+      setFlash(message, result.ok ? 'ok' : 'warn');
+      render();
       break;
     }
 

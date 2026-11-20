@@ -3500,6 +3500,22 @@ export function postRecurringVoucher(company, templateId) {
   return { ok: true, template, voucher: posted.voucher };
 }
 
+export function postDueRecurringVouchers(company, asOn = todayIso()) {
+  const due = (company.recurringVouchers ?? [])
+    .filter((template) => template.nextDate <= asOn)
+    .sort((a, b) => a.nextDate.localeCompare(b.nextDate) || a.name.localeCompare(b.name));
+  let posted = 0;
+  let blocked = 0;
+  const errors = [];
+  for (const template of due) {
+    const result = postRecurringVoucher(company, template.id);
+    if (result.ok) posted += 1;
+    else if (/manual approval/i.test(result.error)) blocked += 1;
+    else errors.push(`${template.name}: ${result.error}`);
+  }
+  return { ok: errors.length === 0, posted, blocked, errors, due: due.length };
+}
+
 export function deleteRecurringVoucher(company, templateId) {
   const template = (company.recurringVouchers ?? []).find((entry) => entry.id === templateId);
   if (!template) return { ok: false, error: 'Recurring template not found.' };

@@ -14,6 +14,7 @@ import {
   exportState,
   findLedgerByName,
   importState,
+  postDueRecurringVouchers,
   postRecurringVoucher,
   saveGstSettings,
   saveTdsSettings,
@@ -175,6 +176,29 @@ test('a due recurring template posts and advances its next date', () => {
   assert.equal(posted.voucher.date, '2026-05-01');
   assert.equal(added.template.nextDate, '2026-06-01');
   assert.equal(added.template.lastVoucherId, posted.voucher.id);
+});
+
+test('all due recurring templates can be posted in one action', () => {
+  const { company } = tradingFixture();
+  const source = company.vouchers.find((entry) => entry.type === 'Sales');
+  addRecurringVoucher(company, {
+    voucherId: source.id,
+    name: 'May sale',
+    frequency: 'Monthly',
+    nextDate: '2026-05-01',
+  });
+  addRecurringVoucher(company, {
+    voucherId: source.id,
+    name: 'June sale',
+    frequency: 'Monthly',
+    nextDate: '2026-06-01',
+  });
+  const result = postDueRecurringVouchers(company, '2026-05-31');
+  assert.equal(result.ok, true);
+  assert.equal(result.posted, 1);
+  assert.equal(result.due, 1);
+  assert.equal(company.recurringVouchers.find((item) => item.name === 'May sale').nextDate, '2026-06-01');
+  assert.equal(company.recurringVouchers.find((item) => item.name === 'June sale').nextDate, '2026-06-01');
 });
 
 test('company consolidation aggregates each company without eliminating balances', () => {

@@ -658,10 +658,7 @@ disabled.
   vouchers (`Date,Type,No,Ledger,Side,Amount,Narration`) and bank statements
   (`Date,Description,Reference,Debit,Credit`), dated currency rates
   (`Code,Date,Rate`). Bank statements also accept OFX, QIF and MT940 files. Excel `.xlsx` workbooks can load
-  ledgers or vouchers into the same review box: the `Ledgers`/`Vouchers` sheet
-  is used when present, otherwise the first worksheet. Date-styled cells become
-  YYYY-MM-DD. The workbook is converted to the same CSV text and imported
-  through the same all-or-nothing path.
+  ledgers, vouchers, stock items, currency rates or bank statements into the same review boxes: named sheets such as `Ledgers` or `Vouchers` are preferred, otherwise the first worksheet is used. Date-styled cells become YYYY-MM-DD. The workbook is converted to the same CSV text and imported through the same all-or-nothing path.
 - Tally XML import for account groups, ledgers, stock groups, stock items with
   opening stock, balanced accounting vouchers, and voucher stock lines. Common
   All Masters and voucher exports are supported, with Tally dates, entities and
@@ -711,7 +708,7 @@ voucher types, voucher alteration, day book, ledgers, trial balance, P&L,
 balance sheet, cash/bank books, registers, receivables/payables with ageing,
 group summary, cash flow, ratio analysis, statistics, period selection,
 bill-wise receivables, bill-wise register and party statement, godowns, batches,
-stock transfers, partially fulfilled sales/purchase orders, recurring voucher templates that can post when due,
+stock transfers, partially fulfilled sales/purchase orders, recurring voucher templates that can post when due individually or in bulk,
 templates, cash-flow forecasting, BOMs and production, GST tax on
 invoices with GSTR-1/GSTR-3B working papers, e-invoice/e-way bill drafts, a
 user-managed compliance calendar and tax-audit reconciliations, TDS/TCS deduction with registers

@@ -1178,6 +1178,7 @@ export function vouchersScreen() {
   const active = company();
   const recent = dayBook(active).slice(0, 12);
   const recurring = [...(active.recurringVouchers ?? [])].sort((a, b) => a.nextDate.localeCompare(b.nextDate));
+  const dueRecurring = recurring.filter((template) => template.nextDate <= todayIso());
   const recurringRows = recurring
     .map((template) => `<tr>
       <td><strong>${esc(template.name)}</strong><div class="muted small">${esc(voucherLabel(template.type))} · ${esc(template.frequency)}</div></td>
@@ -1239,7 +1240,11 @@ export function vouchersScreen() {
         <label class="field"><span>Template name</span><input name="name" maxlength="100" placeholder="e.g. Monthly office rent"></label>
         <label class="field"><span>Repeat</span><select name="frequency"><option>Monthly</option><option>Quarterly</option><option>Yearly</option><option>Weekly</option></select></label>
         <label class="field"><span>Next date</span><input name="nextDate" type="date"></label>
-        <div class="form-actions"><button class="btn primary" type="submit">Create template</button></div>
+        <div class="form-actions"><button class="btn primary" type="submit">Create template</button>
+          ${dueRecurring.length
+            ? `<button class="btn" type="button" data-action="post-due-recurring"${can('voucher.write') ? '' : ' disabled'}>Post all due (${dueRecurring.length})</button>`
+            : ''}
+        </div>
         <p id="recurring-voucher-error" class="form-error" role="alert"></p>
       </form>
       ${recurring.length

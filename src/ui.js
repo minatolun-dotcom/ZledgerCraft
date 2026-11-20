@@ -209,6 +209,7 @@ import {
 import {
   ordersScreen,
   bomComponentRow,
+  stockTransferItemRow,
   inventoryScreen,
 } from './ui-inventory.js';
 import {
@@ -2707,22 +2708,26 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
+    const items = [...form.querySelectorAll('#stock-transfer-lines .transfer-row')].map((row) => ({
+      stockItemId: row.querySelector('[name="transferItemId"]')?.value ?? '',
+      batchNo: row.querySelector('[name="transferBatchNo"]')?.value ?? '',
+      qty: row.querySelector('[name="transferQty"]')?.value ?? '',
+    }));
     const result = addStockTransfer(active, {
       date: data.get('date'),
       fromGodownId: data.get('fromGodownId'),
       toGodownId: data.get('toGodownId'),
-      stockItemId: data.get('stockItemId'),
-      batchNo: data.get('batchNo'),
-      qty: data.get('qty'),
+      items,
       narration: data.get('narration'),
     });
     if (!result.ok) {
       showFormError(result.error, 'stock-transfer-error');
       return;
     }
+    const lineCount = result.transfer.items.length;
     logAudit(
       'stockTransfer.create',
-      `Transferred ${result.transfer.items[0].qty} of stock as ST-${result.transfer.no}.`,
+      `Transferred ${lineCount} item${lineCount === 1 ? '' : 's'} as ST-${result.transfer.no}.`,
       active,
       `ST-${result.transfer.no}`,
     );
@@ -4971,6 +4976,17 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'add-stock-transfer-line': {
+      const container = document.getElementById('stock-transfer-lines');
+      const active = company();
+      if (container && active) {
+        container.insertAdjacentHTML('beforeend', stockTransferItemRow(active));
+      }
+      break;
+    }
+    case 'remove-transfer-line':
+      trigger.closest('.transfer-row')?.remove();
+      break;
     case 'add-bom-component': {
       const container = document.getElementById('bom-components');
       const active = company();

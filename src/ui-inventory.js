@@ -124,6 +124,15 @@ export function ordersScreen() {
   )}`;
 }
 
+export function stockTransferItemRow(active) {
+  return `<div class="bom-row transfer-row">
+    <label class="field"><span>Item</span><select name="transferItemId">${stockItemSelectOptions(active, '')}</select></label>
+    <label class="field"><span>Batch (if tracked)</span><input name="transferBatchNo" maxlength="30" placeholder="e.g. LOT-24" aria-label="Batch"></label>
+    <label class="field"><span>Quantity</span><input name="transferQty" inputmode="decimal" placeholder="0" aria-label="Transfer quantity"></label>
+    <button class="btn small ghost" type="button" data-action="remove-transfer-line">Remove</button>
+  </div>`;
+}
+
 export function bomComponentRow(active) {
   return `<div class="bom-row">
     <label class="field"><span>Component item</span><select name="componentItemId">${stockItemSelectOptions(active, '')}</select></label>
@@ -274,17 +283,28 @@ export function inventoryScreen() {
 
   const transferRows = transfers
     .map((transfer) => {
-      const line = transfer.items?.[0];
-      const item = items.find((entry) => entry.id === line?.stockItemId);
-      const unit = units.find((entry) => entry.id === item?.unitId)?.symbol ?? '';
       const source = godowns.find((entry) => entry.id === transfer.fromGodownId)?.name ?? '—';
       const destination = godowns.find((entry) => entry.id === transfer.toGodownId)?.name ?? '—';
+      const lines = transfer.items ?? [];
+      const lineNames = lines
+        .map((line) => {
+          const item = items.find((entry) => entry.id === line.stockItemId);
+          return `${esc(item?.name ?? 'Unknown item')}${line.batchNo ? ` <span class="muted small">Batch ${esc(line.batchNo)}</span>` : ''}`;
+        })
+        .join('<br>');
+      const lineQtys = lines
+        .map((line) => {
+          const item = items.find((entry) => entry.id === line.stockItemId);
+          const unit = units.find((entry) => entry.id === item?.unitId)?.symbol ?? '';
+          return `${fmtQty(line.qty)} ${esc(unit)}`.trim();
+        })
+        .join('<br>');
       return `<tr>
         <td>${esc(dateLabel(transfer.date))}</td>
         <td><strong>ST-${transfer.no}</strong></td>
         <td>${esc(source)} → ${esc(destination)}</td>
-        <td>${esc(item?.name ?? 'Unknown item')}${line?.batchNo ? `<div class="muted small">Batch ${esc(line.batchNo)}</div>` : ''}</td>
-        <td class="num">${fmtQty(line?.qty ?? 0)} ${esc(unit)}</td>
+        <td>${lines.length ? lineNames : '<span class="muted">No items</span>'}</td>
+        <td class="num">${lineQtys}</td>
         <td class="muted">${esc(transfer.narration || '—')}</td>
         <td class="row-actions"><button class="btn small danger" type="button" data-action="delete-stock-transfer" data-id="${esc(transfer.id)}">Delete</button></td>
       </tr>`;
@@ -387,10 +407,12 @@ export function inventoryScreen() {
         <label class="field"><span>Date</span><input name="date" type="date" value="${esc(todayIso() >= booksStart(active) && todayIso() <= to ? todayIso() : active.fyStart)}" min="${esc(booksStart(active))}" required></label>
         <label class="field"><span>From godown</span><select name="fromGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
         <label class="field"><span>To godown</span><select name="toGodownId">${godownSelectOptions(active, godowns.find((godown) => !godown.primary)?.id ?? defaultGodownId(active))}</select></label>
-        <label class="field"><span>Item</span><select name="stockItemId">${stockItemSelectOptions(active, '')}</select></label>
-        <label class="field"><span>Batch (if tracked)</span><input name="batchNo" maxlength="30" placeholder="e.g. LOT-24"></label>
-        <label class="field"><span>Quantity</span><input name="qty" inputmode="decimal" placeholder="0" required></label>
         <label class="field"><span>Narration</span><input name="narration" maxlength="400" placeholder="Optional reason or vehicle"></label>
+        <div class="bom-components">
+          <span class="muted small">Items moved between the godowns</span>
+          <div id="stock-transfer-lines">${stockTransferItemRow(active)}</div>
+          <button class="btn small" type="button" data-action="add-stock-transfer-line">Add item</button>
+        </div>
         <div class="field form-actions"><button class="btn primary" type="submit">Record transfer</button></div>
         <p id="stock-transfer-error" class="form-error" role="alert"></p>
       </form>

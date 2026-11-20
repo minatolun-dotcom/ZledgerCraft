@@ -344,6 +344,20 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 20: multi-line stock transfers
+
+- A stock transfer now carries up to 50 item lines instead of one item. Each
+  line has its own item, batch and quantity, and repeated item/batch pairs merge
+  so stock is checked once per batch.
+- Every line is validated against the source godown before anything is written,
+  so one short line rejects the whole transfer. The single-item call shape still
+  works for old callers and backups.
+- The Inventory transfer form gained add/remove line rows, and the transfer
+  register lists every line and quantity.
+- Verification: multi-line validation, duplicate merging, godown balances and
+  backup round-trip tests; 258 tests (257 pass, 1 skipped) and an 883.1 kB build
+  pass.
+
 ### 2026-11-20 — Phase 19: BOM, production and tax-challan normalization
 
 - Moved BOMs, production runs and TDS/TCS challans out of the generic collection

@@ -3426,22 +3426,54 @@ export function addStockTransfer(company, input) {
   const to = (company.godowns ?? []).find((godown) => godown.id === input.toGodownId);
   if (!from || !to) return { ok: false, error: 'Choose both the source and destination godown.' };
   if (from.id === to.id) return { ok: false, error: 'Source and destination godowns must be different.' };
-  const item = (company.stockItems ?? []).find((entry) => entry.id === input.stockItemId);
-  if (!item) return { ok: false, error: 'Choose a stock item to transfer.' };
-  const qty = parseQty(input.qty);
-  if (qty === null || qty <= 0) return { ok: false, error: 'Transfer quantity must be greater than zero.' };
-  const batchNo = String(input.batchNo ?? '').trim().slice(0, 30);
-  if (item.batchTracking && !batchNo) return { ok: false, error: `Batch is required for "${item.name}".` };
-  const available = stockOnHand(company, item.id, date, {
-    godownId: from.id,
-    batchNo: item.batchTracking ? batchNo : null,
-  });
-  if (qty > available + 0.0005) {
-    const unit = (company.units ?? []).find((entry) => entry.id === item.unitId)?.symbol ?? '';
-    return {
-      ok: false,
-      error: `Only ${Number(available.toFixed(3))} ${unit} of "${item.name}" in ${from.name} on ${dateLabel(date)}.`,
-    };
+  const requested = Array.isArray(input.items)
+    ? input.items
+    : [{ stockItemId: input.stockItemId, qty: input.qty, batchNo: input.batchNo }];
+  if (!requested.length) return { ok: false, error: 'Add at least one item to the transfer.' };
+  if (requested.length > 50) return { ok: false, error: 'A transfer can carry at most 50 item lines.' };
+  const lines = [];
+  const totals = new Map();
+  for (const raw of requested) {
+    const item = (company.stockItems ?? []).find((entry) => entry.id === raw?.stockItemId);
+    if (!item) return { ok: false, error: 'Choose a stock item for every transfer line.' };
+    const qty = parseQty(raw?.qty);
+    if (qty === null || qty <= 0) {
+      return { ok: false, error: `Transfer quantity for "${item.name}" must be greater than zero.` };
+    }
+    const batchNo = String(raw?.batchNo ?? '').trim().slice(0, 30);
+    if (item.batchTracking && !batchNo) {
+      return { ok: false, error: `Batch is required for "${item.name}".` };
+    }
+    const key = `${item.id}\u0000${item.batchTracking ? batchNo : ''}`;
+    const existing = totals.get(key);
+    if (existing) {
+      existing.qty = round3(existing.qty + qty);
+    } else {
+      const line = {
+        stockItemId: item.id,
+        qty,
+        ...(item.batchTracking && batchNo ? { batchNo } : {}),
+      };
+      totals.set(key, { ...line, item });
+      lines.push(line);
+    }
+  }
+  for (const total of totals.values()) {
+    const available = stockOnHand(company, total.stockItemId, date, {
+      godownId: from.id,
+      batchNo: total.item.batchTracking ? total.batchNo : null,
+    });
+    if (total.qty > available + 0.0005) {
+      const unit = (company.units ?? []).find((entry) => entry.id === total.item.unitId)?.symbol ?? '';
+      return {
+        ok: false,
+        error: `Only ${Number(available.toFixed(3))} ${unit} of "${total.item.name}" in ${from.name} on ${dateLabel(date)}.`,
+      };
+    }
+  }
+  for (const line of lines) {
+    const total = totals.get(`${line.stockItemId}\u0000${line.batchNo ?? ''}`);
+    line.qty = round3(total.qty);
   }
   company.stockTransfers = company.stockTransfers ?? [];
   company.counters = company.counters ?? {};
@@ -3453,7 +3485,7 @@ export function addStockTransfer(company, input) {
     date,
     fromGodownId: from.id,
     toGodownId: to.id,
-    items: [{ stockItemId: item.id, qty, ...(item.batchTracking && batchNo ? { batchNo } : {}) }],
+    items: lines,
     narration: String(input.narration ?? '').trim().slice(0, 400),
     createdAt: new Date().toISOString(),
   };

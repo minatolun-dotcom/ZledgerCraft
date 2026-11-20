@@ -429,6 +429,58 @@ test('stock transfers move quantity between godowns and are guarded', () => {
   assert.equal(deleteGodown(company, warehouse.id).ok, true);
 });
 
+test('a transfer can carry several items and validates every line before writing', () => {
+  const { company, item } = inventoryFixture();
+  const main = defaultGodownId(company);
+  const warehouse = addGodown(company, { name: 'Warehouse' }).godown;
+  const unit = company.units.find((entry) => entry.symbol === 'Nos');
+  const second = addStockItem(company, {
+    name: 'Cotton Sock',
+    stockGroupId: company.stockGroups[0].id,
+    unitId: unit.id,
+    openingQty: 6,
+    openingRate: 40,
+  }).item;
+
+  const partial = addStockTransfer(company, {
+    date: '2026-04-03',
+    fromGodownId: main,
+    toGodownId: warehouse.id,
+    items: [
+      { stockItemId: item.id, qty: 2 },
+      { stockItemId: second.id, qty: 99 },
+    ],
+  });
+  assert.equal(partial.ok, false);
+  assert.match(partial.error, /Only 6/);
+  assert.equal((company.stockTransfers ?? []).length, 0, 'a bad line writes nothing');
+
+  const transfer = addStockTransfer(company, {
+    date: '2026-04-03',
+    fromGodownId: main,
+    toGodownId: warehouse.id,
+    items: [
+      { stockItemId: item.id, qty: 2 },
+      { stockItemId: second.id, qty: 1 },
+      { stockItemId: item.id, qty: 3 },
+    ],
+    narration: 'Two lines',
+  });
+  assert.equal(transfer.ok, true, transfer.error);
+  assert.equal(transfer.transfer.items.length, 2, 'duplicate item lines are merged');
+  assert.equal(transfer.transfer.items[0].qty, 5);
+  assert.equal(transfer.transfer.items[1].qty, 1);
+
+  const byGodown = godownStockSummary(company);
+  const mainQty = byGodown.rows
+    .filter((row) => row.godownId === main)
+    .reduce((sum, row) => sum + row.closingQty, 0);
+  assert.equal(mainQty, 10);
+  const totalQty = stockSummary(company).rows.reduce((sum, row) => sum + row.closingQty, 0);
+  assert.equal(totalQty, 16);
+  assert.equal(stockOnHand(company, second.id, '2026-04-03', { godownId: warehouse.id }), 1);
+});
+
 test('batch-tracked items require batches and report batch balances', () => {
   const company = createCompany('Batch Co', '2026-04-01').company;
   const unit = company.units.find((entry) => entry.symbol === 'Nos');

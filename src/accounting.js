@@ -5,6 +5,7 @@ import {
   booksStart,
   groupById,
   gstStateName,
+  isValidIsoDate,
   primaryGroupOf,
   rateForCurrency,
   round2,
@@ -1303,12 +1304,13 @@ export function billWiseRegister(company, filters = {}) {
   const from = filters.from || company.fyStart;
   const to = filters.to || company.fyEnd;
   const status = ['Open', 'Settled', 'Overdue'].includes(filters.status) ? filters.status : 'All';
+  const asOn = isValidIsoDate(String(filters.asOn ?? '')) ? String(filters.asOn) : to;
   const groupKey = side === 'receivable' ? 'sundryDebtors' : 'sundryCreditors';
   const rows = [];
 
   for (const ledger of company.ledgers) {
     if (!inGroupKey(company, ledger, groupKey)) continue;
-    const data = partyBillLedger(company, ledger, side, to);
+    const data = partyBillLedger(company, ledger, side, asOn);
     for (const bill of data.allBills) {
       if (!bill.isBill || bill.date < from || bill.date > to) continue;
       if (status === 'Open' && bill.status === 'Settled') continue;
@@ -1330,7 +1332,7 @@ export function billWiseRegister(company, filters = {}) {
     side,
     from,
     to,
-    asOn: to,
+    asOn,
     rows,
     count: rows.length,
     partyCount: new Set(rows.map((row) => row.partyId)).size,

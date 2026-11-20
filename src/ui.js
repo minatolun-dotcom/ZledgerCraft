@@ -331,7 +331,7 @@ export let filters = {
   period: { from: '', to: '' },
   register: { type: 'Sales', from: '', to: '' },
   outstanding: { side: 'receivable', asOn: '' },
-  billRegister: { side: 'receivable', from: '', to: '', status: 'All' },
+  billRegister: { side: 'receivable', from: '', to: '', asOn: '', status: 'All' },
   partyStatement: { side: 'receivable', ledgerId: '', from: '', to: '' },
   cashBook: { ledgerId: '', from: '', to: '' },
   stock: { from: '', to: '' },
@@ -1962,7 +1962,8 @@ export function reportPeriodLabel() {
   }
   if (view.screen === 'billRegister') {
     const to = filters.billRegister.to || active.fyEnd;
-    return `${span(filters.billRegister.from, to)} · status as on ${dateLabel(to)}`;
+    const asOn = filters.billRegister.asOn || to;
+    return `${span(filters.billRegister.from, to)} · status as on ${dateLabel(asOn)}`;
   }
   if (view.screen === 'partyStatement') {
     const ledger = active.ledgers.find((item) => item.id === (filters.partyStatement.ledgerId || view.id));
@@ -3452,6 +3453,7 @@ export async function handleSubmit(event) {
       side: data.get('side') === 'payable' ? 'payable' : 'receivable',
       from: data.get('from') || '',
       to: data.get('to') || '',
+      asOn: data.get('asOn') || '',
       status: data.get('status') || 'All',
     };
     render();

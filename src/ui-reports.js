@@ -528,7 +528,8 @@ export function billRegisterScreen() {
   const from = current.from || active.fyStart;
   const to = current.to || active.fyEnd;
   const status = current.status || 'All';
-  const report = billWiseRegister(active, { side, from, to, status });
+  const asOn = current.asOn || to;
+  const report = billWiseRegister(active, { side, from, to, status, asOn });
   const partyLabel = side === 'receivable' ? 'Customer' : 'Supplier';
   const title = side === 'receivable' ? 'Customer bill-wise register' : 'Supplier bill-wise register';
   const statusOptions = [
@@ -579,6 +580,7 @@ export function billRegisterScreen() {
       </label>
       <label class="field inline-field"><span>From</span><input name="from" type="date" value="${esc(from)}" data-period></label>
       <label class="field inline-field"><span>To</span><input name="to" type="date" value="${esc(to)}" data-period></label>
+      <label class="field inline-field"><span>Status as on</span><input name="asOn" type="date" value="${esc(asOn)}"></label>
       <label class="field inline-field"><span>Status</span><select name="status">${statusOptions}</select></label>
       <button class="btn small" type="submit">Apply</button>
     </form>
@@ -589,7 +591,7 @@ export function billRegisterScreen() {
           <tfoot><tr><td colspan="4">${report.count} bill${report.count === 1 ? '' : 's'} · ${report.partyCount} part${report.partyCount === 1 ? 'y' : 'ies'}${report.overdueCount ? ` · ${report.overdueCount} overdue` : ''}</td><td class="num">${money(report.totalOriginal)}</td><td class="num">${money(report.totalSettled)}</td><td class="num">${money(report.totalOutstanding)}</td><td colspan="2"></td></tr></tfoot>
         </table></div>`
       : `<p class="muted">No ${side === 'receivable' ? 'customer' : 'supplier'} bills in this period${status === 'All' ? '' : ` with status ${esc(status)}`}.</p>`}`,
-    `Bills dated ${esc(dateLabel(from))} to ${esc(dateLabel(to))} · status as on ${esc(dateLabel(to))}. Fully settled bills remain listed. Click a party for its statement, or a bill to open the voucher.`,
+    `Bills dated ${esc(dateLabel(from))} to ${esc(dateLabel(to))} · status as on ${esc(dateLabel(asOn))}. Fully settled bills remain listed. Click a party for its statement, or a bill to open the voucher.`,
   );
 }
 

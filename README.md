@@ -490,9 +490,10 @@ disabled.
 - Receivables and payables ageing (0–30 / 31–60 / 61–90 / 90+ days) using
   stored bill allocations, with FIFO fallback, due-date-based buckets, customer
   advances and a drill-down list of open bills with references and overdue days.
-- Bill-wise register by customer or supplier and bill-date period: original,
-  settled and outstanding amounts, status, overdue days, totals and drill-down
-  to the voucher or the party statement. Fully settled bills remain listed.
+- Bill-wise register by customer or supplier and bill-date period, with a
+  separate status-as-on date: original, settled and outstanding amounts, status,
+  overdue days, totals and drill-down to the voucher or the party statement.
+  Fully settled bills remain listed.
 - Party statement for a customer or supplier: the normal ledger statement with
   bill references and allocation detail, followed by every bill up to the report
   date with original, settled, outstanding and overdue status.

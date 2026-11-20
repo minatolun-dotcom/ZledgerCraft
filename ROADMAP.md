@@ -344,6 +344,16 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 29: bill register status date
+
+- The bill-wise register now has a separate status-as-on date, so a bill period
+  can end in April while settlement and overdue status are reviewed at a later
+  date. An invalid date falls back to the period end.
+- The report caption, overdue days and totals follow the as-on date while the
+  listed bills still come from the bill-date period.
+- Verification: open-at-period-end, settled-after-receipt, fallback and existing
+  register cases; 270 tests (269 pass, 1 skipped) and a 913.7 kB build pass.
+
 ### 2026-11-20 — Phase 28: exchange-rate history editing
 
 - The currency master now lists every dated rate and can edit its value, move it

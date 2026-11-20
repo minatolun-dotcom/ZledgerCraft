@@ -87,6 +87,44 @@ test('bill-wise register keeps original, settled and outstanding amounts', () =>
   assert.equal(two.amount, 500);
 });
 
+test('bill status can be reviewed as on a date later than the bill period', () => {
+  const { company, customer, sales, cash } = fixture();
+  const bill = sale(company, customer, sales, 1000, '2026-04-05', {
+    ref: 'INV-LATE',
+    dueDate: '2026-05-05',
+  });
+  receipt(company, cash, customer, 1000, '2026-05-20', [{ voucherId: bill.id, amount: 1000 }]);
+
+  const atBillPeriodEnd = billWiseRegister(company, {
+    side: 'receivable',
+    from: '2026-04-01',
+    to: '2026-04-30',
+    asOn: '2026-04-30',
+  });
+  assert.equal(atBillPeriodEnd.asOn, '2026-04-30');
+  assert.equal(atBillPeriodEnd.rows[0].status, 'Open');
+  assert.equal(atBillPeriodEnd.totalOutstanding, 1000);
+
+  const afterReceipt = billWiseRegister(company, {
+    side: 'receivable',
+    from: '2026-04-01',
+    to: '2026-04-30',
+    asOn: '2026-05-31',
+  });
+  assert.equal(afterReceipt.asOn, '2026-05-31');
+  assert.equal(afterReceipt.rows[0].status, 'Settled');
+  assert.equal(afterReceipt.totalSettled, 1000);
+  assert.equal(afterReceipt.totalOutstanding, 0);
+
+  const fallback = billWiseRegister(company, {
+    side: 'receivable',
+    from: '2026-04-01',
+    to: '2026-04-30',
+    asOn: 'not-a-date',
+  });
+  assert.equal(fallback.asOn, '2026-04-30', 'an invalid as-on date falls back to the period end');
+});
+
 test('bill-wise register attributes unallocated receipts to the oldest bill first', () => {
   const { company, customer, sales, cash } = fixture();
   sale(company, customer, sales, 1000, '2026-04-05', { ref: 'INV-001' });

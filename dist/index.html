@@ -7001,7 +7001,10 @@ function stockOnHand(company, itemId, asOn, options = {}) {
     }
   }
   const manufactures = (company.manufactures ?? [])
-    .filter((manufacture) => manufacture.date <= asOn)
+    .filter(
+      (manufacture) =>
+        manufacture.date <= asOn && manufacture.id !== options.excludeManufactureId,
+    )
     .sort((a, b) => a.date.localeCompare(b.date) || (Number(a.no) || 0) - (Number(b.no) || 0));
   for (const manufacture of manufactures) {
     for (const line of manufacture.components ?? []) {
@@ -7843,6 +7846,46 @@ function addManufacture(company, input) {
 function deleteManufacture(company, manufactureId) {
   const manufacture = (company.manufactures ?? []).find((entry) => entry.id === manufactureId);
   if (!manufacture) return { ok: false, error: 'Production entry not found.' };
+  const output = (company.stockItems ?? []).find((item) => item.id === manufacture.outputItemId);
+  if (output) {
+    const godown = (company.godowns ?? []).find((entry) => entry.id === manufacture.outputGodownId);
+    const batchNo = output.batchTracking ? manufacture.outputBatchNo || undefined : undefined;
+    const dates = new Set([manufacture.date]);
+    const addDate = (date) => {
+      if (date >= manufacture.date) dates.add(date);
+    };
+    for (const voucher of company.vouchers ?? []) {
+      if (!INVENTORY_TYPES.includes(voucher.type)) continue;
+      if ((voucher.items ?? []).some((line) => line.stockItemId === output.id)) addDate(voucher.date);
+    }
+    for (const transfer of company.stockTransfers ?? []) {
+      if ((transfer.items ?? []).some((line) => line.stockItemId === output.id)) addDate(transfer.date);
+    }
+    for (const adjustment of company.stockAdjustments ?? []) {
+      if ((adjustment.rows ?? []).some((line) => line.stockItemId === output.id)) addDate(adjustment.date);
+    }
+    for (const entry of company.manufactures ?? []) {
+      if (
+        entry.outputItemId === output.id ||
+        (entry.components ?? []).some((line) => line.stockItemId === output.id)
+      ) {
+        addDate(entry.date);
+      }
+    }
+    for (const date of [...dates].sort()) {
+      const available = stockOnHand(company, output.id, date, {
+        godownId: manufacture.outputGodownId,
+        batchNo,
+        excludeManufactureId: manufacture.id,
+      });
+      if (available < -0.0005) {
+        return {
+          ok: false,
+          error: `Deleting MFG-${manufacture.no} would make "${output.name}" stock ${Number(available.toFixed(3))} in ${godown?.name ?? 'the output godown'} on ${dateLabel(date)}. Remove or adjust those later stock entries first.`,
+        };
+      }
+    }
+  }
   company.manufactures = (company.manufactures ?? []).filter((entry) => entry.id !== manufactureId);
   return { ok: true, manufacture };
 }

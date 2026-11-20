@@ -1366,6 +1366,59 @@ test('a BOM and production consume components and preserve stock value', () => {
   assert.equal(summary.totals.closingValue, 2000);
 });
 
+test('deleting production is refused when later stock would go negative', () => {
+  const { company, unit, group, cash, sales } = inventoryFixture();
+  const raw = addStockItem(company, {
+    name: 'Delete Fabric',
+    stockGroupId: group.id,
+    unitId: unit.id,
+    openingQty: 20,
+    openingRate: 50,
+  }).item;
+  const finished = addStockItem(company, {
+    name: 'Delete Shirt',
+    stockGroupId: group.id,
+    unitId: unit.id,
+    openingQty: 0,
+    openingRate: 0,
+  }).item;
+  const bom = addBom(company, {
+    name: 'Delete recipe',
+    outputItemId: finished.id,
+    outputQty: 2,
+    components: [{ stockItemId: raw.id, qty: 4 }],
+  }).bom;
+  const production = addManufacture(company, {
+    date: '2026-04-10',
+    bomId: bom.id,
+    outputQty: 4,
+    componentGodownId: defaultGodownId(company),
+    outputGodownId: defaultGodownId(company),
+  });
+  assert.equal(production.ok, true, production.error);
+  const sale = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-12',
+    lines: [
+      { ledgerId: cash.id, side: 'Dr', amount: 300 },
+      { ledgerId: sales.id, side: 'Cr', amount: 300 },
+    ],
+    items: [{ stockItemId: finished.id, qty: 3, rate: 100 }],
+  });
+  assert.equal(sale.ok, true, sale.error);
+
+  const blocked = deleteManufacture(company, production.manufacture.id);
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /would make .* stock -3/);
+  assert.equal(company.manufactures.length, 1);
+
+  assert.equal(deleteVoucher(company, sale.voucher.id), true);
+  const removed = deleteManufacture(company, production.manufacture.id);
+  assert.equal(removed.ok, true, removed.error);
+  assert.equal(stockOnHand(company, raw.id, '2026-04-30'), 20);
+  assert.equal(stockOnHand(company, finished.id, '2026-04-30'), 0);
+});
+
 test('production wastage consumes extra components without inflating finished stock', () => {
   const { company, unit, group } = inventoryFixture();
   const raw = addStockItem(company, {

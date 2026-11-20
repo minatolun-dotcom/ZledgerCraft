@@ -475,7 +475,8 @@ disabled.
 - Production preserves total stock value: components leave at weighted-average
   cost plus optional labour and overhead amounts, and finished goods enter at
   that total. It is a quantity/cost working paper, not a WIP journal, and no
-  ledger entry is posted.
+  ledger entry is posted. Deleting a production entry is refused when it would
+  make the finished item's stock negative on or after that date.
 - Stock is valued operationally: it does not post stock value into the P&L or
   balance sheet, which stay driven by ledger balances only.
 

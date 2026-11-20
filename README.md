@@ -315,8 +315,10 @@ disabled.
 - All standard Tally groups, plus custom groups under any group (they inherit
   the nature of their primary group).
 - Cost categories and cost centres with add, rename and delete masters, and a
-  centre can be moved to another category. Categories without centres and
-  centres used by vouchers are protected from deletion.
+  centre can be moved to another category. Categories or centres can be merged
+  into another master, reassigning their centres, voucher lines and budgets.
+  Categories without centres and centres used by vouchers are protected from
+  deletion; a merge is refused when both sides have a budget for the same year.
 - Annual budgets per ledger, group, cost centre or cost category for a financial
   year, with add, edit, delete and "duplicate next year" masters. One budget per
   target per year is enforced; editing an amount or name keeps the previous
@@ -505,8 +507,9 @@ disabled.
   payee, Indian-numbering amount in words, figures and A/c Payee crossing; DD
   payments get a DD advice and receipt instruments a deposit slip.
 - Cost centre summary by category and centre, with debit/credit/net, voucher
-  counts, period filter, an unallocated-line reconciliation and click-through
-  to a cost-centre break-up of voucher lines.
+  counts, period filter, a category P&L for tagged income and expense, an
+  unallocated-line reconciliation and click-through to a cost-centre break-up
+  of voucher lines.
 - Budget vs Actual by ledger, group, cost centre or cost category for a
   financial year and as-on date: budget, actual, variance, used percentage,
   over-budget status and Print/CSV. Actuals use period voucher movement and

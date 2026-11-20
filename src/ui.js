@@ -96,6 +96,8 @@ import {
   isPartyLedger,
   ledgerOptions,
   loadState,
+  mergeCostCategory,
+  mergeCostCentre,
   normalizeAudit,
   parseAmount,
   parseQty,
@@ -3592,6 +3594,74 @@ export async function handleSubmit(event) {
     setFlash(`Cost centre "${result.centre.name}" ${editingCentreId ? 'saved' : 'added'}.`);
     if (editingCentreId) navigate('costCentres');
     else render();
+    return;
+  }
+
+  if (form.id === 'merge-cost-category-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const sourceId = String(data.get('source') ?? '');
+    const targetId = String(data.get('target') ?? '');
+    const active = company();
+    if (!active) return;
+    const sourceName = (active.costCategories ?? []).find((category) => category.id === sourceId)?.name ?? 'Category';
+    const targetName = (active.costCategories ?? []).find((category) => category.id === targetId)?.name ?? 'target';
+    if (!window.confirm(`Merge "${sourceName}" into "${targetName}"? Centres and category budgets will be reassigned.`)) return;
+    const result = mergeCostCategory(active, sourceId, targetId);
+    if (!result.ok) {
+      setFlash(result.error, 'warn');
+      return;
+    }
+    logAudit(
+      'costCategory.merge',
+      `Merged cost category "${result.source.name}" into "${result.category.name}" (${result.centresMoved} centre(s), ${result.budgetsMoved} budget(s)).`,
+      active,
+      result.category.name,
+    );
+    persist();
+    setFlash(`Merged "${result.source.name}" into "${result.category.name}".`);
+    render();
+    return;
+  }
+
+  if (form.id === 'merge-cost-centre-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const sourceId = String(data.get('source') ?? '');
+    const targetId = String(data.get('target') ?? '');
+    const active = company();
+    if (!active) return;
+    const sourceName = (active.costCentres ?? []).find((centre) => centre.id === sourceId)?.name ?? 'Centre';
+    const targetName = (active.costCentres ?? []).find((centre) => centre.id === targetId)?.name ?? 'target';
+    if (!window.confirm(`Merge "${sourceName}" into "${targetName}"? Voucher allocations and centre budgets will be reassigned.`)) return;
+    const result = mergeCostCentre(active, sourceId, targetId);
+    if (!result.ok) {
+      setFlash(result.error, 'warn');
+      return;
+    }
+    logAudit(
+      'costCentre.merge',
+      `Merged cost centre "${result.source.name}" into "${result.centre.name}" (${result.linesMoved} voucher line(s), ${result.budgetsMoved} budget(s)).`,
+      active,
+      result.centre.name,
+    );
+    persist();
+    setFlash(`Merged "${result.source.name}" into "${result.centre.name}".`);
+    render();
     return;
   }
 

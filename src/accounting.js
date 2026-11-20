@@ -936,6 +936,93 @@ export function costCentreSummary(company, filters = {}) {
   };
 }
 
+/** Profit and loss from voucher lines allocated to cost centres, grouped by category. */
+export function costCategoryPnl(company, filters = {}) {
+  const { from, to } = dateRange(company, filters);
+  const categories = company.costCategories ?? [];
+  const centreCategory = new Map(
+    (company.costCentres ?? []).map((centre) => [centre.id, centre.categoryId]),
+  );
+  const ledgerById = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
+  const byCategory = new Map(
+    categories.map((category) => [
+      category.id,
+      {
+        categoryId: category.id,
+        category: category.name,
+        directIncome: 0,
+        directExpense: 0,
+        indirectIncome: 0,
+        indirectExpense: 0,
+        vouchers: new Set(),
+      },
+    ]),
+  );
+  for (const voucher of vouchersSorted(company)) {
+    if (voucher.date < from || voucher.date > to) continue;
+    for (const line of voucher.lines ?? []) {
+      const categoryId = centreCategory.get(line.costCentreId);
+      if (!categoryId) continue;
+      const category = byCategory.get(categoryId);
+      const ledger = ledgerById.get(line.ledgerId);
+      if (!category || !ledger) continue;
+      const nature = groupNature(company, ledger.groupId);
+      if (nature !== 'Income' && nature !== 'Expense') continue;
+      const amount = round2(line.amount);
+      const direct = isDirectGroup(company, ledger.groupId);
+      if (nature === 'Income') {
+        const net = line.side === 'Cr' ? amount : -amount;
+        if (direct) category.directIncome = round2(category.directIncome + net);
+        else category.indirectIncome = round2(category.indirectIncome + net);
+      } else {
+        const net = line.side === 'Dr' ? amount : -amount;
+        if (direct) category.directExpense = round2(category.directExpense + net);
+        else category.indirectExpense = round2(category.indirectExpense + net);
+      }
+      category.vouchers.add(voucher.id);
+    }
+  }
+
+  const rows = [...byCategory.values()]
+    .map((row) => {
+      const directNet = round2(row.directIncome - row.directExpense);
+      const indirectNet = round2(row.indirectIncome - row.indirectExpense);
+      return {
+        categoryId: row.categoryId,
+        category: row.category,
+        directIncome: row.directIncome,
+        directExpense: row.directExpense,
+        directNet,
+        indirectIncome: row.indirectIncome,
+        indirectExpense: row.indirectExpense,
+        indirectNet,
+        net: round2(directNet + indirectNet),
+        voucherCount: row.vouchers.size,
+      };
+    })
+    .filter((row) =>
+      Math.abs(row.directIncome) + Math.abs(row.directExpense) +
+        Math.abs(row.indirectIncome) + Math.abs(row.indirectExpense) > EPSILON,
+    )
+    .sort((a, b) => a.category.localeCompare(b.category));
+  const total = (key) => round2(rows.reduce((sum, row) => sum + row[key], 0));
+  return {
+    from,
+    to,
+    rows,
+    totalDirectIncome: total('directIncome'),
+    totalDirectExpense: total('directExpense'),
+    totalDirectNet: total('directNet'),
+    totalIndirectIncome: total('indirectIncome'),
+    totalIndirectExpense: total('indirectExpense'),
+    totalIndirectNet: total('indirectNet'),
+    totalNet: total('net'),
+    voucherCount: new Set(
+      [...byCategory.values()].flatMap((row) => [...row.vouchers]),
+    ).size,
+  };
+}
+
 /** Voucher lines allocated to one cost centre. */
 export function costCentreBreakup(company, centreId, filters = {}) {
   const centre = (company.costCentres ?? []).find((item) => item.id === centreId);

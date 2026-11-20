@@ -9,6 +9,7 @@ import {
   bankReconciliation,
   costCentreBreakup,
   costCentreSummary,
+  costCategoryPnl,
   groupChainKeys,
   postDatedRegister,
 } from './accounting.js';
@@ -32,6 +33,31 @@ export function costCentresScreen() {
   const from = current.from || active.fyStart;
   const to = current.to || active.fyEnd;
   const report = costCentreSummary(active, { from, to });
+  const pnl = costCategoryPnl(active, { from, to });
+  const pnlRows = pnl.rows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.category)}</strong><div class="muted small">${row.voucherCount} voucher${row.voucherCount === 1 ? '' : 's'}</div></td>
+        <td class="num">${money(row.directIncome)}</td>
+        <td class="num">${money(row.directExpense)}</td>
+        <td class="num ${row.directNet < 0 ? 'neg' : ''}">${money(row.directNet)}</td>
+        <td class="num">${money(row.indirectIncome)}</td>
+        <td class="num">${money(row.indirectExpense)}</td>
+        <td class="num ${row.net < 0 ? 'neg' : ''}"><strong>${money(row.net)}</strong></td>
+      </tr>`,
+    )
+    .join('');
+  const pnlTotalRow = pnl.rows.length
+    ? `<tr>
+        <td><strong>Total</strong></td>
+        <td class="num">${money(pnl.totalDirectIncome)}</td>
+        <td class="num">${money(pnl.totalDirectExpense)}</td>
+        <td class="num ${pnl.totalDirectNet < 0 ? 'neg' : ''}">${money(pnl.totalDirectNet)}</td>
+        <td class="num">${money(pnl.totalIndirectIncome)}</td>
+        <td class="num">${money(pnl.totalIndirectExpense)}</td>
+        <td class="num ${pnl.totalNet < 0 ? 'neg' : ''}"><strong>${money(pnl.totalNet)}</strong></td>
+      </tr>`
+    : '';
   const centreRows = report.centreRows
     .map(
       (row) => `<tr class="clickable" data-action="open-cost-centre" data-id="${esc(row.centreId)}">
@@ -81,6 +107,13 @@ export function costCentresScreen() {
       <thead><tr><th>Category</th><th class="num">Centres</th><th class="num">Vouchers</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
       <tbody>${categoryRows}</tbody>
     </table></div>
+    <h3 class="column-title">Profit &amp; loss by category</h3>
+    ${pnl.rows.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Category</th><th class="num">Direct income</th><th class="num">Direct expense</th><th class="num">Direct net</th><th class="num">Indirect income</th><th class="num">Indirect expense</th><th class="num">Net</th></tr></thead>
+          <tbody>${pnlRows}${pnlTotalRow}</tbody>
+        </table></div>`
+      : '<p class="muted">No income or expense lines are tagged to a cost centre in this period.</p>'}
     <h3 class="column-title">By cost centre</h3>
     ${report.centreRows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact cost-centre-table">
@@ -95,7 +128,7 @@ export function costCentresScreen() {
           <tbody>${unallocatedRows}</tbody>
         </table></div>`
       : '<p class="muted">Every voucher line in this period has a cost centre.</p>'}`,
-    'Allocated columns include only lines with a cost centre. The unallocated table reconciles the remaining lines in the same period. Click a centre to see its vouchers.',
+    'Allocated columns include only lines with a cost centre. The unallocated table reconciles the remaining lines in the same period. Profit & loss by category counts only tagged income and expense lines, so untagged income or expense is excluded. Click a centre to see its vouchers.',
   );
 }
 

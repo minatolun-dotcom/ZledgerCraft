@@ -776,6 +776,15 @@ export function costCentreMastersPanel(active) {
           <thead><tr><th>Category</th><th class="num">Centres</th><th></th></tr></thead>
           <tbody>${categoryRows}</tbody>
         </table>
+        ${categories.length > 1
+          ? `<form id="merge-cost-category-form" class="inline-form">
+              <select name="source" aria-label="Category to merge">${categories.map((category) => `<option value="${esc(category.id)}">${esc(category.name)}</option>`).join('')}</select>
+              <span class="muted small">into</span>
+              <select name="target" aria-label="Merge category into">${categories.map((category, index) => `<option value="${esc(category.id)}"${index === 1 ? ' selected' : ''}>${esc(category.name)}</option>`).join('')}</select>
+              <button class="btn small ghost" type="submit">Merge category</button>
+            </form>
+            <p class="muted small">Merging moves all centres and category budgets to the target, then removes the source category.</p>`
+          : ''}
       </div>
       <div>
         <h3 class="column-title">Cost centres</h3>
@@ -795,6 +804,15 @@ export function costCentreMastersPanel(active) {
               <tbody>${centreRows}</tbody>
             </table>`
           : '<p class="muted">No cost centres yet. Create one above and assign it to voucher lines.</p>'}
+        ${centres.length > 1
+          ? `<form id="merge-cost-centre-form" class="inline-form">
+              <select name="source" aria-label="Centre to merge">${centres.map((centre) => `<option value="${esc(centre.id)}">${esc(centre.name)}</option>`).join('')}</select>
+              <span class="muted small">into</span>
+              <select name="target" aria-label="Merge centre into">${centres.map((centre, index) => `<option value="${esc(centre.id)}"${index === 1 ? ' selected' : ''}>${esc(centre.name)}</option>`).join('')}</select>
+              <button class="btn small ghost" type="submit">Merge centre</button>
+            </form>
+            <p class="muted small">Merging reassigns voucher lines and centre budgets to the target, then removes the source centre.</p>`
+          : ''}
       </div>
     </div>`,
   );

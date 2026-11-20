@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  addBudget,
   addCostCategory,
   addCostCentre,
   addLedger,
@@ -12,11 +13,13 @@ import {
   exportState,
   findLedgerByName,
   importState,
+  mergeCostCategory,
+  mergeCostCentre,
   normalizeCostMasters,
   updateCostCategory,
   updateCostCentre,
 } from '../src/store.js';
-import { costCentreBreakup, costCentreSummary } from '../src/accounting.js';
+import { costCentreBreakup, costCentreSummary, costCategoryPnl } from '../src/accounting.js';
 
 function costFixture() {
   const company = createCompany('Cost Co', '2026-04-01').company;
@@ -137,6 +140,152 @@ test('cost allocations roll up by centre and category', () => {
   assert.equal(department.credit, 3000);
   assert.equal(department.net, -1500);
   assert.equal(department.centreCount, 2);
+});
+
+test('cost-category P&L counts tagged income and expenses only', () => {
+  const { company, bank, customer, rent, salaries, sales, category, admin, salesTeam } = costFixture();
+  addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: rent.id, side: 'Dr', amount: 1000, costCentreId: admin.id },
+      { ledgerId: bank.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+  addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-11',
+    lines: [
+      { ledgerId: salaries.id, side: 'Dr', amount: 500, costCentreId: salesTeam.id },
+      { ledgerId: bank.id, side: 'Cr', amount: 500 },
+    ],
+  });
+  addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-12',
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 3000 },
+      { ledgerId: sales.id, side: 'Cr', amount: 3000, costCentreId: salesTeam.id },
+    ],
+  });
+  addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-13',
+    lines: [
+      { ledgerId: rent.id, side: 'Dr', amount: 200 },
+      { ledgerId: bank.id, side: 'Cr', amount: 200 },
+    ],
+  });
+
+  const report = costCategoryPnl(company);
+  assert.equal(report.rows.length, 1);
+  const row = report.rows[0];
+  assert.equal(row.categoryId, category.id);
+  assert.equal(row.directIncome, 3000);
+  assert.equal(row.directExpense, 0);
+  assert.equal(row.directNet, 3000);
+  assert.equal(row.indirectExpense, 1500);
+  assert.equal(row.indirectNet, -1500);
+  assert.equal(row.net, 1500);
+  assert.equal(row.voucherCount, 3, 'the untagged payment is excluded');
+  assert.equal(report.totalDirectIncome, 3000);
+  assert.equal(report.totalIndirectExpense, 1500);
+  assert.equal(report.totalNet, 1500);
+
+  const may = costCategoryPnl(company, { from: '2026-05-01', to: '2026-05-31' });
+  assert.equal(may.rows.length, 0);
+  assert.equal(may.totalNet, 0);
+});
+
+test('cost categories and centres can be merged without losing references', () => {
+  const { company, bank, rent, category, admin, salesTeam } = costFixture();
+  addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: rent.id, side: 'Dr', amount: 700, costCentreId: admin.id },
+      { ledgerId: bank.id, side: 'Cr', amount: 700 },
+    ],
+  });
+  addBudget(company, {
+    name: 'Department plan',
+    targetType: 'costCategory',
+    targetId: category.id,
+    yearId: company.years[0].id,
+    amount: 1000,
+  });
+  const targetCategory = addCostCategory(company, { name: 'Business units' }).category;
+  const shared = addCostCentre(company, { name: 'Shared services', categoryId: targetCategory.id }).centre;
+
+  const categoryMerge = mergeCostCategory(company, category.id, targetCategory.id);
+  assert.equal(categoryMerge.ok, true, categoryMerge.error);
+  assert.equal(categoryMerge.centresMoved, 2);
+  assert.equal(categoryMerge.budgetsMoved, 1);
+  assert.equal(company.costCategories.some((entry) => entry.id === category.id), false);
+  assert.equal(company.costCentres.find((centre) => centre.id === admin.id).categoryId, targetCategory.id);
+  assert.equal(company.budgets.find((budget) => budget.name === 'Department plan').targetId, targetCategory.id);
+  assert.equal(costCentreUsage(company, admin.id), 1, 'voucher allocation survives the category merge');
+
+  addBudget(company, {
+    name: 'Admin plan',
+    targetType: 'costCentre',
+    targetId: admin.id,
+    yearId: company.years[0].id,
+    amount: 500,
+  });
+  const centreMerge = mergeCostCentre(company, admin.id, shared.id);
+  assert.equal(centreMerge.ok, true, centreMerge.error);
+  assert.equal(centreMerge.linesMoved, 1);
+  assert.equal(centreMerge.budgetsMoved, 1);
+  assert.equal(company.costCentres.some((centre) => centre.id === admin.id), false);
+  assert.equal(company.vouchers[0].lines[0].costCentreId, shared.id);
+  assert.equal(company.budgets.find((budget) => budget.name === 'Admin plan').targetId, shared.id);
+  assert.equal(costCentreUsage(company, shared.id), 1);
+  assert.equal(mergeCostCentre(company, shared.id, shared.id).ok, false);
+  assert.equal(mergeCostCentre(company, 'missing', salesTeam.id).ok, false);
+});
+
+test('cost-master merges are refused when both sides have a budget for the year', () => {
+  const { company, category, admin, salesTeam } = costFixture();
+  const targetCategory = addCostCategory(company, { name: 'Support' }).category;
+  addBudget(company, {
+    name: 'Department plan',
+    targetType: 'costCategory',
+    targetId: category.id,
+    yearId: company.years[0].id,
+    amount: 1000,
+  });
+  addBudget(company, {
+    name: 'Support plan',
+    targetType: 'costCategory',
+    targetId: targetCategory.id,
+    yearId: company.years[0].id,
+    amount: 800,
+  });
+  const categoryMerge = mergeCostCategory(company, category.id, targetCategory.id);
+  assert.equal(categoryMerge.ok, false);
+  assert.match(categoryMerge.error, /budget.*delete one/i);
+  assert.equal(company.costCategories.some((entry) => entry.id === category.id), true);
+  assert.equal(company.costCentres.find((centre) => centre.id === admin.id).categoryId, category.id);
+
+  addBudget(company, {
+    name: 'Admin plan',
+    targetType: 'costCentre',
+    targetId: admin.id,
+    yearId: company.years[0].id,
+    amount: 500,
+  });
+  addBudget(company, {
+    name: 'Sales plan',
+    targetType: 'costCentre',
+    targetId: salesTeam.id,
+    yearId: company.years[0].id,
+    amount: 600,
+  });
+  const centreMerge = mergeCostCentre(company, admin.id, salesTeam.id);
+  assert.equal(centreMerge.ok, false);
+  assert.match(centreMerge.error, /budget.*delete one/i);
+  assert.equal(company.costCentres.some((centre) => centre.id === admin.id), true);
 });
 
 test('cost centre break-up lists only the chosen centre and honours its period', () => {

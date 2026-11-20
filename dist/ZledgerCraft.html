@@ -5322,6 +5322,72 @@ function costCentreUsage(company, centreId) {
   return count;
 }
 
+function mergeCostCategory(company, sourceId, targetId) {
+  const source = (company.costCategories ?? []).find((item) => item.id === sourceId);
+  const target = (company.costCategories ?? []).find((item) => item.id === targetId);
+  if (!source) return { ok: false, error: 'Cost category to merge was not found.' };
+  if (!target) return { ok: false, error: 'Choose another cost category to merge into.' };
+  if (source.id === target.id) return { ok: false, error: 'Choose a different cost category to merge into.' };
+  const sourceBudgets = (company.budgets ?? []).filter(
+    (budget) => budget.targetType === 'costCategory' && budget.targetId === source.id,
+  );
+  const targetYears = new Set(
+    (company.budgets ?? [])
+      .filter((budget) => budget.targetType === 'costCategory' && budget.targetId === target.id)
+      .map((budget) => budget.yearId),
+  );
+  const conflict = sourceBudgets.find((budget) => targetYears.has(budget.yearId));
+  if (conflict) {
+    return {
+      ok: false,
+      error: `Both categories have a budget for ${(company.years ?? []).find((year) => year.id === conflict.yearId)?.start?.slice(0, 4) ?? 'the same year'}. Delete one budget before merging.`,
+    };
+  }
+  let centresMoved = 0;
+  for (const centre of company.costCentres ?? []) {
+    if (centre.categoryId !== source.id) continue;
+    centre.categoryId = target.id;
+    centresMoved += 1;
+  }
+  for (const budget of sourceBudgets) budget.targetId = target.id;
+  company.costCategories = (company.costCategories ?? []).filter((item) => item.id !== source.id);
+  return { ok: true, category: target, source, centresMoved, budgetsMoved: sourceBudgets.length };
+}
+
+function mergeCostCentre(company, sourceId, targetId) {
+  const source = (company.costCentres ?? []).find((item) => item.id === sourceId);
+  const target = (company.costCentres ?? []).find((item) => item.id === targetId);
+  if (!source) return { ok: false, error: 'Cost centre to merge was not found.' };
+  if (!target) return { ok: false, error: 'Choose another cost centre to merge into.' };
+  if (source.id === target.id) return { ok: false, error: 'Choose a different cost centre to merge into.' };
+  const sourceBudgets = (company.budgets ?? []).filter(
+    (budget) => budget.targetType === 'costCentre' && budget.targetId === source.id,
+  );
+  const targetYears = new Set(
+    (company.budgets ?? [])
+      .filter((budget) => budget.targetType === 'costCentre' && budget.targetId === target.id)
+      .map((budget) => budget.yearId),
+  );
+  const conflict = sourceBudgets.find((budget) => targetYears.has(budget.yearId));
+  if (conflict) {
+    return {
+      ok: false,
+      error: `Both centres have a budget for ${(company.years ?? []).find((year) => year.id === conflict.yearId)?.start?.slice(0, 4) ?? 'the same year'}. Delete one budget before merging.`,
+    };
+  }
+  let linesMoved = 0;
+  for (const voucher of company.vouchers ?? []) {
+    for (const line of voucher.lines ?? []) {
+      if (line.costCentreId !== source.id) continue;
+      line.costCentreId = target.id;
+      linesMoved += 1;
+    }
+  }
+  for (const budget of sourceBudgets) budget.targetId = target.id;
+  company.costCentres = (company.costCentres ?? []).filter((item) => item.id !== source.id);
+  return { ok: true, centre: target, source, linesMoved, budgetsMoved: sourceBudgets.length };
+}
+
 function deleteCostCentre(company, centreId) {
   const centre = (company.costCentres ?? []).find((item) => item.id === centreId);
   if (!centre) return { ok: false, error: 'Cost centre not found.' };
@@ -10285,6 +10351,93 @@ function costCentreSummary(company, filters = {}) {
   };
 }
 
+/** Profit and loss from voucher lines allocated to cost centres, grouped by category. */
+function costCategoryPnl(company, filters = {}) {
+  const { from, to } = dateRange(company, filters);
+  const categories = company.costCategories ?? [];
+  const centreCategory = new Map(
+    (company.costCentres ?? []).map((centre) => [centre.id, centre.categoryId]),
+  );
+  const ledgerById = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
+  const byCategory = new Map(
+    categories.map((category) => [
+      category.id,
+      {
+        categoryId: category.id,
+        category: category.name,
+        directIncome: 0,
+        directExpense: 0,
+        indirectIncome: 0,
+        indirectExpense: 0,
+        vouchers: new Set(),
+      },
+    ]),
+  );
+  for (const voucher of vouchersSorted(company)) {
+    if (voucher.date < from || voucher.date > to) continue;
+    for (const line of voucher.lines ?? []) {
+      const categoryId = centreCategory.get(line.costCentreId);
+      if (!categoryId) continue;
+      const category = byCategory.get(categoryId);
+      const ledger = ledgerById.get(line.ledgerId);
+      if (!category || !ledger) continue;
+      const nature = groupNature(company, ledger.groupId);
+      if (nature !== 'Income' && nature !== 'Expense') continue;
+      const amount = round2(line.amount);
+      const direct = isDirectGroup(company, ledger.groupId);
+      if (nature === 'Income') {
+        const net = line.side === 'Cr' ? amount : -amount;
+        if (direct) category.directIncome = round2(category.directIncome + net);
+        else category.indirectIncome = round2(category.indirectIncome + net);
+      } else {
+        const net = line.side === 'Dr' ? amount : -amount;
+        if (direct) category.directExpense = round2(category.directExpense + net);
+        else category.indirectExpense = round2(category.indirectExpense + net);
+      }
+      category.vouchers.add(voucher.id);
+    }
+  }
+
+  const rows = [...byCategory.values()]
+    .map((row) => {
+      const directNet = round2(row.directIncome - row.directExpense);
+      const indirectNet = round2(row.indirectIncome - row.indirectExpense);
+      return {
+        categoryId: row.categoryId,
+        category: row.category,
+        directIncome: row.directIncome,
+        directExpense: row.directExpense,
+        directNet,
+        indirectIncome: row.indirectIncome,
+        indirectExpense: row.indirectExpense,
+        indirectNet,
+        net: round2(directNet + indirectNet),
+        voucherCount: row.vouchers.size,
+      };
+    })
+    .filter((row) =>
+      Math.abs(row.directIncome) + Math.abs(row.directExpense) +
+        Math.abs(row.indirectIncome) + Math.abs(row.indirectExpense) > EPSILON,
+    )
+    .sort((a, b) => a.category.localeCompare(b.category));
+  const total = (key) => round2(rows.reduce((sum, row) => sum + row[key], 0));
+  return {
+    from,
+    to,
+    rows,
+    totalDirectIncome: total('directIncome'),
+    totalDirectExpense: total('directExpense'),
+    totalDirectNet: total('directNet'),
+    totalIndirectIncome: total('indirectIncome'),
+    totalIndirectExpense: total('indirectExpense'),
+    totalIndirectNet: total('indirectNet'),
+    totalNet: total('net'),
+    voucherCount: new Set(
+      [...byCategory.values()].flatMap((row) => [...row.vouchers]),
+    ).size,
+  };
+}
+
 /** Voucher lines allocated to one cost centre. */
 function costCentreBreakup(company, centreId, filters = {}) {
   const centre = (company.costCentres ?? []).find((item) => item.id === centreId);
@@ -14767,8 +14920,12 @@ const AUDIT_ACTION_LABELS = {
   'currency.rate': 'Exchange rate saved',
   'currency.delete': 'Currency deleted',
   'costCategory.create': 'Cost category created',
+  'costCategory.update': 'Cost category updated',
+  'costCategory.merge': 'Cost category merged',
   'costCategory.delete': 'Cost category deleted',
   'costCentre.create': 'Cost centre created',
+  'costCentre.update': 'Cost centre updated',
+  'costCentre.merge': 'Cost centre merged',
   'costCentre.delete': 'Cost centre deleted',
   'order.create': 'Order recorded',
   'order.status': 'Order status changed',
@@ -15595,6 +15752,15 @@ function costCentreMastersPanel(active) {
           <thead><tr><th>Category</th><th class="num">Centres</th><th></th></tr></thead>
           <tbody>${categoryRows}</tbody>
         </table>
+        ${categories.length > 1
+          ? `<form id="merge-cost-category-form" class="inline-form">
+              <select name="source" aria-label="Category to merge">${categories.map((category) => `<option value="${esc(category.id)}">${esc(category.name)}</option>`).join('')}</select>
+              <span class="muted small">into</span>
+              <select name="target" aria-label="Merge category into">${categories.map((category, index) => `<option value="${esc(category.id)}"${index === 1 ? ' selected' : ''}>${esc(category.name)}</option>`).join('')}</select>
+              <button class="btn small ghost" type="submit">Merge category</button>
+            </form>
+            <p class="muted small">Merging moves all centres and category budgets to the target, then removes the source category.</p>`
+          : ''}
       </div>
       <div>
         <h3 class="column-title">Cost centres</h3>
@@ -15614,6 +15780,15 @@ function costCentreMastersPanel(active) {
               <tbody>${centreRows}</tbody>
             </table>`
           : '<p class="muted">No cost centres yet. Create one above and assign it to voucher lines.</p>'}
+        ${centres.length > 1
+          ? `<form id="merge-cost-centre-form" class="inline-form">
+              <select name="source" aria-label="Centre to merge">${centres.map((centre) => `<option value="${esc(centre.id)}">${esc(centre.name)}</option>`).join('')}</select>
+              <span class="muted small">into</span>
+              <select name="target" aria-label="Merge centre into">${centres.map((centre, index) => `<option value="${esc(centre.id)}"${index === 1 ? ' selected' : ''}>${esc(centre.name)}</option>`).join('')}</select>
+              <button class="btn small ghost" type="submit">Merge centre</button>
+            </form>
+            <p class="muted small">Merging reassigns voucher lines and centre budgets to the target, then removes the source centre.</p>`
+          : ''}
       </div>
     </div>`,
   );
@@ -21121,6 +21296,31 @@ function costCentresScreen() {
   const from = current.from || active.fyStart;
   const to = current.to || active.fyEnd;
   const report = costCentreSummary(active, { from, to });
+  const pnl = costCategoryPnl(active, { from, to });
+  const pnlRows = pnl.rows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.category)}</strong><div class="muted small">${row.voucherCount} voucher${row.voucherCount === 1 ? '' : 's'}</div></td>
+        <td class="num">${money(row.directIncome)}</td>
+        <td class="num">${money(row.directExpense)}</td>
+        <td class="num ${row.directNet < 0 ? 'neg' : ''}">${money(row.directNet)}</td>
+        <td class="num">${money(row.indirectIncome)}</td>
+        <td class="num">${money(row.indirectExpense)}</td>
+        <td class="num ${row.net < 0 ? 'neg' : ''}"><strong>${money(row.net)}</strong></td>
+      </tr>`,
+    )
+    .join('');
+  const pnlTotalRow = pnl.rows.length
+    ? `<tr>
+        <td><strong>Total</strong></td>
+        <td class="num">${money(pnl.totalDirectIncome)}</td>
+        <td class="num">${money(pnl.totalDirectExpense)}</td>
+        <td class="num ${pnl.totalDirectNet < 0 ? 'neg' : ''}">${money(pnl.totalDirectNet)}</td>
+        <td class="num">${money(pnl.totalIndirectIncome)}</td>
+        <td class="num">${money(pnl.totalIndirectExpense)}</td>
+        <td class="num ${pnl.totalNet < 0 ? 'neg' : ''}"><strong>${money(pnl.totalNet)}</strong></td>
+      </tr>`
+    : '';
   const centreRows = report.centreRows
     .map(
       (row) => `<tr class="clickable" data-action="open-cost-centre" data-id="${esc(row.centreId)}">
@@ -21170,6 +21370,13 @@ function costCentresScreen() {
       <thead><tr><th>Category</th><th class="num">Centres</th><th class="num">Vouchers</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
       <tbody>${categoryRows}</tbody>
     </table></div>
+    <h3 class="column-title">Profit &amp; loss by category</h3>
+    ${pnl.rows.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Category</th><th class="num">Direct income</th><th class="num">Direct expense</th><th class="num">Direct net</th><th class="num">Indirect income</th><th class="num">Indirect expense</th><th class="num">Net</th></tr></thead>
+          <tbody>${pnlRows}${pnlTotalRow}</tbody>
+        </table></div>`
+      : '<p class="muted">No income or expense lines are tagged to a cost centre in this period.</p>'}
     <h3 class="column-title">By cost centre</h3>
     ${report.centreRows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact cost-centre-table">
@@ -21184,7 +21391,7 @@ function costCentresScreen() {
           <tbody>${unallocatedRows}</tbody>
         </table></div>`
       : '<p class="muted">Every voucher line in this period has a cost centre.</p>'}`,
-    'Allocated columns include only lines with a cost centre. The unallocated table reconciles the remaining lines in the same period. Click a centre to see its vouchers.',
+    'Allocated columns include only lines with a cost centre. The unallocated table reconciles the remaining lines in the same period. Profit & loss by category counts only tagged income and expense lines, so untagged income or expense is excluded. Click a centre to see its vouchers.',
   );
 }
 
@@ -24861,6 +25068,74 @@ async function handleSubmit(event) {
     setFlash(`Cost centre "${result.centre.name}" ${editingCentreId ? 'saved' : 'added'}.`);
     if (editingCentreId) navigate('costCentres');
     else render();
+    return;
+  }
+
+  if (form.id === 'merge-cost-category-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const sourceId = String(data.get('source') ?? '');
+    const targetId = String(data.get('target') ?? '');
+    const active = company();
+    if (!active) return;
+    const sourceName = (active.costCategories ?? []).find((category) => category.id === sourceId)?.name ?? 'Category';
+    const targetName = (active.costCategories ?? []).find((category) => category.id === targetId)?.name ?? 'target';
+    if (!window.confirm(`Merge "${sourceName}" into "${targetName}"? Centres and category budgets will be reassigned.`)) return;
+    const result = mergeCostCategory(active, sourceId, targetId);
+    if (!result.ok) {
+      setFlash(result.error, 'warn');
+      return;
+    }
+    logAudit(
+      'costCategory.merge',
+      `Merged cost category "${result.source.name}" into "${result.category.name}" (${result.centresMoved} centre(s), ${result.budgetsMoved} budget(s)).`,
+      active,
+      result.category.name,
+    );
+    persist();
+    setFlash(`Merged "${result.source.name}" into "${result.category.name}".`);
+    render();
+    return;
+  }
+
+  if (form.id === 'merge-cost-centre-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const sourceId = String(data.get('source') ?? '');
+    const targetId = String(data.get('target') ?? '');
+    const active = company();
+    if (!active) return;
+    const sourceName = (active.costCentres ?? []).find((centre) => centre.id === sourceId)?.name ?? 'Centre';
+    const targetName = (active.costCentres ?? []).find((centre) => centre.id === targetId)?.name ?? 'target';
+    if (!window.confirm(`Merge "${sourceName}" into "${targetName}"? Voucher allocations and centre budgets will be reassigned.`)) return;
+    const result = mergeCostCentre(active, sourceId, targetId);
+    if (!result.ok) {
+      setFlash(result.error, 'warn');
+      return;
+    }
+    logAudit(
+      'costCentre.merge',
+      `Merged cost centre "${result.source.name}" into "${result.centre.name}" (${result.linesMoved} voucher line(s), ${result.budgetsMoved} budget(s)).`,
+      active,
+      result.centre.name,
+    );
+    persist();
+    setFlash(`Merged "${result.source.name}" into "${result.centre.name}".`);
+    render();
     return;
   }
 

@@ -2896,6 +2896,72 @@ export function costCentreUsage(company, centreId) {
   return count;
 }
 
+export function mergeCostCategory(company, sourceId, targetId) {
+  const source = (company.costCategories ?? []).find((item) => item.id === sourceId);
+  const target = (company.costCategories ?? []).find((item) => item.id === targetId);
+  if (!source) return { ok: false, error: 'Cost category to merge was not found.' };
+  if (!target) return { ok: false, error: 'Choose another cost category to merge into.' };
+  if (source.id === target.id) return { ok: false, error: 'Choose a different cost category to merge into.' };
+  const sourceBudgets = (company.budgets ?? []).filter(
+    (budget) => budget.targetType === 'costCategory' && budget.targetId === source.id,
+  );
+  const targetYears = new Set(
+    (company.budgets ?? [])
+      .filter((budget) => budget.targetType === 'costCategory' && budget.targetId === target.id)
+      .map((budget) => budget.yearId),
+  );
+  const conflict = sourceBudgets.find((budget) => targetYears.has(budget.yearId));
+  if (conflict) {
+    return {
+      ok: false,
+      error: `Both categories have a budget for ${(company.years ?? []).find((year) => year.id === conflict.yearId)?.start?.slice(0, 4) ?? 'the same year'}. Delete one budget before merging.`,
+    };
+  }
+  let centresMoved = 0;
+  for (const centre of company.costCentres ?? []) {
+    if (centre.categoryId !== source.id) continue;
+    centre.categoryId = target.id;
+    centresMoved += 1;
+  }
+  for (const budget of sourceBudgets) budget.targetId = target.id;
+  company.costCategories = (company.costCategories ?? []).filter((item) => item.id !== source.id);
+  return { ok: true, category: target, source, centresMoved, budgetsMoved: sourceBudgets.length };
+}
+
+export function mergeCostCentre(company, sourceId, targetId) {
+  const source = (company.costCentres ?? []).find((item) => item.id === sourceId);
+  const target = (company.costCentres ?? []).find((item) => item.id === targetId);
+  if (!source) return { ok: false, error: 'Cost centre to merge was not found.' };
+  if (!target) return { ok: false, error: 'Choose another cost centre to merge into.' };
+  if (source.id === target.id) return { ok: false, error: 'Choose a different cost centre to merge into.' };
+  const sourceBudgets = (company.budgets ?? []).filter(
+    (budget) => budget.targetType === 'costCentre' && budget.targetId === source.id,
+  );
+  const targetYears = new Set(
+    (company.budgets ?? [])
+      .filter((budget) => budget.targetType === 'costCentre' && budget.targetId === target.id)
+      .map((budget) => budget.yearId),
+  );
+  const conflict = sourceBudgets.find((budget) => targetYears.has(budget.yearId));
+  if (conflict) {
+    return {
+      ok: false,
+      error: `Both centres have a budget for ${(company.years ?? []).find((year) => year.id === conflict.yearId)?.start?.slice(0, 4) ?? 'the same year'}. Delete one budget before merging.`,
+    };
+  }
+  let linesMoved = 0;
+  for (const voucher of company.vouchers ?? []) {
+    for (const line of voucher.lines ?? []) {
+      if (line.costCentreId !== source.id) continue;
+      line.costCentreId = target.id;
+      linesMoved += 1;
+    }
+  }
+  for (const budget of sourceBudgets) budget.targetId = target.id;
+  company.costCentres = (company.costCentres ?? []).filter((item) => item.id !== source.id);
+  return { ok: true, centre: target, source, linesMoved, budgetsMoved: sourceBudgets.length };
+}
+
 export function deleteCostCentre(company, centreId) {
   const centre = (company.costCentres ?? []).find((item) => item.id === centreId);
   if (!centre) return { ok: false, error: 'Cost centre not found.' };

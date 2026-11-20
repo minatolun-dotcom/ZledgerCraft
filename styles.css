@@ -119,11 +119,21 @@ kbd {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   font-weight: 800;
   letter-spacing: 0.16em;
   font-size: 0.95rem;
   color: var(--accent);
   white-space: nowrap;
+}
+
+.brand-mark {
+  width: 1.55rem;
+  height: 1.55rem;
+  flex: none;
+  color: #ffffff;
 }
 
 .brand span {
@@ -2141,6 +2151,10 @@ kbd {
 
 .auth-card .brand span {
   color: var(--accent);
+}
+
+.auth-card .brand-mark {
+  color: #0f5c3f;
 }
 
 .auth-card h1 {

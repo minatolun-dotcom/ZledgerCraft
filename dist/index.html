@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="ZledgerCraft - local-only double-entry accounting with a keyboard-first workflow." />
     <title>ZledgerCraft</title>
+    <link rel="icon" href="/brand/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+    <link rel="manifest" href="/brand/site.webmanifest" />
+    <meta name="theme-color" content="#0F5C3F" />
     <style>
 :root {
   --ink: #101b2d;
@@ -127,11 +132,21 @@ kbd {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   font-weight: 800;
   letter-spacing: 0.16em;
   font-size: 0.95rem;
   color: var(--accent);
   white-space: nowrap;
+}
+
+.brand-mark {
+  width: 1.55rem;
+  height: 1.55rem;
+  flex: none;
+  color: #ffffff;
 }
 
 .brand span {
@@ -2149,6 +2164,10 @@ kbd {
 
 .auth-card .brand span {
   color: var(--accent);
+}
+
+.auth-card .brand-mark {
+  color: #0f5c3f;
 }
 
 .auth-card h1 {
@@ -20202,7 +20221,7 @@ function renderLogin(message = '', messageClass = 'form-error') {
   document.title = 'Sign in · ZledgerCraft';
   root.innerHTML = `<main id="main-content" class="auth-screen">
     <section class="auth-card">
-      <div class="brand">Zledger<span>CRAFT</span></div>
+      <div class="brand"><svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M 82 40 H 174 A 20 20 0 0 1 194 60 V 196 A 20 20 0 0 1 174 216 H 82 A 20 20 0 0 1 62 196 V 60 A 20 20 0 0 1 82 40 Z M 76 67 H 180 V 93 L 110 163 H 180 V 189 H 76 V 163 L 146 93 H 76 Z"/></svg>Zledger<span>CRAFT</span></div>
       <h1>Sign in to the server</h1>
       <p class="muted">${authInfo?.neonAuth ? 'Use your Neon Auth email and password. Books are stored on the server.' : 'Use the account created by the server owner. This is a LAN workspace; books are not stored in this browser.'}</p>
       <form id="login-form" class="form-grid" novalidate>
@@ -20245,7 +20264,7 @@ function renderPasswordReset(token, message = '') {
   document.title = 'Reset password · ZledgerCraft';
   root.innerHTML = `<main id="main-content" class="auth-screen">
     <section class="auth-card">
-      <div class="brand">Zledger<span>CRAFT</span></div>
+      <div class="brand"><svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M 82 40 H 174 A 20 20 0 0 1 194 60 V 196 A 20 20 0 0 1 174 216 H 82 A 20 20 0 0 1 62 196 V 60 A 20 20 0 0 1 82 40 Z M 76 67 H 180 V 93 L 110 163 H 180 V 189 H 76 V 163 L 146 93 H 76 Z"/></svg>Zledger<span>CRAFT</span></div>
       <h1>Reset your password</h1>
       <p class="muted">Choose a new password. The link can be used once and expires automatically.</p>
       <form id="reset-password-form" class="form-grid" data-token="${esc(token)}" novalidate>
@@ -21385,7 +21404,7 @@ function updateVoucherTotals() {
 function headerHtml(active) {
   return `
     <header class="topbar">
-      <div class="brand">Zledger<span>CRAFT</span></div>
+      <div class="brand"><svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M 82 40 H 174 A 20 20 0 0 1 194 60 V 196 A 20 20 0 0 1 174 216 H 82 A 20 20 0 0 1 62 196 V 60 A 20 20 0 0 1 82 40 Z M 76 67 H 180 V 93 L 110 163 H 180 V 189 H 76 V 163 L 146 93 H 76 Z"/></svg>Zledger<span>CRAFT</span></div>
       <div class="company-line">
         ${active
           ? `<span class="label">Company</span> <strong>${esc(active.name)}</strong>

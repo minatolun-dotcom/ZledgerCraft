@@ -605,7 +605,7 @@ export function renderLogin(message = '', messageClass = 'form-error') {
   document.title = 'Sign in · ZledgerCraft';
   root.innerHTML = `<main id="main-content" class="auth-screen">
     <section class="auth-card">
-      <div class="brand">Zledger<span>CRAFT</span></div>
+      <div class="brand"><svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M 82 40 H 174 A 20 20 0 0 1 194 60 V 196 A 20 20 0 0 1 174 216 H 82 A 20 20 0 0 1 62 196 V 60 A 20 20 0 0 1 82 40 Z M 76 67 H 180 V 93 L 110 163 H 180 V 189 H 76 V 163 L 146 93 H 76 Z"/></svg>Zledger<span>CRAFT</span></div>
       <h1>Sign in to the server</h1>
       <p class="muted">${authInfo?.neonAuth ? 'Use your Neon Auth email and password. Books are stored on the server.' : 'Use the account created by the server owner. This is a LAN workspace; books are not stored in this browser.'}</p>
       <form id="login-form" class="form-grid" novalidate>
@@ -648,7 +648,7 @@ export function renderPasswordReset(token, message = '') {
   document.title = 'Reset password · ZledgerCraft';
   root.innerHTML = `<main id="main-content" class="auth-screen">
     <section class="auth-card">
-      <div class="brand">Zledger<span>CRAFT</span></div>
+      <div class="brand"><svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M 82 40 H 174 A 20 20 0 0 1 194 60 V 196 A 20 20 0 0 1 174 216 H 82 A 20 20 0 0 1 62 196 V 60 A 20 20 0 0 1 82 40 Z M 76 67 H 180 V 93 L 110 163 H 180 V 189 H 76 V 163 L 146 93 H 76 Z"/></svg>Zledger<span>CRAFT</span></div>
       <h1>Reset your password</h1>
       <p class="muted">Choose a new password. The link can be used once and expires automatically.</p>
       <form id="reset-password-form" class="form-grid" data-token="${esc(token)}" novalidate>
@@ -1788,7 +1788,7 @@ export function updateVoucherTotals() {
 export function headerHtml(active) {
   return `
     <header class="topbar">
-      <div class="brand">Zledger<span>CRAFT</span></div>
+      <div class="brand"><svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M 82 40 H 174 A 20 20 0 0 1 194 60 V 196 A 20 20 0 0 1 174 216 H 82 A 20 20 0 0 1 62 196 V 60 A 20 20 0 0 1 82 40 Z M 76 67 H 180 V 93 L 110 163 H 180 V 189 H 76 V 163 L 146 93 H 76 Z"/></svg>Zledger<span>CRAFT</span></div>
       <div class="company-line">
         ${active
           ? `<span class="label">Company</span> <strong>${esc(active.name)}</strong>

@@ -1,6 +1,6 @@
 // ZledgerCraft - single-file build. Inlines CSS and ES modules into dist/ZledgerCraft.html
 // so the app can be opened straight from disk.
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -58,6 +58,7 @@ if (output === html || !output.includes('<style>') || !output.includes('(functio
 }
 
 await mkdir(join(root, 'dist'), { recursive: true });
+await cp(join(root, 'brand'), join(root, 'dist', 'brand'), { recursive: true });
 const target = join(root, 'dist', 'ZledgerCraft.html');
 await writeFile(target, output, 'utf8');
 // Cloudflare Pages expects an index document at the root of its output

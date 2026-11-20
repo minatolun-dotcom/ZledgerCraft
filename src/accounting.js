@@ -848,10 +848,20 @@ export function costCentreSummary(company, filters = {}) {
     ]),
   );
 
+  const unallocated = new Map();
+  const unallocatedVouchers = new Set();
   for (const voucher of vouchersSorted(company)) {
     if (voucher.date < from || voucher.date > to) continue;
     for (const line of voucher.lines ?? []) {
-      if (!line.costCentreId) continue;
+      if (!line.costCentreId) {
+        const key = line.ledgerId;
+        const entry = unallocated.get(key) ?? { ledgerId: key, debit: 0, credit: 0 };
+        if (line.side === 'Cr') entry.credit = round2(entry.credit + round2(line.amount));
+        else entry.debit = round2(entry.debit + round2(line.amount));
+        unallocated.set(key, entry);
+        unallocatedVouchers.add(voucher.id);
+        continue;
+      }
       const centre = byCentre.get(line.costCentreId);
       if (!centre) continue;
       const category = byCategory.get(centre.categoryId);
@@ -895,11 +905,25 @@ export function costCentreSummary(company, filters = {}) {
     }))
     .sort((a, b) => a.category.localeCompare(b.category));
 
+  const unallocatedRows = [...unallocated.values()]
+    .map((row) => ({
+      ledgerId: row.ledgerId,
+      ledger: company.ledgers.find((ledger) => ledger.id === row.ledgerId)?.name ?? 'Unknown ledger',
+      debit: row.debit,
+      credit: row.credit,
+      net: round2(row.debit - row.credit),
+    }))
+    .sort((a, b) => Math.abs(b.net) - Math.abs(a.net) || a.ledger.localeCompare(b.ledger));
   return {
     from,
     to,
     centreRows,
     categoryRows,
+    unallocatedRows,
+    unallocatedDebit: round2(unallocatedRows.reduce((sum, row) => sum + row.debit, 0)),
+    unallocatedCredit: round2(unallocatedRows.reduce((sum, row) => sum + row.credit, 0)),
+    unallocatedNet: round2(unallocatedRows.reduce((sum, row) => sum + row.net, 0)),
+    unallocatedVoucherCount: unallocatedVouchers.size,
     totalDebit: round2(centreRows.reduce((sum, row) => sum + row.debit, 0)),
     totalCredit: round2(centreRows.reduce((sum, row) => sum + row.credit, 0)),
     totalNet: round2(centreRows.reduce((sum, row) => sum + row.net, 0)),

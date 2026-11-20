@@ -319,7 +319,8 @@ disabled.
   centres used by vouchers are protected from deletion.
 - Annual budgets per ledger, group or cost centre for a financial year, with
   add, edit, delete and "duplicate next year" masters. One budget per target per
-  year is enforced; cost-centre budgets measure spend tagged to that centre.
+  year is enforced; editing an amount or name keeps the previous amount in a
+  short history, and cost-centre budgets measure spend tagged to that centre.
 - Foreign currencies with a code, name, symbol and dated INR exchange rates that
   can be added, edited, redated or deleted from the rate history.
   INR remains the base currency; voucher amounts can be entered in a foreign
@@ -338,7 +339,9 @@ disabled.
   joining/exit dates and optional bank name, account number and IFSC). Enabling payroll creates or reuses the Salaries and
   Salary Payable ledgers and seeds Basic Salary, HRA, conveyance, PF, ESI and
   professional tax pay heads; each employee stores a fixed monthly amount per
-  pay head, prorated by calendar days in the month the employee joins or exits.
+  pay head or, for a percentage head, a percent of fixed Basic. Amounts,
+  including percentage heads, are prorated by calendar days in the month the
+  employee joins or exits.
   Opening casual, sick and earned leave balances are editable per employee,
   and a leave register records non-overlapping dated leave, showing opening,
   used and remaining days. Leave does not change payroll by itself; each run
@@ -500,8 +503,8 @@ disabled.
   payee, Indian-numbering amount in words, figures and A/c Payee crossing; DD
   payments get a DD advice and receipt instruments a deposit slip.
 - Cost centre summary by category and centre, with debit/credit/net, voucher
-  counts, period filter and click-through to a cost-centre break-up of voucher
-  lines.
+  counts, period filter, an unallocated-line reconciliation and click-through
+  to a cost-centre break-up of voucher lines.
 - Budget vs Actual by ledger or group for a financial year and as-on date:
   budget, actual, variance, used percentage, over-budget status and Print/CSV.
   Actuals use period voucher movement and exclude opening balances.
@@ -742,8 +745,8 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit and paid-days proration, casual/sick/earned leave balances and a leave register, bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV; no automatic leave-to-paid-days link, overtime, arrears, formula or percentage pay heads, employer PF/ESI contributions, state PT slabs, ECR/returns, Form 24Q/16 or bank payment workflow |
 | Bank reconciliation and statement import | Covered — CSV, OFX, QIF and MT940 statement import, optional opening/closing balance validation, auto/manual matching, adjustment posting and book balance; no Excel or live bank feeds |
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque/DD advice and receipt deposit-slip previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no magnetic-ink cheque stationery presets or bank-issued advice formats |
-| Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary and break-up; no merging categories, split allocations or unallocated reconciliation |
-| Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance and over-budget status; no phased, revised, approval or cost-centre budgets |
+| Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary, break-up and an unallocated-line reconciliation; no merging categories or split allocations |
+| Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance, over-budget status and a short amount history; no phased revision workflow, approval or cost-centre budgets |
 | Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting, a postable unrealised forex revaluation and postable simple overdue interest; no realised gain/loss posting, foreign inventory/bill allocations, interest compounding or reminders that post charges |
 | Multiple financial years per company, year-end closing and carry-forward | Covered — year selector, close/reopen and automatic next year; no closing journal is written because balances are cumulative |
 | Bill-wise entry and allocation | Covered — bill refs, due dates, explicit/FIFO settlements, ageing, bill-wise register and party statement with bill detail; no bill-wise opening allocation or bill interest |

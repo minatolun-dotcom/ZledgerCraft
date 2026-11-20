@@ -5,6 +5,7 @@ import {
   ledgerOptions,
   payrollBankTransferRows,
   employeeLeaveBalance,
+  employeePayComponents,
   payrollLedgers,
   parseAmount,
   payrollMonthEnd,
@@ -78,15 +79,8 @@ export function defaultPayrollMonth(active) {
 }
 
 export function employeeMonthlyTotals(employee, headMap) {
-  let gross = 0;
-  let deductions = 0;
-  for (const entry of employee.pay ?? []) {
-    const head = headMap.get(entry.payHeadId);
-    if (!head) continue;
-    if (head.kind === 'Earning') gross += entry.amount;
-    else deductions += entry.amount;
-  }
-  return { gross: round2(gross), deductions: round2(deductions), net: round2(gross - deductions) };
+  const totals = employeePayComponents(employee, headMap);
+  return { gross: totals.gross, deductions: totals.deductionTotal, net: totals.net };
 }
 
 export function payrollScreen() {
@@ -175,7 +169,7 @@ export function payrollScreen() {
       return `<tr>
         <td><strong>${esc(head.name)}</strong></td>
         <td><span class="badge">${esc(head.kind)}</span></td>
-        <td class="muted small">${head.statutory ? esc(head.statutory) : '—'}</td>
+        <td class="muted small">${head.statutory ? esc(head.statutory) : head.percentOfBasic ? `${head.percentOfBasic}% of Basic` : 'Fixed'}</td>
         <td>${ledger ? esc(ledger.name) : '<span class="badge overdue">choose a ledger</span>'}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
@@ -205,13 +199,14 @@ export function payrollScreen() {
         <option value="PT">PT</option>
         <option value="TDS">TDS</option>
       </select>
+      <input name="percentOfBasic" inputmode="decimal" placeholder="% of Basic (optional)" aria-label="Percent of Basic">
       <select name="ledgerId" aria-label="Pay head ledger" required>${ledgerChoice}</select>
       <button class="btn small" type="submit">Add pay head</button>
       <p id="payroll-head-error" class="form-error" role="alert"></p>
     </form>
     ${heads.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
-          <thead><tr><th>Pay head</th><th>Kind</th><th>Statutory</th><th>Ledger</th><th class="num">Employees</th><th></th></tr></thead>
+          <thead><tr><th>Pay head</th><th>Kind</th><th>Basis</th><th>Ledger</th><th class="num">Employees</th><th></th></tr></thead>
           <tbody>${headRows}</tbody>
         </table></div>`
       : '<p class="muted">No pay heads yet.</p>'}`,
@@ -222,8 +217,8 @@ export function payrollScreen() {
     .map((head) => {
       const entry = editing?.pay?.find((item) => item.payHeadId === head.id);
       return `<label class="field">
-        <span>${esc(head.name)} <span class="muted small">${esc(head.kind)}</span></span>
-        <input name="pay_${esc(head.id)}" inputmode="decimal" value="${entry ? esc(entry.amount) : ''}" placeholder="0.00">
+        <span>${esc(head.name)} <span class="muted small">${esc(head.kind)}${head.percentOfBasic ? ` · ${head.percentOfBasic}% of Basic` : ''}</span></span>
+        <input name="pay_${esc(head.id)}" inputmode="decimal" value="${entry ? esc(entry.amount) : ''}" placeholder="${head.percentOfBasic ? 'Percent' : '0.00'}">
       </label>`;
     })
     .join('');
@@ -247,7 +242,7 @@ export function payrollScreen() {
           <span>Include in payroll runs</span>
         </label>
         <div class="pay-heads-block">
-          <p class="muted small">Monthly amounts. Leave a pay head blank when it does not apply.</p>
+          <p class="muted small">Monthly amounts. For a percentage pay head, enter the percent of Basic; leave it blank when it does not apply.</p>
           <div class="pay-grid">${payFields}</div>
         </div>
         <div class="field form-actions">

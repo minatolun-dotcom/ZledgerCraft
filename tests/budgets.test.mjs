@@ -135,6 +135,10 @@ test('budgets can be edited and duplicated into the next financial year', () => 
   assert.equal(updated.budget.amount, 1200);
   assert.equal(updated.budget.targetId, rent.id);
   assert.ok(updated.budget.updatedAt);
+  assert.equal(updated.budget.history.length, 1);
+  assert.equal(updated.budget.history[0].amount, 1000);
+  assert.equal(updated.budget.history[0].name, 'Rent plan');
+  assert.ok(updated.budget.history[0].changedAt);
 
   const clash = updateBudget(company, first.id, { name: 'salary plan' });
   assert.equal(clash.ok, false);

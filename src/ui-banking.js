@@ -44,6 +44,16 @@ export function costCentresScreen() {
       </tr>`,
     )
     .join('');
+  const unallocatedRows = report.unallocatedRows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.ledger)}</strong></td>
+        <td class="num">${money(row.debit)}</td>
+        <td class="num">${money(row.credit)}</td>
+        <td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td>
+      </tr>`,
+    )
+    .join('');
   const categoryRows = report.categoryRows
     .map(
       (row) => `<tr>
@@ -64,6 +74,7 @@ export function costCentresScreen() {
       <div class="ratio-card"><span class="ratio-label">Debit allocations</span><strong>${money(report.totalDebit)}</strong><span class="muted small">${report.voucherCount} voucher${report.voucherCount === 1 ? '' : 's'}</span></div>
       <div class="ratio-card"><span class="ratio-label">Credit allocations</span><strong>${money(report.totalCredit)}</strong><span class="muted small">${report.centreRows.length} centres</span></div>
       <div class="ratio-card"><span class="ratio-label">Net allocation</span><strong>${money(report.totalNet)}</strong><span class="muted small">Debit less credit</span></div>
+      <div class="ratio-card"><span class="ratio-label">Unallocated net</span><strong class="${Math.abs(report.unallocatedNet) > 0.005 ? 'neg' : ''}">${money(report.unallocatedNet)}</strong><span class="muted small">${report.unallocatedVoucherCount} voucher${report.unallocatedVoucherCount === 1 ? '' : 's'} · ${money(report.unallocatedDebit)} Dr / ${money(report.unallocatedCredit)} Cr</span></div>
     </div>
     <h3 class="column-title">By category</h3>
     <div class="table-scroll" tabindex="0"><table class="data-table compact">
@@ -76,8 +87,15 @@ export function costCentresScreen() {
           <thead><tr><th>Cost centre</th><th>Category</th><th class="num">Vouchers</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
           <tbody>${centreRows}</tbody>
         </table></div>`
-      : '<p class="muted">No cost centres yet. Create them in Masters, then choose one on a voucher line.</p>'}`,
-    'Only voucher lines with a cost centre are included. Click a centre to see its vouchers.',
+      : '<p class="muted">No cost centres yet. Create them in Masters, then choose one on a voucher line.</p>'}
+    <h3 class="column-title">Unallocated lines</h3>
+    ${report.unallocatedRows.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Ledger without a cost centre</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
+          <tbody>${unallocatedRows}</tbody>
+        </table></div>`
+      : '<p class="muted">Every voucher line in this period has a cost centre.</p>'}`,
+    'Allocated columns include only lines with a cost centre. The unallocated table reconciles the remaining lines in the same period. Click a centre to see its vouchers.',
   );
 }
 

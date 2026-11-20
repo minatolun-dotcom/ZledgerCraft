@@ -4222,10 +4222,12 @@ function normalizePayroll(company) {
       const id = String(head.id || uid('pay')).slice(0, 80);
       if (seenHeads.has(name.toUpperCase())) return null;
       seenHeads.add(name.toUpperCase());
+      const percent = parseAmount(head.percentOfBasic);
       return {
         id,
         name,
         kind,
+        ...(percent !== null && percent > 0 && percent <= 100 ? { percentOfBasic: round2(percent) } : {}),
         ...(head.ledgerId && (company.ledgers ?? []).some((ledger) => ledger.id === head.ledgerId)
           ? { ledgerId: String(head.ledgerId).slice(0, 80) }
           : {}),
@@ -4439,6 +4441,34 @@ function savePayrollSettings(company, input = {}) {
   return { ok: true, payroll: company.payroll, created };
 }
 
+function employeePayComponents(employee, headMap, factor = 1) {
+  const basic = round2(
+    (employee.pay ?? [])
+      .filter((entry) => {
+        const head = headMap.get(entry.payHeadId);
+        return head?.kind === 'Earning' && !head.percentOfBasic && /basic/i.test(head.name);
+      })
+      .reduce((sum, entry) => sum + round2(entry.amount) * factor, 0),
+  );
+  const earnings = [];
+  const deductions = [];
+  for (const entry of employee.pay ?? []) {
+    const head = headMap.get(entry.payHeadId);
+    if (!head) continue;
+    const amount = head.percentOfBasic
+      ? round2((basic * head.percentOfBasic) / 100)
+      : round2(round2(entry.amount) * factor);
+    if (amount <= 0) continue;
+    const line = { payHeadId: head.id, name: head.name, amount };
+    if (head.statutory) line.statutory = head.statutory;
+    if (head.kind === 'Earning') earnings.push(line);
+    else deductions.push(line);
+  }
+  const gross = round2(earnings.reduce((sum, line) => sum + line.amount, 0));
+  const deductionTotal = round2(deductions.reduce((sum, line) => sum + line.amount, 0));
+  return { basic, earnings, deductions, gross, deductionTotal, net: round2(gross - deductionTotal) };
+}
+
 function payrollStatutoryRows(company, month = '') {
   const payroll = company.payroll ?? {};
   const settings = normalizeStatutorySettings(payroll.statutory);
@@ -4451,15 +4481,9 @@ function payrollStatutoryRows(company, month = '') {
   return (payroll.employees ?? [])
     .filter((employee) => employee.active)
     .map((employee) => {
-      const earnings = (employee.pay ?? [])
-        .map((entry) => ({ head: heads.get(entry.payHeadId), amount: round2(entry.amount) }))
-        .filter((entry) => entry.head?.kind === 'Earning');
-      const gross = round2(earnings.reduce((sum, entry) => sum + entry.amount, 0));
-      const basic = round2(
-        earnings
-          .filter((entry) => /basic/i.test(entry.head.name))
-          .reduce((sum, entry) => sum + entry.amount, 0),
-      );
+      const components = employeePayComponents(employee, heads);
+      const gross = components.gross;
+      const basic = components.basic;
       const pfWage = Math.min(basic, settings.pfCeiling);
       const pf = round2((pfWage * settings.pfRate) / 100);
       const esi = gross > 0 && gross <= settings.esiCeiling ? round2((gross * settings.esiRate) / 100) : 0;
@@ -4520,7 +4544,15 @@ function addPayHead(company, input = {}) {
   const ledger = (company.ledgers ?? []).find((entry) => entry.id === input.ledgerId);
   if (!ledger) return { ok: false, error: 'Choose the ledger this pay head posts to.' };
   const statutory = String(input.statutory ?? '').trim().slice(0, 12).toUpperCase();
+  const percent = parseAmount(input.percentOfBasic);
+  if (percent !== null && (percent <= 0 || percent > 100)) {
+    return { ok: false, error: 'Percent of Basic must be more than 0 and at most 100.' };
+  }
+  if (percent !== null && statutory) {
+    return { ok: false, error: 'A percentage pay head cannot also carry a statutory tag.' };
+  }
   const head = { id: uid('pay'), name, kind, ledgerId: ledger.id };
+  if (percent !== null) head.percentOfBasic = round2(percent);
   if (statutory) head.statutory = statutory;
   company.payroll.payHeads.push(head);
   return { ok: true, payHead: head };
@@ -4559,6 +4591,15 @@ function employeePayEntries(company, input) {
   }
   const earnings = pay.filter((entry) => heads.get(entry.payHeadId).kind === 'Earning');
   if (!earnings.length) return { error: 'Give the employee at least one earning pay head amount.' };
+  if (earnings.every((entry) => heads.get(entry.payHeadId).percentOfBasic)) {
+    return { error: 'Add at least one fixed earning, such as Basic Salary, before using percentage pay heads.' };
+  }
+  for (const entry of pay) {
+    const head = heads.get(entry.payHeadId);
+    if (head.percentOfBasic && entry.amount > 100) {
+      return { error: `${head.name} is a percentage of Basic and cannot exceed 100%.` };
+    }
+  }
   return { pay };
 }
 
@@ -4817,25 +4858,11 @@ function runPayroll(company, input = {}) {
     if (paidDays === 0) continue;
     const prorated = paidDays < monthDays;
     const factor = prorated ? paidDays / monthDays : 1;
-    const earnings = [];
-    const deductions = [];
-    for (const entry of employee.pay ?? []) {
-      const head = heads.get(entry.payHeadId);
-      if (!head) continue;
-      const line = {
-        payHeadId: head.id,
-        name: head.name,
-        amount: round2(round2(entry.amount) * factor),
-      };
-      if (head.statutory) line.statutory = head.statutory;
-      if (head.kind === 'Earning') earnings.push(line);
-      else deductions.push(line);
-    }
+    const components = employeePayComponents(employee, heads, factor);
+    const { earnings, deductions, gross, deductionTotal } = components;
     if (!earnings.length) {
       return { ok: false, error: `${employee.name} has no earning amounts. Update the pay structure or deactivate the employee.` };
     }
-    const gross = round2(earnings.reduce((sum, line) => sum + line.amount, 0));
-    const deductionTotal = round2(deductions.reduce((sum, line) => sum + line.amount, 0));
     if (deductionTotal > gross + 0.005) {
       return { ok: false, error: `${employee.name}'s deductions exceed earnings.` };
     }
@@ -5035,6 +5062,18 @@ function normalizeBudgets(company) {
         yearId: year.id,
         amount,
         createdAt: budget.createdAt ? String(budget.createdAt) : new Date().toISOString(),
+        ...(Array.isArray(budget.history) && budget.history.length
+          ? {
+              history: budget.history
+                .filter((entry) => entry && parseAmount(entry.amount) !== null && isValidIsoDate(String(entry.changedAt ?? '').slice(0, 10)))
+                .map((entry) => ({
+                  amount: parseAmount(entry.amount),
+                  changedAt: String(entry.changedAt),
+                  ...(entry.name ? { name: String(entry.name).slice(0, 80) } : {}),
+                }))
+                .slice(-25),
+            }
+          : {}),
       };
     })
     .filter((budget) => {
@@ -5112,6 +5151,13 @@ function updateBudget(company, budgetId, input = {}) {
     )
   ) {
     return { ok: false, error: `A budget already exists for "${target.name}" in this financial year.` };
+  }
+  const changed = budget.amount !== amount || budget.name !== name;
+  if (changed) {
+    budget.history = [
+      ...(budget.history ?? []),
+      { amount: budget.amount, changedAt: new Date().toISOString(), name: budget.name },
+    ].slice(-25);
   }
   budget.name = name;
   budget.targetType = targetType;
@@ -10095,10 +10141,20 @@ function costCentreSummary(company, filters = {}) {
     ]),
   );
 
+  const unallocated = new Map();
+  const unallocatedVouchers = new Set();
   for (const voucher of vouchersSorted(company)) {
     if (voucher.date < from || voucher.date > to) continue;
     for (const line of voucher.lines ?? []) {
-      if (!line.costCentreId) continue;
+      if (!line.costCentreId) {
+        const key = line.ledgerId;
+        const entry = unallocated.get(key) ?? { ledgerId: key, debit: 0, credit: 0 };
+        if (line.side === 'Cr') entry.credit = round2(entry.credit + round2(line.amount));
+        else entry.debit = round2(entry.debit + round2(line.amount));
+        unallocated.set(key, entry);
+        unallocatedVouchers.add(voucher.id);
+        continue;
+      }
       const centre = byCentre.get(line.costCentreId);
       if (!centre) continue;
       const category = byCategory.get(centre.categoryId);
@@ -10142,11 +10198,25 @@ function costCentreSummary(company, filters = {}) {
     }))
     .sort((a, b) => a.category.localeCompare(b.category));
 
+  const unallocatedRows = [...unallocated.values()]
+    .map((row) => ({
+      ledgerId: row.ledgerId,
+      ledger: company.ledgers.find((ledger) => ledger.id === row.ledgerId)?.name ?? 'Unknown ledger',
+      debit: row.debit,
+      credit: row.credit,
+      net: round2(row.debit - row.credit),
+    }))
+    .sort((a, b) => Math.abs(b.net) - Math.abs(a.net) || a.ledger.localeCompare(b.ledger));
   return {
     from,
     to,
     centreRows,
     categoryRows,
+    unallocatedRows,
+    unallocatedDebit: round2(unallocatedRows.reduce((sum, row) => sum + row.debit, 0)),
+    unallocatedCredit: round2(unallocatedRows.reduce((sum, row) => sum + row.credit, 0)),
+    unallocatedNet: round2(unallocatedRows.reduce((sum, row) => sum + row.net, 0)),
+    unallocatedVoucherCount: unallocatedVouchers.size,
     totalDebit: round2(centreRows.reduce((sum, row) => sum + row.debit, 0)),
     totalCredit: round2(centreRows.reduce((sum, row) => sum + row.credit, 0)),
     totalNet: round2(centreRows.reduce((sum, row) => sum + row.net, 0)),
@@ -15325,6 +15395,14 @@ function budgetMastersPanel(active) {
             ? (active.costCentres ?? []).find((centre) => centre.id === budget.targetId)
             : active.ledgers.find((ledger) => ledger.id === budget.targetId);
       const year = (active.years ?? []).find((item) => item.id === budget.yearId);
+      const history = budget.history ?? [];
+      const historyRows = history.length
+        ? `<tr><td colspan="5"><details><summary class="muted small">${history.length} earlier amount${history.length === 1 ? '' : 's'}</summary><div class="muted small">${history
+            .slice()
+            .reverse()
+            .map((entry) => `${money(entry.amount)} · ${dateLabel(String(entry.changedAt).slice(0, 10))}`)
+            .join('<br>')}</div></details></td></tr>`
+        : '';
       return `<tr>
         <td><strong>${esc(budget.name)}</strong></td>
         <td>${esc(target?.name ?? 'Missing target')}</td>
@@ -15335,7 +15413,7 @@ function budgetMastersPanel(active) {
           <button class="btn small ghost" type="button" data-action="duplicate-budget" data-id="${esc(budget.id)}">Duplicate next year</button>
           <button class="btn small danger" type="button" data-action="delete-budget" data-id="${esc(budget.id)}">Delete</button>
         </td>
-      </tr>`;
+      </tr>${historyRows}`;
     })
     .join('');
 
@@ -20407,15 +20485,8 @@ function defaultPayrollMonth(active) {
 }
 
 function employeeMonthlyTotals(employee, headMap) {
-  let gross = 0;
-  let deductions = 0;
-  for (const entry of employee.pay ?? []) {
-    const head = headMap.get(entry.payHeadId);
-    if (!head) continue;
-    if (head.kind === 'Earning') gross += entry.amount;
-    else deductions += entry.amount;
-  }
-  return { gross: round2(gross), deductions: round2(deductions), net: round2(gross - deductions) };
+  const totals = employeePayComponents(employee, headMap);
+  return { gross: totals.gross, deductions: totals.deductionTotal, net: totals.net };
 }
 
 function payrollScreen() {
@@ -20504,7 +20575,7 @@ function payrollScreen() {
       return `<tr>
         <td><strong>${esc(head.name)}</strong></td>
         <td><span class="badge">${esc(head.kind)}</span></td>
-        <td class="muted small">${head.statutory ? esc(head.statutory) : '—'}</td>
+        <td class="muted small">${head.statutory ? esc(head.statutory) : head.percentOfBasic ? `${head.percentOfBasic}% of Basic` : 'Fixed'}</td>
         <td>${ledger ? esc(ledger.name) : '<span class="badge overdue">choose a ledger</span>'}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
@@ -20534,13 +20605,14 @@ function payrollScreen() {
         <option value="PT">PT</option>
         <option value="TDS">TDS</option>
       </select>
+      <input name="percentOfBasic" inputmode="decimal" placeholder="% of Basic (optional)" aria-label="Percent of Basic">
       <select name="ledgerId" aria-label="Pay head ledger" required>${ledgerChoice}</select>
       <button class="btn small" type="submit">Add pay head</button>
       <p id="payroll-head-error" class="form-error" role="alert"></p>
     </form>
     ${heads.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
-          <thead><tr><th>Pay head</th><th>Kind</th><th>Statutory</th><th>Ledger</th><th class="num">Employees</th><th></th></tr></thead>
+          <thead><tr><th>Pay head</th><th>Kind</th><th>Basis</th><th>Ledger</th><th class="num">Employees</th><th></th></tr></thead>
           <tbody>${headRows}</tbody>
         </table></div>`
       : '<p class="muted">No pay heads yet.</p>'}`,
@@ -20551,8 +20623,8 @@ function payrollScreen() {
     .map((head) => {
       const entry = editing?.pay?.find((item) => item.payHeadId === head.id);
       return `<label class="field">
-        <span>${esc(head.name)} <span class="muted small">${esc(head.kind)}</span></span>
-        <input name="pay_${esc(head.id)}" inputmode="decimal" value="${entry ? esc(entry.amount) : ''}" placeholder="0.00">
+        <span>${esc(head.name)} <span class="muted small">${esc(head.kind)}${head.percentOfBasic ? ` · ${head.percentOfBasic}% of Basic` : ''}</span></span>
+        <input name="pay_${esc(head.id)}" inputmode="decimal" value="${entry ? esc(entry.amount) : ''}" placeholder="${head.percentOfBasic ? 'Percent' : '0.00'}">
       </label>`;
     })
     .join('');
@@ -20576,7 +20648,7 @@ function payrollScreen() {
           <span>Include in payroll runs</span>
         </label>
         <div class="pay-heads-block">
-          <p class="muted small">Monthly amounts. Leave a pay head blank when it does not apply.</p>
+          <p class="muted small">Monthly amounts. For a percentage pay head, enter the percent of Basic; leave it blank when it does not apply.</p>
           <div class="pay-grid">${payFields}</div>
         </div>
         <div class="field form-actions">
@@ -20975,6 +21047,16 @@ function costCentresScreen() {
       </tr>`,
     )
     .join('');
+  const unallocatedRows = report.unallocatedRows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.ledger)}</strong></td>
+        <td class="num">${money(row.debit)}</td>
+        <td class="num">${money(row.credit)}</td>
+        <td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td>
+      </tr>`,
+    )
+    .join('');
   const categoryRows = report.categoryRows
     .map(
       (row) => `<tr>
@@ -20995,6 +21077,7 @@ function costCentresScreen() {
       <div class="ratio-card"><span class="ratio-label">Debit allocations</span><strong>${money(report.totalDebit)}</strong><span class="muted small">${report.voucherCount} voucher${report.voucherCount === 1 ? '' : 's'}</span></div>
       <div class="ratio-card"><span class="ratio-label">Credit allocations</span><strong>${money(report.totalCredit)}</strong><span class="muted small">${report.centreRows.length} centres</span></div>
       <div class="ratio-card"><span class="ratio-label">Net allocation</span><strong>${money(report.totalNet)}</strong><span class="muted small">Debit less credit</span></div>
+      <div class="ratio-card"><span class="ratio-label">Unallocated net</span><strong class="${Math.abs(report.unallocatedNet) > 0.005 ? 'neg' : ''}">${money(report.unallocatedNet)}</strong><span class="muted small">${report.unallocatedVoucherCount} voucher${report.unallocatedVoucherCount === 1 ? '' : 's'} · ${money(report.unallocatedDebit)} Dr / ${money(report.unallocatedCredit)} Cr</span></div>
     </div>
     <h3 class="column-title">By category</h3>
     <div class="table-scroll" tabindex="0"><table class="data-table compact">
@@ -21007,8 +21090,15 @@ function costCentresScreen() {
           <thead><tr><th>Cost centre</th><th>Category</th><th class="num">Vouchers</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
           <tbody>${centreRows}</tbody>
         </table></div>`
-      : '<p class="muted">No cost centres yet. Create them in Masters, then choose one on a voucher line.</p>'}`,
-    'Only voucher lines with a cost centre are included. Click a centre to see its vouchers.',
+      : '<p class="muted">No cost centres yet. Create them in Masters, then choose one on a voucher line.</p>'}
+    <h3 class="column-title">Unallocated lines</h3>
+    ${report.unallocatedRows.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Ledger without a cost centre</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
+          <tbody>${unallocatedRows}</tbody>
+        </table></div>`
+      : '<p class="muted">Every voucher line in this period has a cost centre.</p>'}`,
+    'Allocated columns include only lines with a cost centre. The unallocated table reconciles the remaining lines in the same period. Click a centre to see its vouchers.',
   );
 }
 
@@ -24439,6 +24529,7 @@ async function handleSubmit(event) {
       name: data.get('name'),
       kind: data.get('kind'),
       statutory: data.get('statutory'),
+      percentOfBasic: data.get('percentOfBasic'),
       ledgerId: data.get('ledgerId'),
     });
     if (!result.ok) {

@@ -1796,10 +1796,12 @@ export function normalizePayroll(company) {
       const id = String(head.id || uid('pay')).slice(0, 80);
       if (seenHeads.has(name.toUpperCase())) return null;
       seenHeads.add(name.toUpperCase());
+      const percent = parseAmount(head.percentOfBasic);
       return {
         id,
         name,
         kind,
+        ...(percent !== null && percent > 0 && percent <= 100 ? { percentOfBasic: round2(percent) } : {}),
         ...(head.ledgerId && (company.ledgers ?? []).some((ledger) => ledger.id === head.ledgerId)
           ? { ledgerId: String(head.ledgerId).slice(0, 80) }
           : {}),
@@ -2013,6 +2015,34 @@ export function savePayrollSettings(company, input = {}) {
   return { ok: true, payroll: company.payroll, created };
 }
 
+export function employeePayComponents(employee, headMap, factor = 1) {
+  const basic = round2(
+    (employee.pay ?? [])
+      .filter((entry) => {
+        const head = headMap.get(entry.payHeadId);
+        return head?.kind === 'Earning' && !head.percentOfBasic && /basic/i.test(head.name);
+      })
+      .reduce((sum, entry) => sum + round2(entry.amount) * factor, 0),
+  );
+  const earnings = [];
+  const deductions = [];
+  for (const entry of employee.pay ?? []) {
+    const head = headMap.get(entry.payHeadId);
+    if (!head) continue;
+    const amount = head.percentOfBasic
+      ? round2((basic * head.percentOfBasic) / 100)
+      : round2(round2(entry.amount) * factor);
+    if (amount <= 0) continue;
+    const line = { payHeadId: head.id, name: head.name, amount };
+    if (head.statutory) line.statutory = head.statutory;
+    if (head.kind === 'Earning') earnings.push(line);
+    else deductions.push(line);
+  }
+  const gross = round2(earnings.reduce((sum, line) => sum + line.amount, 0));
+  const deductionTotal = round2(deductions.reduce((sum, line) => sum + line.amount, 0));
+  return { basic, earnings, deductions, gross, deductionTotal, net: round2(gross - deductionTotal) };
+}
+
 export function payrollStatutoryRows(company, month = '') {
   const payroll = company.payroll ?? {};
   const settings = normalizeStatutorySettings(payroll.statutory);
@@ -2025,15 +2055,9 @@ export function payrollStatutoryRows(company, month = '') {
   return (payroll.employees ?? [])
     .filter((employee) => employee.active)
     .map((employee) => {
-      const earnings = (employee.pay ?? [])
-        .map((entry) => ({ head: heads.get(entry.payHeadId), amount: round2(entry.amount) }))
-        .filter((entry) => entry.head?.kind === 'Earning');
-      const gross = round2(earnings.reduce((sum, entry) => sum + entry.amount, 0));
-      const basic = round2(
-        earnings
-          .filter((entry) => /basic/i.test(entry.head.name))
-          .reduce((sum, entry) => sum + entry.amount, 0),
-      );
+      const components = employeePayComponents(employee, heads);
+      const gross = components.gross;
+      const basic = components.basic;
       const pfWage = Math.min(basic, settings.pfCeiling);
       const pf = round2((pfWage * settings.pfRate) / 100);
       const esi = gross > 0 && gross <= settings.esiCeiling ? round2((gross * settings.esiRate) / 100) : 0;
@@ -2094,7 +2118,15 @@ export function addPayHead(company, input = {}) {
   const ledger = (company.ledgers ?? []).find((entry) => entry.id === input.ledgerId);
   if (!ledger) return { ok: false, error: 'Choose the ledger this pay head posts to.' };
   const statutory = String(input.statutory ?? '').trim().slice(0, 12).toUpperCase();
+  const percent = parseAmount(input.percentOfBasic);
+  if (percent !== null && (percent <= 0 || percent > 100)) {
+    return { ok: false, error: 'Percent of Basic must be more than 0 and at most 100.' };
+  }
+  if (percent !== null && statutory) {
+    return { ok: false, error: 'A percentage pay head cannot also carry a statutory tag.' };
+  }
   const head = { id: uid('pay'), name, kind, ledgerId: ledger.id };
+  if (percent !== null) head.percentOfBasic = round2(percent);
   if (statutory) head.statutory = statutory;
   company.payroll.payHeads.push(head);
   return { ok: true, payHead: head };
@@ -2133,6 +2165,15 @@ function employeePayEntries(company, input) {
   }
   const earnings = pay.filter((entry) => heads.get(entry.payHeadId).kind === 'Earning');
   if (!earnings.length) return { error: 'Give the employee at least one earning pay head amount.' };
+  if (earnings.every((entry) => heads.get(entry.payHeadId).percentOfBasic)) {
+    return { error: 'Add at least one fixed earning, such as Basic Salary, before using percentage pay heads.' };
+  }
+  for (const entry of pay) {
+    const head = heads.get(entry.payHeadId);
+    if (head.percentOfBasic && entry.amount > 100) {
+      return { error: `${head.name} is a percentage of Basic and cannot exceed 100%.` };
+    }
+  }
   return { pay };
 }
 
@@ -2391,25 +2432,11 @@ export function runPayroll(company, input = {}) {
     if (paidDays === 0) continue;
     const prorated = paidDays < monthDays;
     const factor = prorated ? paidDays / monthDays : 1;
-    const earnings = [];
-    const deductions = [];
-    for (const entry of employee.pay ?? []) {
-      const head = heads.get(entry.payHeadId);
-      if (!head) continue;
-      const line = {
-        payHeadId: head.id,
-        name: head.name,
-        amount: round2(round2(entry.amount) * factor),
-      };
-      if (head.statutory) line.statutory = head.statutory;
-      if (head.kind === 'Earning') earnings.push(line);
-      else deductions.push(line);
-    }
+    const components = employeePayComponents(employee, heads, factor);
+    const { earnings, deductions, gross, deductionTotal } = components;
     if (!earnings.length) {
       return { ok: false, error: `${employee.name} has no earning amounts. Update the pay structure or deactivate the employee.` };
     }
-    const gross = round2(earnings.reduce((sum, line) => sum + line.amount, 0));
-    const deductionTotal = round2(deductions.reduce((sum, line) => sum + line.amount, 0));
     if (deductionTotal > gross + 0.005) {
       return { ok: false, error: `${employee.name}'s deductions exceed earnings.` };
     }
@@ -2609,6 +2636,18 @@ export function normalizeBudgets(company) {
         yearId: year.id,
         amount,
         createdAt: budget.createdAt ? String(budget.createdAt) : new Date().toISOString(),
+        ...(Array.isArray(budget.history) && budget.history.length
+          ? {
+              history: budget.history
+                .filter((entry) => entry && parseAmount(entry.amount) !== null && isValidIsoDate(String(entry.changedAt ?? '').slice(0, 10)))
+                .map((entry) => ({
+                  amount: parseAmount(entry.amount),
+                  changedAt: String(entry.changedAt),
+                  ...(entry.name ? { name: String(entry.name).slice(0, 80) } : {}),
+                }))
+                .slice(-25),
+            }
+          : {}),
       };
     })
     .filter((budget) => {
@@ -2686,6 +2725,13 @@ export function updateBudget(company, budgetId, input = {}) {
     )
   ) {
     return { ok: false, error: `A budget already exists for "${target.name}" in this financial year.` };
+  }
+  const changed = budget.amount !== amount || budget.name !== name;
+  if (changed) {
+    budget.history = [
+      ...(budget.history ?? []),
+      { amount: budget.amount, changedAt: new Date().toISOString(), name: budget.name },
+    ].slice(-25);
   }
   budget.name = name;
   budget.targetType = targetType;

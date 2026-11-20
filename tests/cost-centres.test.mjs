@@ -126,6 +126,11 @@ test('cost allocations roll up by centre and category', () => {
   assert.equal(report.totalDebit, 1500);
   assert.equal(report.totalCredit, 3000);
   assert.equal(report.totalNet, -1500);
+  assert.equal(report.unallocatedDebit, 3000);
+  assert.equal(report.unallocatedCredit, 1500);
+  assert.equal(report.unallocatedNet, 1500);
+  assert.equal(report.unallocatedRows.find((row) => row.ledgerId === customer.id).debit, 3000);
+  assert.equal(report.unallocatedRows.find((row) => row.ledgerId === bank.id).credit, 1500);
 
   const department = report.categoryRows.find((row) => row.categoryId === admin.categoryId);
   assert.equal(department.debit, 1500);

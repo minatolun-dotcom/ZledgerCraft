@@ -140,6 +140,43 @@ test('employees need a name, a valid PAN and at least one earning', () => {
   assert.equal(company.payroll.employees[0].name, 'Asha M');
 });
 
+test('percentage-of-basic pay heads compute from fixed Basic and prorate', () => {
+  const { company } = fixture();
+  const salaries = payrollLedgers(company).salaries;
+  const added = addPayHead(company, {
+    name: 'Performance Bonus',
+    kind: 'Earning',
+    ledgerId: salaries.id,
+    percentOfBasic: 10,
+  });
+  assert.equal(added.ok, true, added.error);
+  assert.equal(added.payHead.percentOfBasic, 10);
+  assert.equal(addPayHead(company, { name: 'Too much', kind: 'Earning', ledgerId: salaries.id, percentOfBasic: 101 }).ok, false);
+  assert.equal(addPayHead(company, { name: 'Tagged', kind: 'Deduction', ledgerId: salaries.id, percentOfBasic: 5, statutory: 'PF' }).ok, false);
+
+  const basic = head(company, 'Basic Salary').id;
+  const bonus = added.payHead.id;
+  const result = addEmployee(company, {
+    name: 'Ravi Kumar',
+    pay: [
+      { payHeadId: basic, amount: 10000 },
+      { payHeadId: bonus, amount: 10 },
+    ],
+  });
+  assert.equal(result.ok, true, result.error);
+
+  const run = runPayroll(company, { month: '2026-04' });
+  assert.equal(run.ok, true, run.error);
+  const bonusLine = run.run.rows[0].earnings.find((line) => line.payHeadId === bonus);
+  assert.equal(bonusLine.amount, 1000);
+  assert.equal(run.run.rows[0].gross, 11000);
+
+  const part = runPayroll(company, { month: '2026-06', paidDays: { [result.employee.id]: 15 } });
+  assert.equal(part.ok, true, part.error);
+  assert.equal(part.run.rows[0].earnings.find((line) => line.payHeadId === bonus).amount, 500);
+  assert.equal(part.run.rows[0].gross, 5500);
+});
+
 test('a payroll run posts a balanced journal and stores the run snapshot', () => {
   const { company } = fixture();
   standardEmployee(company);

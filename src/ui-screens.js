@@ -654,6 +654,14 @@ export function budgetMastersPanel(active) {
             ? (active.costCentres ?? []).find((centre) => centre.id === budget.targetId)
             : active.ledgers.find((ledger) => ledger.id === budget.targetId);
       const year = (active.years ?? []).find((item) => item.id === budget.yearId);
+      const history = budget.history ?? [];
+      const historyRows = history.length
+        ? `<tr><td colspan="5"><details><summary class="muted small">${history.length} earlier amount${history.length === 1 ? '' : 's'}</summary><div class="muted small">${history
+            .slice()
+            .reverse()
+            .map((entry) => `${money(entry.amount)} · ${dateLabel(String(entry.changedAt).slice(0, 10))}`)
+            .join('<br>')}</div></details></td></tr>`
+        : '';
       return `<tr>
         <td><strong>${esc(budget.name)}</strong></td>
         <td>${esc(target?.name ?? 'Missing target')}</td>
@@ -664,7 +672,7 @@ export function budgetMastersPanel(active) {
           <button class="btn small ghost" type="button" data-action="duplicate-budget" data-id="${esc(budget.id)}">Duplicate next year</button>
           <button class="btn small danger" type="button" data-action="delete-budget" data-id="${esc(budget.id)}">Delete</button>
         </td>
-      </tr>`;
+      </tr>${historyRows}`;
     })
     .join('');
 

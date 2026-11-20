@@ -3362,6 +3362,7 @@ export async function handleSubmit(event) {
       name: data.get('name'),
       kind: data.get('kind'),
       statutory: data.get('statutory'),
+      percentOfBasic: data.get('percentOfBasic'),
       ledgerId: data.get('ledgerId'),
     });
     if (!result.ok) {

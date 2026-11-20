@@ -554,7 +554,9 @@ disabled.
   with title, due date, category and notes. Open tasks are flagged overdue or
   due within seven days, and tasks can be edited, marked done, reopened and
   deleted. Optional filed-on date and acknowledgement/reference fields keep a
-  local filing history. Due dates are not calculated and nothing is filed.
+  local filing history. Optional late-fee and interest amounts are kept with
+  the task and totalled on the calendar. Due dates are not calculated and
+  nothing is filed.
 - Tax audit working papers for a period: books turnover from Sales Accounts
   versus GST outward taxable, output-tax and input-credit reconciliation between
   GST-role ledgers and GSTR-3B, TDS/TCS deducted, paid and outstanding, the

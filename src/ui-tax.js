@@ -555,6 +555,8 @@ export function complianceScreen() {
   const overdue = open.filter((task) => task.dueDate < today);
   const dueSoon = open.filter((task) => task.dueDate >= today && task.dueDate <= soon);
   const done = tasks.filter((task) => task.status === 'Done');
+  const lateFeeTotal = round2(tasks.reduce((sum, task) => sum + (task.lateFee ?? 0), 0));
+  const interestTotal = round2(tasks.reduce((sum, task) => sum + (task.interest ?? 0), 0));
 
   const categoryOptions = ['GST', 'TDS', 'Payroll', 'Other']
     .map((category) => `<option value="${category}"${(editing?.category ?? 'Other') === category ? ' selected' : ''}>${category}</option>`)
@@ -568,6 +570,8 @@ export function complianceScreen() {
     <label class="field"><span>Notes</span><input name="notes" maxlength="200" placeholder="Optional working note" value="${esc(editing?.notes ?? '')}"></label>
     <label class="field"><span>Filed on (optional)</span><input name="filedOn" type="date" value="${esc(editing?.filedOn ?? '')}"></label>
     <label class="field"><span>Acknowledgement / reference</span><input name="reference" maxlength="80" placeholder="Portal reference or ARN" value="${esc(editing?.reference ?? '')}"></label>
+    <label class="field"><span>Late fee</span><input name="lateFee" inputmode="decimal" placeholder="0.00" value="${esc(editing?.lateFee ?? '')}"></label>
+    <label class="field"><span>Interest</span><input name="interest" inputmode="decimal" placeholder="0.00" value="${esc(editing?.interest ?? '')}"></label>
     <div class="form-actions">
       <button class="btn primary" type="submit">${editing ? 'Update task' : 'Add task'}</button>
       ${editing ? '<button class="btn ghost" type="button" data-action="cancel-compliance-task">Cancel</button>' : ''}
@@ -582,7 +586,7 @@ export function complianceScreen() {
       const near = !isDone && !late && task.dueDate <= soon;
       return `<tr>
         <td><span class="badge${isDone ? '' : late ? ' overdue' : near ? ' attention' : ''}">${isDone ? 'Done' : late ? 'Overdue' : near ? 'Due soon' : 'Open'}</span></td>
-        <td><strong>${esc(task.title)}</strong>${task.notes ? `<div class="muted small">${esc(task.notes)}</div>` : ''}${task.reference ? `<div class="muted small">Ref ${esc(task.reference)}</div>` : ''}</td>
+        <td><strong>${esc(task.title)}</strong>${task.notes ? `<div class="muted small">${esc(task.notes)}</div>` : ''}${task.reference ? `<div class="muted small">Ref ${esc(task.reference)}</div>` : ''}${task.lateFee || task.interest ? `<div class="muted small">Late fee ${money(task.lateFee ?? 0)} · interest ${money(task.interest ?? 0)}</div>` : ''}</td>
         <td>${esc(task.category)}</td>
         <td>${esc(dateLabel(task.dueDate))}${task.filedOn ? `<div class="muted small">Filed ${esc(dateLabel(task.filedOn))}</div>` : ''}</td>
         <td class="row-actions">
@@ -600,6 +604,7 @@ export function complianceScreen() {
     <div class="ratio-grid">
       <div class="ratio-card"><span class="ratio-label">Open</span><strong>${open.length}</strong><span class="muted small">${overdue.length} overdue · ${dueSoon.length} due within 7 days</span></div>
       <div class="ratio-card"><span class="ratio-label">Completed</span><strong>${done.length}</strong><span class="muted small">Kept for filing history</span></div>
+      <div class="ratio-card"><span class="ratio-label">Late fee / interest</span><strong>${money(lateFeeTotal)}</strong><span class="muted small">${money(interestTotal)} interest recorded</span></div>
     </div>
     ${sorted.length
       ? `<table class="data-table compact">

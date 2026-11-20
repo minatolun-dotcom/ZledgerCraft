@@ -5185,7 +5185,11 @@ function complianceTaskInput(input = {}) {
   const filedOn = String(input.filedOn ?? '').trim();
   if (filedOn && !isValidIsoDate(filedOn)) return { error: 'Enter a valid filed-on date.' };
   const reference = String(input.reference ?? '').trim().slice(0, 80);
-  return { title, dueDate, category, notes, filedOn, reference };
+  const lateFee = parseAmount(input.lateFee ?? 0);
+  if (lateFee === null || lateFee < 0) return { error: 'Late fee must be zero or more.' };
+  const interest = parseAmount(input.interest ?? 0);
+  if (interest === null || interest < 0) return { error: 'Interest must be zero or more.' };
+  return { title, dueDate, category, notes, filedOn, reference, lateFee, interest };
 }
 
 export function addComplianceTask(company, input = {}) {
@@ -5203,6 +5207,8 @@ export function addComplianceTask(company, input = {}) {
     notes: checked.notes,
     ...(checked.filedOn ? { filedOn: checked.filedOn } : {}),
     ...(checked.reference ? { reference: checked.reference } : {}),
+    ...(checked.lateFee ? { lateFee: checked.lateFee } : {}),
+    ...(checked.interest ? { interest: checked.interest } : {}),
     status: 'Open',
     createdAt: new Date().toISOString(),
   };
@@ -5223,6 +5229,10 @@ export function updateComplianceTask(company, taskId, input = {}) {
   else delete task.filedOn;
   if (checked.reference) task.reference = checked.reference;
   else delete task.reference;
+  if (checked.lateFee) task.lateFee = checked.lateFee;
+  else delete task.lateFee;
+  if (checked.interest) task.interest = checked.interest;
+  else delete task.interest;
   return { ok: true, task };
 }
 
@@ -5268,6 +5278,8 @@ export function normalizeComplianceTasks(company) {
       notes: String(task.notes ?? '').trim().slice(0, 200),
       ...(isValidIsoDate(task.filedOn) ? { filedOn: task.filedOn } : {}),
       ...(task.reference ? { reference: String(task.reference).slice(0, 80) } : {}),
+      ...(parseAmount(task.lateFee) ? { lateFee: parseAmount(task.lateFee) } : {}),
+      ...(parseAmount(task.interest) ? { interest: parseAmount(task.interest) } : {}),
       status: task.status === 'Done' ? 'Done' : 'Open',
       ...(task.status === 'Done' && task.completedAt ? { completedAt: String(task.completedAt) } : {}),
       createdAt: String(task.createdAt ?? new Date().toISOString()),

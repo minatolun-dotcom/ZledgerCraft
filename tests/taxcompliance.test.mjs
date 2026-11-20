@@ -295,6 +295,8 @@ test('compliance tasks validate, update, toggle and survive a backup', () => {
   assert.equal(addComplianceTask(company, { dueDate: '2026-05-11' }).ok, false);
   assert.equal(addComplianceTask(company, { title: 'File GSTR-1', dueDate: '11-05-2026' }).ok, false);
 
+  assert.equal(addComplianceTask(company, { title: 'Late fee', dueDate: '2026-05-11', lateFee: -1 }).ok, false);
+  assert.equal(addComplianceTask(company, { title: 'Interest', dueDate: '2026-05-11', interest: -1 }).ok, false);
   const added = addComplianceTask(company, {
     title: ' File GSTR-1 for April ',
     category: 'GST',
@@ -302,10 +304,14 @@ test('compliance tasks validate, update, toggle and survive a backup', () => {
     notes: 'Check B2B invoices',
     filedOn: '2026-05-10',
     reference: 'ARN-123',
+    lateFee: '50',
+    interest: '12.5',
   });
   assert.equal(added.ok, true, added.error);
   assert.equal(added.task.title, 'File GSTR-1 for April');
   assert.equal(added.task.status, 'Open');
+  assert.equal(added.task.lateFee, 50);
+  assert.equal(added.task.interest, 12.5);
 
   const second = addComplianceTask(company, {
     title: 'Deposit TDS',
@@ -322,11 +328,15 @@ test('compliance tasks validate, update, toggle and survive a backup', () => {
     notes: 'After books close',
     filedOn: '2026-05-19',
     reference: 'ARN-456',
+    lateFee: '75',
+    interest: '20',
   });
   assert.equal(updated.ok, true, updated.error);
   assert.equal(updated.task.title, 'File GSTR-3B for April');
   assert.equal(updated.task.filedOn, '2026-05-19');
   assert.equal(updated.task.reference, 'ARN-456');
+  assert.equal(updated.task.lateFee, 75);
+  assert.equal(updated.task.interest, 20);
 
   const done = setComplianceTaskStatus(company, added.task.id, 'Done');
   assert.equal(done.ok, true, done.error);
@@ -347,6 +357,8 @@ test('compliance tasks validate, update, toggle and survive a backup', () => {
   assert.equal(tasks.length, 2);
   assert.equal(tasks.find((task) => task.id === added.task.id).dueDate, '2026-05-20');
   assert.equal(tasks.find((task) => task.id === added.task.id).reference, 'ARN-456');
+  assert.equal(tasks.find((task) => task.id === added.task.id).lateFee, 75);
+  assert.equal(tasks.find((task) => task.id === added.task.id).interest, 20);
 
   assert.equal(deleteComplianceTask(company, added.task.id).ok, true);
   assert.equal(company.complianceTasks.length, 1);

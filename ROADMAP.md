@@ -360,9 +360,11 @@ inside those stages.
   the section master.
 - Tax audit now calculates the digital-receipt percentage from bank versus cash
   receipts and flags whether the 95% test is met.
+- Compliance tasks can carry late-fee and interest amounts, with totals shown on
+  the calendar beside the overdue and due-soon counts.
 - Verification: transfer dependency, all-bill movement total, GST rate window,
-  TDS section window/history and digital-receipt tests; 335 tests (334 pass, 1
-  skipped) and a 1,182.7 kB build.
+  TDS section window/history, digital-receipt and compliance late-fee tests; 335
+  tests (334 pass, 1 skipped) and a 1,184.3 kB build.
 
 ### 2026-11-20 — Phase 51: compliance filing history
 

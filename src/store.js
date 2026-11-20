@@ -671,9 +671,20 @@ function statementDayGap(a, b) {
 }
 
 /** Greedy one-to-one match by signed amount, preferring the nearest date. */
-export function autoMatchBank(company, ledgerId) {
+function matchWords(value) {
+  return new Set(
+    String(value ?? '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length >= 4),
+  );
+}
+
+export function autoMatchBank(company, ledgerId, options = {}) {
   const config = company.bankReconciliations?.[ledgerId];
   if (!config) return { ok: false, error: 'Import a bank statement first.' };
+  const dateWindow = Math.min(60, Math.max(0, Math.round(Number(options.dateWindow ?? 7)) || 0));
+  const tolerance = Math.min(100000, Math.max(0, Number(options.tolerance ?? 0.005) || 0));
   const used = new Set(Object.values(config.matches));
   const entries = [];
   for (const voucher of company.vouchers) {
@@ -683,6 +694,7 @@ export function autoMatchBank(company, ledgerId) {
         voucherId: voucher.id,
         date: voucher.date,
         no: Number(voucher.no) || 0,
+        narration: voucher.narration ?? '',
         amount: line.side === 'Cr' ? -round2(line.amount) : round2(line.amount),
       });
     }
@@ -691,11 +703,27 @@ export function autoMatchBank(company, ledgerId) {
   const lines = [...config.statement.lines].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   for (const line of lines) {
     if (config.matches[line.id]) continue;
+    const words = matchWords(line.description);
     const candidates = entries
-      .filter((entry) => !used.has(entry.voucherId) && Math.abs(entry.amount - line.amount) < 0.005)
-      .map((entry) => ({ ...entry, gap: statementDayGap(line.date, entry.date) }))
-      .filter((entry) => entry.gap <= 7)
-      .sort((a, b) => a.gap - b.gap || a.date.localeCompare(b.date) || a.no - b.no);
+      .filter(
+        (entry) =>
+          !used.has(entry.voucherId) &&
+          Math.abs(entry.amount - line.amount) <= tolerance + 0.004,
+      )
+      .map((entry) => {
+        const entryWords = matchWords(entry.narration);
+        const overlap = [...words].filter((word) => entryWords.has(word)).length;
+        return { ...entry, gap: statementDayGap(line.date, entry.date), overlap };
+      })
+      .filter((entry) => entry.gap <= dateWindow)
+      .sort(
+        (a, b) =>
+          b.overlap - a.overlap ||
+          a.gap - b.gap ||
+          Math.abs(a.amount - line.amount) - Math.abs(b.amount - line.amount) ||
+          a.date.localeCompare(b.date) ||
+          a.no - b.no,
+      );
     const candidate = candidates[0];
     if (!candidate) continue;
     config.matches[line.id] = candidate.voucherId;
@@ -1209,6 +1237,31 @@ export function gstTaxLedgers(company) {
   return map;
 }
 
+/** Creates or renames the ledger attached to a GST role. */
+export function saveGstTaxLedger(company, role, name) {
+  if (!GST_ROLES[role]) return { ok: false, error: 'Choose a valid GST tax role.' };
+  const ledgerName = String(name ?? '').trim();
+  if (!ledgerName) return { ok: false, error: 'Tax ledger name is required.' };
+  if (ledgerName.length > 80) return { ok: false, error: 'Tax ledger name must be 80 characters or fewer.' };
+  const clash = findLedgerByName(company, ledgerName);
+  const existing = company.ledgers.find((ledger) => ledger.gstRole === role);
+  if (clash && clash !== existing) {
+    return { ok: false, error: `A ledger named "${ledgerName}" already exists.` };
+  }
+  if (existing) {
+    existing.name = ledgerName;
+    return { ok: true, ledger: existing, created: false };
+  }
+  const group =
+    company.groups.find((entry) => entry.key === 'dutiesTaxes') ??
+    company.groups.find((entry) => entry.key === 'currentLiabilities');
+  if (!group) return { ok: false, error: 'The Duties & Taxes group is missing from this company.' };
+  const result = addLedger(company, { name: ledgerName, groupId: group.id, opening: 0, openingType: 'Cr' });
+  if (!result.ok) return result;
+  result.ledger.gstRole = role;
+  return { ok: true, ledger: result.ledger, created: true };
+}
+
 function ensureGstLedger(company, role) {
   const existing = company.ledgers.find((ledger) => ledger.gstRole === role);
   if (existing) return { ledger: existing, created: false };
@@ -1274,6 +1327,8 @@ export function normalizeGst(company) {
     address: clean(source.address, 200),
     city: clean(source.city, 80),
     pin: /^[0-9]{6}$/.test(String(source.pin ?? '').trim()) ? String(source.pin).trim() : '',
+    phone: clean(source.phone, 30),
+    email: clean(source.email, 120).toLowerCase(),
     stateCode: stateCode || (gstin ? gstin.slice(0, 2) : ''),
     rates: rates.length ? rates : seedGstRates(),
   };
@@ -1295,7 +1350,7 @@ export function normalizeGst(company) {
       if (GST_STATES.some(([code]) => code === value)) ledger.stateCode = value;
       else delete ledger.stateCode;
     }
-    for (const [field, limit] of [['address', 200], ['city', 80]]) {
+    for (const [field, limit] of [['address', 200], ['city', 80], ['phone', 30]]) {
       if (ledger[field] === undefined) continue;
       const value = String(ledger[field] ?? '').trim().slice(0, limit);
       if (value) ledger[field] = value;
@@ -1306,9 +1361,20 @@ export function normalizeGst(company) {
       if (/^[0-9]{6}$/.test(value)) ledger.pin = value;
       else delete ledger.pin;
     }
+    if (ledger.email !== undefined) {
+      const value = String(ledger.email ?? '').trim().toLowerCase().slice(0, 120);
+      if (value) ledger.email = value;
+      else delete ledger.email;
+    }
+    if (ledger.sacCode !== undefined) {
+      const value = String(ledger.sacCode ?? '').trim();
+      if (/^[0-9]{4}([0-9]{2}([0-9]{2})?)?$/.test(value)) ledger.sacCode = value;
+      else delete ledger.sacCode;
+    }
   }
 
   const ledgerIds = new Set((company.ledgers ?? []).map((ledger) => ledger.id));
+  const voucherIds = new Set((company.vouchers ?? []).map((voucher) => voucher.id));
   for (const voucher of company.vouchers ?? []) {
     if (!voucher.gst) continue;
     const entry = voucher.gst;
@@ -1329,6 +1395,7 @@ export function normalizeGst(company) {
       partyGstin: isValidGstin(entry.partyGstin) ? String(entry.partyGstin).trim().toUpperCase() : '',
       ...(ledgerIds.has(entry.partyLedgerId) ? { partyLedgerId: entry.partyLedgerId } : {}),
       reverseCharge: Boolean(entry.reverseCharge),
+      ...(voucherIds.has(entry.originalVoucherId) ? { originalVoucherId: entry.originalVoucherId } : {}),
       taxable: round2(taxable),
       cgst: amount(entry.cgst),
       sgst: amount(entry.sgst),
@@ -1349,12 +1416,19 @@ export function saveGstSettings(company, input = {}) {
   const address = String(input.address !== undefined ? input.address : existing.address ?? '').trim();
   const city = String(input.city !== undefined ? input.city : existing.city ?? '').trim();
   const pin = String(input.pin !== undefined ? input.pin : existing.pin ?? '').trim();
+  const phone = String(input.phone !== undefined ? input.phone : existing.phone ?? '').trim();
+  const email = String(input.email !== undefined ? input.email : existing.email ?? '').trim().toLowerCase();
 
   if (legalName.length > 120) return { ok: false, error: 'Legal name must be 120 characters or fewer.' };
   if (tradeName.length > 120) return { ok: false, error: 'Trade name must be 120 characters or fewer.' };
   if (address.length > 200) return { ok: false, error: 'Address must be 200 characters or fewer.' };
   if (city.length > 80) return { ok: false, error: 'City or location must be 80 characters or fewer.' };
   if (pin && !/^[0-9]{6}$/.test(pin)) return { ok: false, error: 'PIN code must be 6 digits.' };
+  if (phone.length > 30) return { ok: false, error: 'Phone number must be 30 characters or fewer.' };
+  if (email.length > 120) return { ok: false, error: 'Email address must be 120 characters or fewer.' };
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { ok: false, error: 'Enter a valid email address.' };
+  }
   if (gstin && !isValidGstin(gstin)) {
     return { ok: false, error: 'GSTIN must be 15 characters: state code, PAN, entity code, Z and checksum.' };
   }
@@ -1379,6 +1453,8 @@ export function saveGstSettings(company, input = {}) {
   company.gst.address = address;
   company.gst.city = city;
   company.gst.pin = pin;
+  company.gst.phone = phone;
+  company.gst.email = email;
   company.gst.stateCode = GST_STATES.some(([code]) => code === stateCode) ? stateCode : '';
   if (enabled && !company.gst.stateCode) company.gst.stateCode = gstin.slice(0, 2);
 
@@ -1615,6 +1691,8 @@ export function normalizeTds(company) {
       if (seenChallans.has(id)) return null;
       seenChallans.add(id);
       const section = (company.tds.sections ?? []).find((entry) => entry.id === challan.sectionId);
+      const lateFee = Math.max(0, parseAmount(challan.lateFee ?? 0) ?? 0);
+      const interest = Math.max(0, parseAmount(challan.interest ?? 0) ?? 0);
       return {
         id,
         kind,
@@ -1622,6 +1700,8 @@ export function normalizeTds(company) {
         amount: round2(amount),
         reference: String(challan.reference ?? '').trim().slice(0, 40),
         bsrCode: String(challan.bsrCode ?? '').trim().slice(0, 20),
+        ...(lateFee ? { lateFee: round2(lateFee) } : {}),
+        ...(interest ? { interest: round2(interest) } : {}),
         ...(section ? { sectionId: section.id } : {}),
       };
     })
@@ -1780,6 +1860,14 @@ export function addTaxChallan(company, input = {}) {
   const reference = String(input.reference ?? '').trim().slice(0, 40);
   if (reference.length > 40) return { ok: false, error: 'Challan reference must be 40 characters or fewer.' };
   const bsrCode = String(input.bsrCode ?? '').trim().slice(0, 20);
+  const lateFee = parseAmount(input.lateFee ?? 0);
+  if (lateFee === null || lateFee < 0) {
+    return { ok: false, error: 'Late fee must be a number of zero or more.' };
+  }
+  const interest = parseAmount(input.interest ?? 0);
+  if (interest === null || interest < 0) {
+    return { ok: false, error: 'Interest must be a number of zero or more.' };
+  }
   const section = (company.tds?.sections ?? []).find((entry) => entry.id === input.sectionId);
   if (section && section.kind !== kind) {
     return { ok: false, error: `${section.code} is a ${section.kind} section; choose a ${kind} section for this challan.` };
@@ -1792,6 +1880,8 @@ export function addTaxChallan(company, input = {}) {
     amount,
     reference,
     bsrCode,
+    ...(lateFee ? { lateFee: round2(lateFee) } : {}),
+    ...(interest ? { interest: round2(interest) } : {}),
   };
   if (section) challan.sectionId = section.id;
   company.taxChallans.push(challan);
@@ -1815,6 +1905,8 @@ export const DEFAULT_PAYROLL_STATUTORY = {
   esiRate: 0.75,
   esiCeiling: 21000,
   ptAmount: 200,
+  employerPfRate: 0,
+  employerEsiRate: 0,
 };
 
 function normalizeStatutorySettings(source = {}) {
@@ -1828,6 +1920,8 @@ function normalizeStatutorySettings(source = {}) {
     esiRate: number(source.esiRate, DEFAULT_PAYROLL_STATUTORY.esiRate, 0, 100),
     esiCeiling: number(source.esiCeiling, DEFAULT_PAYROLL_STATUTORY.esiCeiling, 0, 10000000),
     ptAmount: number(source.ptAmount, DEFAULT_PAYROLL_STATUTORY.ptAmount, 0, 100000),
+    employerPfRate: number(source.employerPfRate, DEFAULT_PAYROLL_STATUTORY.employerPfRate, 0, 100),
+    employerEsiRate: number(source.employerEsiRate, DEFAULT_PAYROLL_STATUTORY.employerEsiRate, 0, 100),
   };
 }
 
@@ -2170,6 +2264,9 @@ export function payrollStatutoryRows(company, month = '') {
       const pf = round2((pfWage * settings.pfRate) / 100);
       const esi = gross > 0 && gross <= settings.esiCeiling ? round2((gross * settings.esiRate) / 100) : 0;
       const pt = gross > 0 ? round2(settings.ptAmount) : 0;
+      const employerPf = round2((pfWage * settings.employerPfRate) / 100);
+      const employerEsi =
+        gross > 0 && gross <= settings.esiCeiling ? round2((gross * settings.employerEsiRate) / 100) : 0;
       return {
         employeeId: employee.id,
         name: employee.name,
@@ -2181,6 +2278,9 @@ export function payrollStatutoryRows(company, month = '') {
         esi,
         pt,
         total: round2(pf + esi + pt),
+        employerPf,
+        employerEsi,
+        employerTotal: round2(employerPf + employerEsi),
         heads: {
           PF: statutoryHeads.get('PF') ?? null,
           ESI: statutoryHeads.get('ESI') ?? null,
@@ -2522,6 +2622,7 @@ export function runPayroll(company, input = {}) {
 
   const monthDays = Number(end.slice(8, 10));
   const monthStart = `${month}-01`;
+  const settings = normalizeStatutorySettings(company.payroll.statutory);
   const rows = [];
   const paidInput = input.paidDays && typeof input.paidDays === 'object' ? input.paidDays : {};
   for (const employee of employees) {
@@ -2548,6 +2649,10 @@ export function runPayroll(company, input = {}) {
     if (deductionTotal > gross + 0.005) {
       return { ok: false, error: `${employee.name}'s deductions exceed earnings.` };
     }
+    const pfWage = Math.min(components.basic, settings.pfCeiling);
+    const employerPf = round2((pfWage * settings.employerPfRate) / 100);
+    const employerEsi =
+      gross > 0 && gross <= settings.esiCeiling ? round2((gross * settings.employerEsiRate) / 100) : 0;
     rows.push({
       employeeId: employee.id,
       name: employee.name,
@@ -2560,6 +2665,8 @@ export function runPayroll(company, input = {}) {
       gross,
       deductionTotal,
       net: round2(gross - deductionTotal),
+      ...(employerPf ? { employerPf } : {}),
+      ...(employerEsi ? { employerEsi } : {}),
     });
   }
   if (!rows.length) {
@@ -2571,7 +2678,10 @@ export function runPayroll(company, input = {}) {
     gross: round2(rows.reduce((sum, row) => sum + row.gross, 0)),
     deductions: round2(rows.reduce((sum, row) => sum + row.deductionTotal, 0)),
     net: round2(rows.reduce((sum, row) => sum + row.net, 0)),
+    employerPf: round2(rows.reduce((sum, row) => sum + (row.employerPf ?? 0), 0)),
+    employerEsi: round2(rows.reduce((sum, row) => sum + (row.employerEsi ?? 0), 0)),
   };
+  totals.employerCost = round2(totals.employerPf + totals.employerEsi);
   if (totals.gross <= 0) return { ok: false, error: 'Payroll has no earnings to post.' };
 
   const debitTotals = new Map();
@@ -2596,6 +2706,24 @@ export function runPayroll(company, input = {}) {
     return { ok: false, error: 'Salary Payable ledger is missing. Save the payroll setup again to recreate it.' };
   }
   if (totals.net > 0) add(creditTotals, payable.id, totals.net);
+  if (totals.employerPf > 0) {
+    const pfPayable = findLedgerByName(company, 'Provident Fund Payable');
+    const salaries = payrollLedgers(company).salaries;
+    if (!pfPayable || !salaries) {
+      return { ok: false, error: 'Employer PF needs Salaries and Provident Fund Payable ledgers.' };
+    }
+    add(debitTotals, salaries.id, totals.employerPf);
+    add(creditTotals, pfPayable.id, totals.employerPf);
+  }
+  if (totals.employerEsi > 0) {
+    const esiPayable = findLedgerByName(company, 'ESI Payable');
+    const salaries = payrollLedgers(company).salaries;
+    if (!esiPayable || !salaries) {
+      return { ok: false, error: 'Employer ESI needs Salaries and ESI Payable ledgers.' };
+    }
+    add(debitTotals, salaries.id, totals.employerEsi);
+    add(creditTotals, esiPayable.id, totals.employerEsi);
+  }
 
   const lines = [];
   for (const [ledgerId, amount] of debitTotals) lines.push({ ledgerId, side: 'Dr', amount });
@@ -3387,6 +3515,15 @@ function ledgerTaxDetails(input = {}, existing = null) {
   } else if (existing?.stateCode) {
     details.stateCode = existing.stateCode;
   }
+  if (input.sacCode !== undefined) {
+    const sacCode = String(input.sacCode ?? '').trim();
+    if (sacCode && !/^[0-9]{4}([0-9]{2}([0-9]{2})?)?$/.test(sacCode)) {
+      return { error: 'SAC code must be 4, 6 or 8 digits.' };
+    }
+    if (sacCode) details.sacCode = sacCode;
+  } else if (existing?.sacCode) {
+    details.sacCode = existing.sacCode;
+  }
   if (input.address !== undefined) {
     const value = String(input.address ?? '').trim().slice(0, 200);
     if (value) details.address = value;
@@ -3407,6 +3544,21 @@ function ledgerTaxDetails(input = {}, existing = null) {
     if (value) details.pin = value;
   } else if (existing?.pin) {
     details.pin = existing.pin;
+  }
+  if (input.phone !== undefined) {
+    const value = String(input.phone ?? '').trim().slice(0, 30);
+    if (value) details.phone = value;
+  } else if (existing?.phone) {
+    details.phone = existing.phone;
+  }
+  if (input.email !== undefined) {
+    const value = String(input.email ?? '').trim().toLowerCase().slice(0, 120);
+    if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      return { error: 'Enter a valid party email address.' };
+    }
+    if (value) details.email = value;
+  } else if (existing?.email) {
+    details.email = existing.email;
   }
   if (details.gstin && !details.stateCode) details.stateCode = details.gstin.slice(0, 2);
   return { details };
@@ -3583,6 +3735,19 @@ export function validateVoucherInput(company, type, input, options = {}) {
     if (partyGstin && !isValidGstin(partyGstin)) {
       return { ok: false, error: 'Party GSTIN must be 15 characters, or leave it blank for a B2C invoice.' };
     }
+    const originalVoucherId = String(gstInput.originalVoucherId ?? '').trim();
+    let originalVoucher = null;
+    if (originalVoucherId) {
+      originalVoucher = (company.vouchers ?? []).find((voucher) => voucher.id === originalVoucherId);
+      if (!originalVoucher) return { ok: false, error: 'The linked original invoice was not found.' };
+      const expected = type === 'CreditNote' ? 'Sales' : 'Purchase';
+      if (originalVoucher.type !== expected) {
+        return { ok: false, error: `Link a ${expected.toLowerCase()} invoice to this ${type === 'CreditNote' ? 'credit' : 'debit'} note.` };
+      }
+      if (originalVoucher.date > date) {
+        return { ok: false, error: 'The original invoice date cannot be after the note date.' };
+      }
+    }
 
     const supplyType = placeOfSupply === homeState ? 'Intra' : 'Inter';
     const rateValue = round2(rateEntry.rate);
@@ -3629,6 +3794,7 @@ export function validateVoucherInput(company, type, input, options = {}) {
       partyGstin,
       partyLedgerId: balancing[0].ledgerId,
       reverseCharge: Boolean(gstInput.reverseCharge),
+      ...(originalVoucher ? { originalVoucherId: originalVoucher.id } : {}),
       taxable,
       cgst,
       sgst,
@@ -5382,10 +5548,32 @@ export function addOrder(company, input) {
 export function orderRemainingItems(order) {
   return (order.items ?? [])
     .map((line) => {
-      const qty = round3(Math.max(0, Number(line.qty) - Number(line.fulfilledQty ?? 0)));
+      const closed = Number(line.closedQty ?? 0);
+      const qty = round3(Math.max(0, Number(line.qty) - Number(line.fulfilledQty ?? 0) - closed));
       return { ...line, qty, amount: round2(qty * Number(line.rate ?? 0)) };
     })
     .filter((line) => line.qty > 0.0005);
+}
+
+/** Closes the unfulfilled remainder without pretending it was delivered. */
+export function shortCloseOrder(company, orderId, reason = '') {
+  const order = (company.orders ?? []).find((entry) => entry.id === orderId && !entry.kind);
+  if (!order) return { ok: false, error: 'Sales or purchase order not found.' };
+  if (order.status !== 'Open') return { ok: false, error: 'Only an open order can be short-closed.' };
+  const remaining = orderRemainingItems(order);
+  if (!remaining.length) return { ok: false, error: 'This order has no remaining quantity.' };
+  const closed = round2(remaining.reduce((sum, line) => sum + line.amount, 0));
+  for (const line of order.items ?? []) {
+    const open = round3(Number(line.qty) - Number(line.fulfilledQty ?? 0) - Number(line.closedQty ?? 0));
+    if (open > 0.0005) line.closedQty = round3(Number(line.closedQty ?? 0) + open);
+  }
+  order.status = 'Closed';
+  order.closedByShortClose = true;
+  order.closedAt = new Date().toISOString();
+  const note = String(reason ?? '').trim().slice(0, 200);
+  if (note) order.closeReason = note;
+  else delete order.closeReason;
+  return { ok: true, order, value: closed, count: remaining.length };
 }
 
 /** Recomputes an order's fulfilled quantities from every linked voucher. */
@@ -5408,11 +5596,12 @@ export function refreshOrderFulfilment(company, order) {
     }
   }
   const complete = (order.items ?? []).every(
-    (line) => Number(line.fulfilledQty ?? 0) >= Number(line.qty) - 0.0005,
+    (line) =>
+      Number(line.fulfilledQty ?? 0) + Number(line.closedQty ?? 0) >= Number(line.qty) - 0.0005,
   );
   if (complete && order.status === 'Open') {
     order.status = 'Closed';
-    order.closedByFulfilment = true;
+    order.closedByFulfilment = !order.closedByShortClose;
   } else if (!complete && order.status === 'Closed' && order.closedByFulfilment) {
     order.status = 'Open';
     delete order.closedByFulfilment;
@@ -5488,6 +5677,8 @@ export function setOrderStatus(company, orderId, status, reason = '') {
   if (status === 'Open') {
     delete order.closeReason;
     delete order.closedAt;
+    delete order.closedByShortClose;
+    for (const line of order.items ?? []) delete line.closedQty;
   } else {
     const note = String(reason ?? '').trim().slice(0, 200);
     if (note) order.closeReason = note;
@@ -5853,7 +6044,7 @@ export function updateLedger(company, ledgerId, input) {
     if (party.details.pan) ledger.pan = party.details.pan;
     else delete ledger.pan;
   }
-  for (const field of ['address', 'city', 'pin']) {
+  for (const field of ['address', 'city', 'pin', 'phone', 'email', 'sacCode']) {
     if (input[field] === undefined) continue;
     if (party.details[field]) ledger[field] = party.details[field];
     else delete ledger[field];
@@ -6913,6 +7104,14 @@ function validateImportedCompany(company) {
         if (fulfilled === null || fulfilled < 0 || fulfilled > qty + 0.0005) {
           return `Company "${name}": order ${order.no ?? ''} has an invalid fulfilled quantity.`;
         }
+      }
+      const closed = parseQty(line.closedQty ?? 0);
+      if (
+        closed === null ||
+        closed < 0 ||
+        closed + (parseQty(line.fulfilledQty ?? 0) ?? 0) > qty + 0.0005
+      ) {
+        return `Company "${name}": order ${order.no ?? ''} has an invalid short-closed quantity.`;
       }
       total = round2(total + qty * rate);
     }

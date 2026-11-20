@@ -29,6 +29,19 @@ test('an unsaved voucher draft is read back only for its company and type', () =
   assert.equal(readVoucherDraft(null, 'Sales'), null);
 });
 
+test('an unsaved alteration draft is kept separate from a new voucher draft', () => {
+  store.clear();
+  const created = { type: 'Sales', narration: 'new', lines: [] };
+  const altered = { type: 'Sales', narration: 'edit', lines: [] };
+  localStorage.setItem(`zc.voucherDraft.${company.id}.Sales`, JSON.stringify(created));
+  localStorage.setItem(`zc.voucherDraft.${company.id}.Sales.v1`, JSON.stringify(altered));
+  assert.deepEqual(readVoucherDraft(company, 'Sales'), created);
+  assert.deepEqual(readVoucherDraft(company, 'Sales', 'v1'), altered);
+  clearVoucherDraft(company, 'Sales', 'v1');
+  assert.equal(readVoucherDraft(company, 'Sales', 'v1'), null);
+  assert.deepEqual(readVoucherDraft(company, 'Sales'), created);
+});
+
 test('corrupt, oversized or mismatched drafts are ignored', () => {
   store.clear();
   localStorage.setItem(`zc.voucherDraft.${company.id}.Sales`, '{not json');

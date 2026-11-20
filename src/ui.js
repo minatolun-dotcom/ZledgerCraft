@@ -119,6 +119,7 @@ import {
   runPayroll,
   saveBankStatement,
   saveGstSettings,
+  saveGstTaxLedger,
   savePayrollSettings,
   saveState,
   saveTdsSettings,
@@ -130,6 +131,7 @@ import {
   setNextVoucherNumber,
   setInstrumentStatus,
   setOrderStatus,
+  shortCloseOrder,
   signedOpening,
   suggestedComplianceDueDate,
   todayIso,
@@ -1264,6 +1266,7 @@ export function prepareDraft(type, source = null) {
       rateId: source?.gst?.rateId ?? '',
       partyGstin: source?.gst?.partyGstin ?? '',
       placeOfSupply: source?.gst?.placeOfSupply ?? '',
+      originalVoucherId: source?.gst?.originalVoucherId ?? '',
       reverseCharge: Boolean(source?.gst?.reverseCharge),
     },
     tds: {
@@ -1289,14 +1292,14 @@ export function prepareDraft(type, source = null) {
 const VOUCHER_DRAFT_PREFIX = 'zc.voucherDraft.';
 let voucherDraftTimer = null;
 
-function voucherDraftKey(companyId, type) {
-  return `${VOUCHER_DRAFT_PREFIX}${companyId}.${type}`;
+function voucherDraftKey(companyId, type, voucherId = '') {
+  return `${VOUCHER_DRAFT_PREFIX}${companyId}.${type}${voucherId ? `.${voucherId}` : ''}`;
 }
 
-export function readVoucherDraft(company, type) {
+export function readVoucherDraft(company, type, voucherId = '') {
   if (!company?.id || typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(voucherDraftKey(company.id, type));
+    const raw = localStorage.getItem(voucherDraftKey(company.id, type, voucherId));
     if (!raw || raw.length > 200000) return null;
     const saved = JSON.parse(raw);
     if (!saved || saved.type !== type || !Array.isArray(saved.lines)) return null;
@@ -1306,23 +1309,23 @@ export function readVoucherDraft(company, type) {
   }
 }
 
-export function clearVoucherDraft(company, type) {
+export function clearVoucherDraft(company, type, voucherId = '') {
   if (!company?.id || typeof localStorage === 'undefined') return;
   try {
-    localStorage.removeItem(voucherDraftKey(company.id, type));
+    localStorage.removeItem(voucherDraftKey(company.id, type, voucherId));
   } catch {
     // A full or unavailable storage area should not block voucher entry.
   }
 }
 
 function saveVoucherDraft() {
-  if (!draft || view.screen !== 'voucherNew' || view.editId || view.pendingEdit) return;
+  if (!draft || view.screen !== 'voucherNew') return;
   const active = company();
   const form = document.getElementById('voucher-form');
   if (!active?.id || !form || typeof localStorage === 'undefined') return;
   try {
     const snapshot = { ...readVoucherForm(), orderId: draft.orderId || '' };
-    localStorage.setItem(voucherDraftKey(active.id, snapshot.type), JSON.stringify(snapshot));
+    localStorage.setItem(voucherDraftKey(active.id, snapshot.type, view.editId || ''), JSON.stringify(snapshot));
   } catch {
     // Ignore quota errors; the draft is a convenience, not the save of record.
   }
@@ -1360,7 +1363,9 @@ export async function openAlter(voucherId) {
     return false;
   }
   if (!(await acquireRecordLease('voucher', voucher.id))) return false;
-  prepareDraft(voucher.type, voucher);
+  const saved = readVoucherDraft(active, voucher.type, voucher.id);
+  prepareDraft(voucher.type, saved ?? voucher);
+  if (saved) setFlash('Restored your unsaved changes to this voucher.');
   navigate('voucherNew', { type: voucher.type, editId: voucher.id });
   return true;
 }
@@ -1493,6 +1498,7 @@ export function formGst(form) {
     rateId: rate.value,
     partyGstin: form.querySelector('[name="gstPartyGstin"]')?.value ?? '',
     placeOfSupply: form.querySelector('[name="gstPlaceOfSupply"]')?.value ?? '',
+    originalVoucherId: form.querySelector('[name="gstOriginalVoucher"]')?.value ?? '',
     reverseCharge: Boolean(form.querySelector('[name="gstReverseCharge"]')?.checked),
   };
 }
@@ -1564,6 +1570,19 @@ export function gstVoucherBlock(active) {
         `<option value="${code}"${draft.gst?.placeOfSupply === code ? ' selected' : ''}>${code} · ${esc(name)}</option>`,
     ),
   ].join('');
+  const originalType = draft.type === 'CreditNote' ? 'Sales' : draft.type === 'DebitNote' ? 'Purchase' : '';
+  const originalOptions = originalType
+    ? [
+        '<option value="">Not linked</option>',
+        ...(active.vouchers ?? [])
+          .filter((voucher) => voucher.type === originalType && voucher.id !== view.editId)
+          .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no)
+          .map(
+            (voucher) =>
+              `<option value="${esc(voucher.id)}"${draft.gst?.originalVoucherId === voucher.id ? ' selected' : ''}>${esc(voucher.bill?.ref || `${voucherLabel(voucher.type)} ${voucher.no}`)} · ${esc(dateLabel(voucher.date))}</option>`,
+          ),
+      ].join('')
+    : '';
   return `<div class="gst-block">
       <div class="inventory-head">
         <h2>GST</h2>
@@ -1575,6 +1594,7 @@ export function gstVoucherBlock(active) {
           <input name="gstPartyGstin" maxlength="15" placeholder="Blank for B2C" value="${esc(draft.gst?.partyGstin ?? '')}">
         </label>
         <label class="field"><span>Place of supply</span><select name="gstPlaceOfSupply">${stateOptions}</select></label>
+        ${originalType ? `<label class="field"><span>Original ${originalType.toLowerCase()} invoice</span><select name="gstOriginalVoucher">${originalOptions}</select></label>` : ''}
         <label class="field gst-check">
           <input type="checkbox" name="gstReverseCharge"${draft.gst?.reverseCharge ? ' checked' : ''}>
           <span>Reverse charge</span>
@@ -2889,6 +2909,31 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'short-close-order-form') {
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = shortCloseOrder(active, data.get('orderId'), data.get('reason'));
+    if (!result.ok) {
+      showFormError(result.error, 'short-close-error');
+      return;
+    }
+    logAudit(
+      'order.shortClose',
+      `Short-closed ${result.order.type === 'Sales' ? 'SO' : 'PO'}-${result.order.no} with ${money(result.value)} remaining value.`,
+      active,
+      `${result.order.type === 'Sales' ? 'SO' : 'PO'}-${result.order.no}`,
+    );
+    persist();
+    setFlash(
+      `Short-closed ${result.order.type === 'Sales' ? 'SO' : 'PO'}-${result.order.no}; ${result.count} line(s) written off.`,
+    );
+    render();
+    return;
+  }
+
   if (form.id === 'order-form') {
     if (!can('voucher.write')) {
       requirePermission('voucher.write');
@@ -3175,6 +3220,29 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'gst-tax-ledger-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = saveGstTaxLedger(active, data.get('role'), data.get('name'));
+    if (!result.ok) {
+      showFormError(result.error, 'gst-tax-ledger-error');
+      return;
+    }
+    logAudit(
+      result.created ? 'gst.ledger.create' : 'gst.ledger.rename',
+      `${result.created ? 'Created' : 'Renamed'} ${GST_ROLES[data.get('role')]} tax ledger as "${result.ledger.name}".`,
+      active,
+      result.ledger.id,
+    );
+    persist();
+    setFlash(`${result.created ? 'Created' : 'Renamed'} ${GST_ROLES[data.get('role')]} tax ledger.`);
+    render();
+    return;
+  }
+
   if (form.id === 'gst-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -3189,6 +3257,8 @@ export async function handleSubmit(event) {
       address: data.get('address'),
       city: data.get('city'),
       pin: data.get('pin'),
+      phone: data.get('phone'),
+      email: data.get('email'),
       stateCode: data.get('stateCode'),
     });
     if (!result.ok) {
@@ -3323,6 +3393,8 @@ export async function handleSubmit(event) {
       amount: data.get('amount'),
       reference: data.get('reference'),
       bsrCode: data.get('bsrCode'),
+      lateFee: data.get('lateFee') || 0,
+      interest: data.get('interest') || 0,
       sectionId: data.get('sectionId'),
     });
     if (!result.ok) {
@@ -3347,7 +3419,16 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = savePayrollSettings(active, { enabled: data.get('enabled') === 'on' });
+    const result = savePayrollSettings(active, {
+      enabled: data.get('enabled') === 'on',
+      pfRate: data.get('pfRate'),
+      pfCeiling: data.get('pfCeiling'),
+      esiRate: data.get('esiRate'),
+      esiCeiling: data.get('esiCeiling'),
+      ptAmount: data.get('ptAmount'),
+      employerPfRate: data.get('employerPfRate'),
+      employerEsiRate: data.get('employerEsiRate'),
+    });
     if (!result.ok) {
       showFormError(result.error, 'payroll-error');
       return;
@@ -3711,7 +3792,8 @@ export async function handleSubmit(event) {
       showFormError(result.error);
       return;
     }
-    clearVoucherDraft(active, draft.type);
+    clearVoucherDraft(active, draft.type, editingId || '');
+    if (editingId) clearVoucherDraft(active, draft.type);
     const instrumentNote = result.voucher.instrument
       ? ` · ${result.voucher.instrument.kind} ${result.voucher.instrument.number} dated ${dateLabel(result.voucher.instrument.date)}`
       : '';
@@ -4648,7 +4730,10 @@ async function handleClick(event) {
       const active = company();
       const ledgerId = selectedBankLedgerId();
       if (!active || !ledgerId) break;
-      const result = autoMatchBank(active, ledgerId);
+      const result = autoMatchBank(active, ledgerId, {
+        dateWindow: document.getElementById('recon-date-window')?.value,
+        tolerance: document.getElementById('recon-amount-tolerance')?.value,
+      });
       if (!result.ok) {
         setFlash(result.error, 'warn');
         render();

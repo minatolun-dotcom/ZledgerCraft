@@ -344,6 +344,30 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-21 — Phase 53: cumulative local-backlog pass
+
+- GST registration and party ledgers now carry optional phone/email, exported
+  into draft e-invoice seller and buyer details.
+- Altered vouchers now keep their own local draft, separate from a new voucher
+  of the same type, and restore it when the voucher is reopened.
+- TDS/TCS challans can record optional late fee and interest, with totals and a
+  combined outlay in the withholding register.
+- GST tax ledgers can be created or renamed from the registration panel without
+  losing their role tags.
+- Service ledgers can carry a SAC code; service-only GST invoices now feed the
+  HSN/SAC summary, and the SAC flows into e-invoice lines.
+- Bank auto-match accepts a configurable date window and amount tolerance and
+  ranks candidates by narration-word overlap before date and amount.
+- Optional employer PF/ESI rates are calculated and posted to the payable
+  ledgers in the payroll journal.
+- Credit/debit notes can link to one matching original invoice, shown in the
+  GSTR-1 credit-note working paper.
+- Open orders can be short-closed with the remaining quantity written off and
+  an optional reason; reopening restores the remainder.
+- Verification: full suite 339 tests (338 pass, 1 skipped), focused contact,
+  draft, challan, GST ledger/SAC/link, bank, payroll and order tests; 1,204.1 kB
+  build.
+
 ### 2026-11-21 — Phase 52: integrity and rate-window bundle
 
 - Deleting a stock transfer is now refused when later destination-godown

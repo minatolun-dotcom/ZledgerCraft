@@ -12,6 +12,7 @@ import {
   emptyState,
   exportState,
   findLedgerByName,
+  saveGstTaxLedger,
   gstTaxLedgers,
   importState,
   round2,
@@ -108,6 +109,15 @@ test('GST setup validates the GSTIN and creates the four tax ledgers', () => {
     assert.equal(company.groups.find((group) => group.id === ledger.groupId).key, 'dutiesTaxes');
   }
 
+  assert.equal(saveGstTaxLedger(company, 'cgst', 'Central GST').ok, true);
+  assert.equal(ledgers.cgst.name, 'Central GST');
+  assert.equal(saveGstTaxLedger(company, 'cgst', 'SGST').ok, false);
+  assert.equal(saveGstTaxLedger(company, 'bogus', 'Tax').ok, false);
+  const cess = saveGstTaxLedger(company, 'cess', 'GST Compensation Cess');
+  assert.equal(cess.ok, true, cess.error);
+  assert.equal(cess.created, false);
+  assert.equal(ledgers.cess.name, 'GST Compensation Cess');
+
   // Saving again reuses the same ledgers instead of duplicating them.
   const again = saveGstSettings(company, {
     enabled: true,
@@ -116,7 +126,42 @@ test('GST setup validates the GSTIN and creates the four tax ledgers', () => {
   });
   assert.equal(again.ok, true, again.error);
   assert.deepEqual(again.created, []);
-  assert.equal(company.ledgers.filter((ledger) => ledger.name === 'CGST').length, 1);
+  assert.equal(company.ledgers.filter((ledger) => ledger.name === 'Central GST').length, 1);
+});
+
+test('a service ledger SAC code feeds the HSN/SAC summary without stock items', () => {
+  const { company, customer } = fixture();
+  const service = addLedger(company, {
+    name: 'Consulting services',
+    groupId: groupId(company, 'directIncomes'),
+    opening: 0,
+    sacCode: '998311',
+  });
+  assert.equal(service.ok, true, service.error);
+  assert.equal(addLedger(company, {
+    name: 'Bad SAC',
+    groupId: groupId(company, 'directIncomes'),
+    opening: 0,
+    sacCode: '12',
+  }).ok, false);
+
+  const sale = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 1180 },
+      { ledgerId: service.ledger.id, side: 'Cr', amount: 1000 },
+    ],
+    gst: { rateId: rateId(company, 18), placeOfSupply: '27' },
+  });
+  assert.equal(sale.ok, true, sale.error);
+  const report = gstReturns(company, { from: '2026-04-01', to: '2026-04-30' });
+  const row = report.gstr1.hsn.find((entry) => entry.hsn === '998311');
+  assert.ok(row);
+  assert.equal(row.unit, 'OTH');
+  assert.equal(row.qty, 1);
+  assert.equal(row.taxable, 1000);
+  assert.equal(row.tax, 180);
 });
 
 test('an intra-state sale posts CGST and SGST and balances the party line', () => {
@@ -196,11 +241,25 @@ test('credit notes reduce outward supplies and debit notes reduce ITC', () => {
       { ledgerId: sales.id, side: 'Dr', amount: 1000 },
       { ledgerId: customer.id, side: 'Cr', amount: 1000 },
     ],
-    gst: { rateId: rateId(company, 18), placeOfSupply: '27' },
+    gst: { rateId: rateId(company, 18), placeOfSupply: '27', originalVoucherId: invoice.id },
   });
   assert.equal(credit.ok, true, credit.error);
   assert.equal(credit.voucher.total, 1180);
+  assert.equal(credit.voucher.gst.originalVoucherId, invoice.id);
   assert.equal(credit.voucher.lines.find((line) => line.ledgerId === customer.id).side, 'Cr');
+  const returns = gstReturns(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(returns.gstr1.cdnr[0].originalRef, 'Sales 1');
+  const wrongLink = addVoucher(company, {
+    type: 'CreditNote',
+    date: '2026-04-16',
+    lines: [
+      { ledgerId: sales.id, side: 'Dr', amount: 100 },
+      { ledgerId: customer.id, side: 'Cr', amount: 100 },
+    ],
+    gst: { rateId: rateId(company, 18), placeOfSupply: '27', originalVoucherId: purchase.id },
+  });
+  assert.equal(wrongLink.ok, false);
+  assert.match(wrongLink.error, /sales invoice/);
 
   const debit = addVoucher(company, {
     type: 'DebitNote',

@@ -135,6 +135,33 @@ test('auto-match pairs signed amounts within a week one-to-one', () => {
   assert.equal(matches[report.lines[2].id], paid.id);
 });
 
+test('auto-match honours narration overlap, date window and amount tolerance', () => {
+  const { company, bank, capital, rent } = bankFixture();
+  const first = receipt(company, bank, capital, 1000, '2026-04-10', 'Acme customer settlement');
+  const second = receipt(company, bank, capital, 1000, '2026-04-11', 'Other deposit');
+  const small = payment(company, bank, rent, 250, '2026-04-12', 'Rent for April');
+
+  saveBankStatement(company, bank.id, [
+    { date: '2026-04-10', description: 'Acme customer settlement', amount: 1000 },
+    { date: '2026-04-11', description: 'Unrelated credit', amount: 1000 },
+    { date: '2026-04-20', description: 'Rent April cheque', amount: -249.5 },
+  ]);
+
+  const withoutWidth = autoMatchBank(company, bank.id, { dateWindow: 2, tolerance: 1 });
+  assert.equal(withoutWidth.ok, true, withoutWidth.error);
+  assert.equal(withoutWidth.count, 2);
+  const firstLine = bankReconciliation(company, bank.id).lines.find((line) => line.description === 'Acme customer settlement');
+  const secondLine = bankReconciliation(company, bank.id).lines.find((line) => line.description === 'Unrelated credit');
+  assert.equal(company.bankReconciliations[bank.id].matches[firstLine.id], first.id);
+  assert.equal(company.bankReconciliations[bank.id].matches[secondLine.id], second.id);
+
+  const wider = autoMatchBank(company, bank.id, { dateWindow: 10, tolerance: 1 });
+  assert.equal(wider.ok, true, wider.error);
+  assert.equal(wider.count, 1);
+  const rentLine = bankReconciliation(company, bank.id).lines.find((line) => line.description === 'Rent April cheque');
+  assert.equal(company.bankReconciliations[bank.id].matches[rentLine.id], small.id);
+});
+
 test('unmatched statement lines can be posted as bank adjustments', () => {
   const { company, bank, rent } = bankFixture();
   saveBankStatement(company, bank.id, [

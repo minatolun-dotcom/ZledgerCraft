@@ -3097,9 +3097,20 @@ function statementDayGap(a, b) {
 }
 
 /** Greedy one-to-one match by signed amount, preferring the nearest date. */
-function autoMatchBank(company, ledgerId) {
+function matchWords(value) {
+  return new Set(
+    String(value ?? '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length >= 4),
+  );
+}
+
+function autoMatchBank(company, ledgerId, options = {}) {
   const config = company.bankReconciliations?.[ledgerId];
   if (!config) return { ok: false, error: 'Import a bank statement first.' };
+  const dateWindow = Math.min(60, Math.max(0, Math.round(Number(options.dateWindow ?? 7)) || 0));
+  const tolerance = Math.min(100000, Math.max(0, Number(options.tolerance ?? 0.005) || 0));
   const used = new Set(Object.values(config.matches));
   const entries = [];
   for (const voucher of company.vouchers) {
@@ -3109,6 +3120,7 @@ function autoMatchBank(company, ledgerId) {
         voucherId: voucher.id,
         date: voucher.date,
         no: Number(voucher.no) || 0,
+        narration: voucher.narration ?? '',
         amount: line.side === 'Cr' ? -round2(line.amount) : round2(line.amount),
       });
     }
@@ -3117,11 +3129,27 @@ function autoMatchBank(company, ledgerId) {
   const lines = [...config.statement.lines].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   for (const line of lines) {
     if (config.matches[line.id]) continue;
+    const words = matchWords(line.description);
     const candidates = entries
-      .filter((entry) => !used.has(entry.voucherId) && Math.abs(entry.amount - line.amount) < 0.005)
-      .map((entry) => ({ ...entry, gap: statementDayGap(line.date, entry.date) }))
-      .filter((entry) => entry.gap <= 7)
-      .sort((a, b) => a.gap - b.gap || a.date.localeCompare(b.date) || a.no - b.no);
+      .filter(
+        (entry) =>
+          !used.has(entry.voucherId) &&
+          Math.abs(entry.amount - line.amount) <= tolerance + 0.004,
+      )
+      .map((entry) => {
+        const entryWords = matchWords(entry.narration);
+        const overlap = [...words].filter((word) => entryWords.has(word)).length;
+        return { ...entry, gap: statementDayGap(line.date, entry.date), overlap };
+      })
+      .filter((entry) => entry.gap <= dateWindow)
+      .sort(
+        (a, b) =>
+          b.overlap - a.overlap ||
+          a.gap - b.gap ||
+          Math.abs(a.amount - line.amount) - Math.abs(b.amount - line.amount) ||
+          a.date.localeCompare(b.date) ||
+          a.no - b.no,
+      );
     const candidate = candidates[0];
     if (!candidate) continue;
     config.matches[line.id] = candidate.voucherId;
@@ -3635,6 +3663,31 @@ function gstTaxLedgers(company) {
   return map;
 }
 
+/** Creates or renames the ledger attached to a GST role. */
+function saveGstTaxLedger(company, role, name) {
+  if (!GST_ROLES[role]) return { ok: false, error: 'Choose a valid GST tax role.' };
+  const ledgerName = String(name ?? '').trim();
+  if (!ledgerName) return { ok: false, error: 'Tax ledger name is required.' };
+  if (ledgerName.length > 80) return { ok: false, error: 'Tax ledger name must be 80 characters or fewer.' };
+  const clash = findLedgerByName(company, ledgerName);
+  const existing = company.ledgers.find((ledger) => ledger.gstRole === role);
+  if (clash && clash !== existing) {
+    return { ok: false, error: `A ledger named "${ledgerName}" already exists.` };
+  }
+  if (existing) {
+    existing.name = ledgerName;
+    return { ok: true, ledger: existing, created: false };
+  }
+  const group =
+    company.groups.find((entry) => entry.key === 'dutiesTaxes') ??
+    company.groups.find((entry) => entry.key === 'currentLiabilities');
+  if (!group) return { ok: false, error: 'The Duties & Taxes group is missing from this company.' };
+  const result = addLedger(company, { name: ledgerName, groupId: group.id, opening: 0, openingType: 'Cr' });
+  if (!result.ok) return result;
+  result.ledger.gstRole = role;
+  return { ok: true, ledger: result.ledger, created: true };
+}
+
 function ensureGstLedger(company, role) {
   const existing = company.ledgers.find((ledger) => ledger.gstRole === role);
   if (existing) return { ledger: existing, created: false };
@@ -3700,6 +3753,8 @@ function normalizeGst(company) {
     address: clean(source.address, 200),
     city: clean(source.city, 80),
     pin: /^[0-9]{6}$/.test(String(source.pin ?? '').trim()) ? String(source.pin).trim() : '',
+    phone: clean(source.phone, 30),
+    email: clean(source.email, 120).toLowerCase(),
     stateCode: stateCode || (gstin ? gstin.slice(0, 2) : ''),
     rates: rates.length ? rates : seedGstRates(),
   };
@@ -3721,7 +3776,7 @@ function normalizeGst(company) {
       if (GST_STATES.some(([code]) => code === value)) ledger.stateCode = value;
       else delete ledger.stateCode;
     }
-    for (const [field, limit] of [['address', 200], ['city', 80]]) {
+    for (const [field, limit] of [['address', 200], ['city', 80], ['phone', 30]]) {
       if (ledger[field] === undefined) continue;
       const value = String(ledger[field] ?? '').trim().slice(0, limit);
       if (value) ledger[field] = value;
@@ -3732,9 +3787,20 @@ function normalizeGst(company) {
       if (/^[0-9]{6}$/.test(value)) ledger.pin = value;
       else delete ledger.pin;
     }
+    if (ledger.email !== undefined) {
+      const value = String(ledger.email ?? '').trim().toLowerCase().slice(0, 120);
+      if (value) ledger.email = value;
+      else delete ledger.email;
+    }
+    if (ledger.sacCode !== undefined) {
+      const value = String(ledger.sacCode ?? '').trim();
+      if (/^[0-9]{4}([0-9]{2}([0-9]{2})?)?$/.test(value)) ledger.sacCode = value;
+      else delete ledger.sacCode;
+    }
   }
 
   const ledgerIds = new Set((company.ledgers ?? []).map((ledger) => ledger.id));
+  const voucherIds = new Set((company.vouchers ?? []).map((voucher) => voucher.id));
   for (const voucher of company.vouchers ?? []) {
     if (!voucher.gst) continue;
     const entry = voucher.gst;
@@ -3755,6 +3821,7 @@ function normalizeGst(company) {
       partyGstin: isValidGstin(entry.partyGstin) ? String(entry.partyGstin).trim().toUpperCase() : '',
       ...(ledgerIds.has(entry.partyLedgerId) ? { partyLedgerId: entry.partyLedgerId } : {}),
       reverseCharge: Boolean(entry.reverseCharge),
+      ...(voucherIds.has(entry.originalVoucherId) ? { originalVoucherId: entry.originalVoucherId } : {}),
       taxable: round2(taxable),
       cgst: amount(entry.cgst),
       sgst: amount(entry.sgst),
@@ -3775,12 +3842,19 @@ function saveGstSettings(company, input = {}) {
   const address = String(input.address !== undefined ? input.address : existing.address ?? '').trim();
   const city = String(input.city !== undefined ? input.city : existing.city ?? '').trim();
   const pin = String(input.pin !== undefined ? input.pin : existing.pin ?? '').trim();
+  const phone = String(input.phone !== undefined ? input.phone : existing.phone ?? '').trim();
+  const email = String(input.email !== undefined ? input.email : existing.email ?? '').trim().toLowerCase();
 
   if (legalName.length > 120) return { ok: false, error: 'Legal name must be 120 characters or fewer.' };
   if (tradeName.length > 120) return { ok: false, error: 'Trade name must be 120 characters or fewer.' };
   if (address.length > 200) return { ok: false, error: 'Address must be 200 characters or fewer.' };
   if (city.length > 80) return { ok: false, error: 'City or location must be 80 characters or fewer.' };
   if (pin && !/^[0-9]{6}$/.test(pin)) return { ok: false, error: 'PIN code must be 6 digits.' };
+  if (phone.length > 30) return { ok: false, error: 'Phone number must be 30 characters or fewer.' };
+  if (email.length > 120) return { ok: false, error: 'Email address must be 120 characters or fewer.' };
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { ok: false, error: 'Enter a valid email address.' };
+  }
   if (gstin && !isValidGstin(gstin)) {
     return { ok: false, error: 'GSTIN must be 15 characters: state code, PAN, entity code, Z and checksum.' };
   }
@@ -3805,6 +3879,8 @@ function saveGstSettings(company, input = {}) {
   company.gst.address = address;
   company.gst.city = city;
   company.gst.pin = pin;
+  company.gst.phone = phone;
+  company.gst.email = email;
   company.gst.stateCode = GST_STATES.some(([code]) => code === stateCode) ? stateCode : '';
   if (enabled && !company.gst.stateCode) company.gst.stateCode = gstin.slice(0, 2);
 
@@ -4041,6 +4117,8 @@ function normalizeTds(company) {
       if (seenChallans.has(id)) return null;
       seenChallans.add(id);
       const section = (company.tds.sections ?? []).find((entry) => entry.id === challan.sectionId);
+      const lateFee = Math.max(0, parseAmount(challan.lateFee ?? 0) ?? 0);
+      const interest = Math.max(0, parseAmount(challan.interest ?? 0) ?? 0);
       return {
         id,
         kind,
@@ -4048,6 +4126,8 @@ function normalizeTds(company) {
         amount: round2(amount),
         reference: String(challan.reference ?? '').trim().slice(0, 40),
         bsrCode: String(challan.bsrCode ?? '').trim().slice(0, 20),
+        ...(lateFee ? { lateFee: round2(lateFee) } : {}),
+        ...(interest ? { interest: round2(interest) } : {}),
         ...(section ? { sectionId: section.id } : {}),
       };
     })
@@ -4206,6 +4286,14 @@ function addTaxChallan(company, input = {}) {
   const reference = String(input.reference ?? '').trim().slice(0, 40);
   if (reference.length > 40) return { ok: false, error: 'Challan reference must be 40 characters or fewer.' };
   const bsrCode = String(input.bsrCode ?? '').trim().slice(0, 20);
+  const lateFee = parseAmount(input.lateFee ?? 0);
+  if (lateFee === null || lateFee < 0) {
+    return { ok: false, error: 'Late fee must be a number of zero or more.' };
+  }
+  const interest = parseAmount(input.interest ?? 0);
+  if (interest === null || interest < 0) {
+    return { ok: false, error: 'Interest must be a number of zero or more.' };
+  }
   const section = (company.tds?.sections ?? []).find((entry) => entry.id === input.sectionId);
   if (section && section.kind !== kind) {
     return { ok: false, error: `${section.code} is a ${section.kind} section; choose a ${kind} section for this challan.` };
@@ -4218,6 +4306,8 @@ function addTaxChallan(company, input = {}) {
     amount,
     reference,
     bsrCode,
+    ...(lateFee ? { lateFee: round2(lateFee) } : {}),
+    ...(interest ? { interest: round2(interest) } : {}),
   };
   if (section) challan.sectionId = section.id;
   company.taxChallans.push(challan);
@@ -4241,6 +4331,8 @@ const DEFAULT_PAYROLL_STATUTORY = {
   esiRate: 0.75,
   esiCeiling: 21000,
   ptAmount: 200,
+  employerPfRate: 0,
+  employerEsiRate: 0,
 };
 
 function normalizeStatutorySettings(source = {}) {
@@ -4254,6 +4346,8 @@ function normalizeStatutorySettings(source = {}) {
     esiRate: number(source.esiRate, DEFAULT_PAYROLL_STATUTORY.esiRate, 0, 100),
     esiCeiling: number(source.esiCeiling, DEFAULT_PAYROLL_STATUTORY.esiCeiling, 0, 10000000),
     ptAmount: number(source.ptAmount, DEFAULT_PAYROLL_STATUTORY.ptAmount, 0, 100000),
+    employerPfRate: number(source.employerPfRate, DEFAULT_PAYROLL_STATUTORY.employerPfRate, 0, 100),
+    employerEsiRate: number(source.employerEsiRate, DEFAULT_PAYROLL_STATUTORY.employerEsiRate, 0, 100),
   };
 }
 
@@ -4596,6 +4690,9 @@ function payrollStatutoryRows(company, month = '') {
       const pf = round2((pfWage * settings.pfRate) / 100);
       const esi = gross > 0 && gross <= settings.esiCeiling ? round2((gross * settings.esiRate) / 100) : 0;
       const pt = gross > 0 ? round2(settings.ptAmount) : 0;
+      const employerPf = round2((pfWage * settings.employerPfRate) / 100);
+      const employerEsi =
+        gross > 0 && gross <= settings.esiCeiling ? round2((gross * settings.employerEsiRate) / 100) : 0;
       return {
         employeeId: employee.id,
         name: employee.name,
@@ -4607,6 +4704,9 @@ function payrollStatutoryRows(company, month = '') {
         esi,
         pt,
         total: round2(pf + esi + pt),
+        employerPf,
+        employerEsi,
+        employerTotal: round2(employerPf + employerEsi),
         heads: {
           PF: statutoryHeads.get('PF') ?? null,
           ESI: statutoryHeads.get('ESI') ?? null,
@@ -4948,6 +5048,7 @@ function runPayroll(company, input = {}) {
 
   const monthDays = Number(end.slice(8, 10));
   const monthStart = `${month}-01`;
+  const settings = normalizeStatutorySettings(company.payroll.statutory);
   const rows = [];
   const paidInput = input.paidDays && typeof input.paidDays === 'object' ? input.paidDays : {};
   for (const employee of employees) {
@@ -4974,6 +5075,10 @@ function runPayroll(company, input = {}) {
     if (deductionTotal > gross + 0.005) {
       return { ok: false, error: `${employee.name}'s deductions exceed earnings.` };
     }
+    const pfWage = Math.min(components.basic, settings.pfCeiling);
+    const employerPf = round2((pfWage * settings.employerPfRate) / 100);
+    const employerEsi =
+      gross > 0 && gross <= settings.esiCeiling ? round2((gross * settings.employerEsiRate) / 100) : 0;
     rows.push({
       employeeId: employee.id,
       name: employee.name,
@@ -4986,6 +5091,8 @@ function runPayroll(company, input = {}) {
       gross,
       deductionTotal,
       net: round2(gross - deductionTotal),
+      ...(employerPf ? { employerPf } : {}),
+      ...(employerEsi ? { employerEsi } : {}),
     });
   }
   if (!rows.length) {
@@ -4997,7 +5104,10 @@ function runPayroll(company, input = {}) {
     gross: round2(rows.reduce((sum, row) => sum + row.gross, 0)),
     deductions: round2(rows.reduce((sum, row) => sum + row.deductionTotal, 0)),
     net: round2(rows.reduce((sum, row) => sum + row.net, 0)),
+    employerPf: round2(rows.reduce((sum, row) => sum + (row.employerPf ?? 0), 0)),
+    employerEsi: round2(rows.reduce((sum, row) => sum + (row.employerEsi ?? 0), 0)),
   };
+  totals.employerCost = round2(totals.employerPf + totals.employerEsi);
   if (totals.gross <= 0) return { ok: false, error: 'Payroll has no earnings to post.' };
 
   const debitTotals = new Map();
@@ -5022,6 +5132,24 @@ function runPayroll(company, input = {}) {
     return { ok: false, error: 'Salary Payable ledger is missing. Save the payroll setup again to recreate it.' };
   }
   if (totals.net > 0) add(creditTotals, payable.id, totals.net);
+  if (totals.employerPf > 0) {
+    const pfPayable = findLedgerByName(company, 'Provident Fund Payable');
+    const salaries = payrollLedgers(company).salaries;
+    if (!pfPayable || !salaries) {
+      return { ok: false, error: 'Employer PF needs Salaries and Provident Fund Payable ledgers.' };
+    }
+    add(debitTotals, salaries.id, totals.employerPf);
+    add(creditTotals, pfPayable.id, totals.employerPf);
+  }
+  if (totals.employerEsi > 0) {
+    const esiPayable = findLedgerByName(company, 'ESI Payable');
+    const salaries = payrollLedgers(company).salaries;
+    if (!esiPayable || !salaries) {
+      return { ok: false, error: 'Employer ESI needs Salaries and ESI Payable ledgers.' };
+    }
+    add(debitTotals, salaries.id, totals.employerEsi);
+    add(creditTotals, esiPayable.id, totals.employerEsi);
+  }
 
   const lines = [];
   for (const [ledgerId, amount] of debitTotals) lines.push({ ledgerId, side: 'Dr', amount });
@@ -5813,6 +5941,15 @@ function ledgerTaxDetails(input = {}, existing = null) {
   } else if (existing?.stateCode) {
     details.stateCode = existing.stateCode;
   }
+  if (input.sacCode !== undefined) {
+    const sacCode = String(input.sacCode ?? '').trim();
+    if (sacCode && !/^[0-9]{4}([0-9]{2}([0-9]{2})?)?$/.test(sacCode)) {
+      return { error: 'SAC code must be 4, 6 or 8 digits.' };
+    }
+    if (sacCode) details.sacCode = sacCode;
+  } else if (existing?.sacCode) {
+    details.sacCode = existing.sacCode;
+  }
   if (input.address !== undefined) {
     const value = String(input.address ?? '').trim().slice(0, 200);
     if (value) details.address = value;
@@ -5833,6 +5970,21 @@ function ledgerTaxDetails(input = {}, existing = null) {
     if (value) details.pin = value;
   } else if (existing?.pin) {
     details.pin = existing.pin;
+  }
+  if (input.phone !== undefined) {
+    const value = String(input.phone ?? '').trim().slice(0, 30);
+    if (value) details.phone = value;
+  } else if (existing?.phone) {
+    details.phone = existing.phone;
+  }
+  if (input.email !== undefined) {
+    const value = String(input.email ?? '').trim().toLowerCase().slice(0, 120);
+    if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      return { error: 'Enter a valid party email address.' };
+    }
+    if (value) details.email = value;
+  } else if (existing?.email) {
+    details.email = existing.email;
   }
   if (details.gstin && !details.stateCode) details.stateCode = details.gstin.slice(0, 2);
   return { details };
@@ -6009,6 +6161,19 @@ function validateVoucherInput(company, type, input, options = {}) {
     if (partyGstin && !isValidGstin(partyGstin)) {
       return { ok: false, error: 'Party GSTIN must be 15 characters, or leave it blank for a B2C invoice.' };
     }
+    const originalVoucherId = String(gstInput.originalVoucherId ?? '').trim();
+    let originalVoucher = null;
+    if (originalVoucherId) {
+      originalVoucher = (company.vouchers ?? []).find((voucher) => voucher.id === originalVoucherId);
+      if (!originalVoucher) return { ok: false, error: 'The linked original invoice was not found.' };
+      const expected = type === 'CreditNote' ? 'Sales' : 'Purchase';
+      if (originalVoucher.type !== expected) {
+        return { ok: false, error: `Link a ${expected.toLowerCase()} invoice to this ${type === 'CreditNote' ? 'credit' : 'debit'} note.` };
+      }
+      if (originalVoucher.date > date) {
+        return { ok: false, error: 'The original invoice date cannot be after the note date.' };
+      }
+    }
 
     const supplyType = placeOfSupply === homeState ? 'Intra' : 'Inter';
     const rateValue = round2(rateEntry.rate);
@@ -6055,6 +6220,7 @@ function validateVoucherInput(company, type, input, options = {}) {
       partyGstin,
       partyLedgerId: balancing[0].ledgerId,
       reverseCharge: Boolean(gstInput.reverseCharge),
+      ...(originalVoucher ? { originalVoucherId: originalVoucher.id } : {}),
       taxable,
       cgst,
       sgst,
@@ -7808,10 +7974,32 @@ function addOrder(company, input) {
 function orderRemainingItems(order) {
   return (order.items ?? [])
     .map((line) => {
-      const qty = round3(Math.max(0, Number(line.qty) - Number(line.fulfilledQty ?? 0)));
+      const closed = Number(line.closedQty ?? 0);
+      const qty = round3(Math.max(0, Number(line.qty) - Number(line.fulfilledQty ?? 0) - closed));
       return { ...line, qty, amount: round2(qty * Number(line.rate ?? 0)) };
     })
     .filter((line) => line.qty > 0.0005);
+}
+
+/** Closes the unfulfilled remainder without pretending it was delivered. */
+function shortCloseOrder(company, orderId, reason = '') {
+  const order = (company.orders ?? []).find((entry) => entry.id === orderId && !entry.kind);
+  if (!order) return { ok: false, error: 'Sales or purchase order not found.' };
+  if (order.status !== 'Open') return { ok: false, error: 'Only an open order can be short-closed.' };
+  const remaining = orderRemainingItems(order);
+  if (!remaining.length) return { ok: false, error: 'This order has no remaining quantity.' };
+  const closed = round2(remaining.reduce((sum, line) => sum + line.amount, 0));
+  for (const line of order.items ?? []) {
+    const open = round3(Number(line.qty) - Number(line.fulfilledQty ?? 0) - Number(line.closedQty ?? 0));
+    if (open > 0.0005) line.closedQty = round3(Number(line.closedQty ?? 0) + open);
+  }
+  order.status = 'Closed';
+  order.closedByShortClose = true;
+  order.closedAt = new Date().toISOString();
+  const note = String(reason ?? '').trim().slice(0, 200);
+  if (note) order.closeReason = note;
+  else delete order.closeReason;
+  return { ok: true, order, value: closed, count: remaining.length };
 }
 
 /** Recomputes an order's fulfilled quantities from every linked voucher. */
@@ -7834,11 +8022,12 @@ function refreshOrderFulfilment(company, order) {
     }
   }
   const complete = (order.items ?? []).every(
-    (line) => Number(line.fulfilledQty ?? 0) >= Number(line.qty) - 0.0005,
+    (line) =>
+      Number(line.fulfilledQty ?? 0) + Number(line.closedQty ?? 0) >= Number(line.qty) - 0.0005,
   );
   if (complete && order.status === 'Open') {
     order.status = 'Closed';
-    order.closedByFulfilment = true;
+    order.closedByFulfilment = !order.closedByShortClose;
   } else if (!complete && order.status === 'Closed' && order.closedByFulfilment) {
     order.status = 'Open';
     delete order.closedByFulfilment;
@@ -7914,6 +8103,8 @@ function setOrderStatus(company, orderId, status, reason = '') {
   if (status === 'Open') {
     delete order.closeReason;
     delete order.closedAt;
+    delete order.closedByShortClose;
+    for (const line of order.items ?? []) delete line.closedQty;
   } else {
     const note = String(reason ?? '').trim().slice(0, 200);
     if (note) order.closeReason = note;
@@ -8279,7 +8470,7 @@ function updateLedger(company, ledgerId, input) {
     if (party.details.pan) ledger.pan = party.details.pan;
     else delete ledger.pan;
   }
-  for (const field of ['address', 'city', 'pin']) {
+  for (const field of ['address', 'city', 'pin', 'phone', 'email', 'sacCode']) {
     if (input[field] === undefined) continue;
     if (party.details[field]) ledger[field] = party.details[field];
     else delete ledger[field];
@@ -9339,6 +9530,14 @@ function validateImportedCompany(company) {
         if (fulfilled === null || fulfilled < 0 || fulfilled > qty + 0.0005) {
           return `Company "${name}": order ${order.no ?? ''} has an invalid fulfilled quantity.`;
         }
+      }
+      const closed = parseQty(line.closedQty ?? 0);
+      if (
+        closed === null ||
+        closed < 0 ||
+        closed + (parseQty(line.fulfilledQty ?? 0) ?? 0) > qty + 0.0005
+      ) {
+        return `Company "${name}": order ${order.no ?? ''} has an invalid short-closed quantity.`;
       }
       total = round2(total + qty * rate);
     }
@@ -12555,6 +12754,9 @@ function gstReturns(company, filters = {}) {
   for (const voucher of rows) {
     const gst = voucher.gst;
     const taxTotal = round2(gst.cgst + gst.sgst + gst.igst + gst.cess);
+    const original = gst.originalVoucherId
+      ? (company.vouchers ?? []).find((entry) => entry.id === gst.originalVoucherId)
+      : null;
     const document = {
       id: voucher.id,
       type: voucher.type,
@@ -12569,6 +12771,9 @@ function gstReturns(company, filters = {}) {
       rate: gst.rate,
       cessRate: gst.cessRate,
       reverseCharge: Boolean(gst.reverseCharge),
+      originalVoucherId: original?.id ?? '',
+      originalRef: original ? original.bill?.ref || `${VOUCHER_TYPES[original.type]?.label ?? original.type} ${original.no}` : '',
+      originalNo: original?.no ?? '',
       taxable: gst.taxable,
       cgst: gst.cgst,
       sgst: gst.sgst,
@@ -12600,25 +12805,43 @@ function gstReturns(company, filters = {}) {
     }
 
     // HSN summary covers outward invoices and their credit notes.
-    if ((voucher.type === 'Sales' || voucher.type === 'CreditNote') && voucher.items?.length) {
+    if (voucher.type === 'Sales' || voucher.type === 'CreditNote') {
       const direction = voucher.type === 'Sales' ? 1 : -1;
-      for (const line of voucher.items) {
-        const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
-        const hsn = item?.hsn || 'Unclassified';
-        const unit = uqcFor(company, item?.unitId);
-        const key = `${hsn}|${unit}`;
-        let bucket = hsnMap.get(key);
-        if (!bucket) {
-          bucket = { hsn, unit, description: item?.name ?? '', qty: 0, taxable: 0, tax: 0 };
-          hsnMap.set(key, bucket);
-        } else if (!bucket.description && item?.name) {
-          bucket.description = item.name;
+      if (voucher.items?.length) {
+        for (const line of voucher.items) {
+          const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
+          const hsn = item?.hsn || 'Unclassified';
+          const unit = uqcFor(company, item?.unitId);
+          const key = `${hsn}|${unit}`;
+          let bucket = hsnMap.get(key);
+          if (!bucket) {
+            bucket = { hsn, unit, description: item?.name ?? '', qty: 0, taxable: 0, tax: 0 };
+            hsnMap.set(key, bucket);
+          } else if (!bucket.description && item?.name) {
+            bucket.description = item.name;
+          }
+          const lineAmount = round2(line.amount ?? round2((line.qty ?? 0) * (line.rate ?? 0)));
+          const share = gst.taxable > 0 ? lineAmount / gst.taxable : 0;
+          bucket.qty = round3(bucket.qty + direction * (line.qty ?? 0));
+          bucket.taxable = round2(bucket.taxable + direction * lineAmount);
+          bucket.tax = round2(bucket.tax + direction * round2(taxTotal * share));
         }
-        const lineAmount = round2(line.amount ?? round2((line.qty ?? 0) * (line.rate ?? 0)));
-        const share = gst.taxable > 0 ? lineAmount / gst.taxable : 0;
-        bucket.qty = round3(bucket.qty + direction * (line.qty ?? 0));
-        bucket.taxable = round2(bucket.taxable + direction * lineAmount);
-        bucket.tax = round2(bucket.tax + direction * round2(taxTotal * share));
+      } else {
+        const serviceEntry = (voucher.lines ?? [])
+          .map((line) => ({ line, ledger: (company.ledgers ?? []).find((ledger) => ledger.id === line.ledgerId) }))
+          .find((entry) => entry.ledger?.sacCode);
+        if (serviceEntry) {
+          const hsn = serviceEntry.ledger.sacCode;
+          const key = `${hsn}|OTH`;
+          let bucket = hsnMap.get(key);
+          if (!bucket) {
+            bucket = { hsn, unit: 'OTH', description: serviceEntry.ledger.name, qty: 0, taxable: 0, tax: 0 };
+            hsnMap.set(key, bucket);
+          }
+          bucket.qty = round3(bucket.qty + direction);
+          bucket.taxable = round2(bucket.taxable + direction * gst.taxable);
+          bucket.tax = round2(bucket.tax + direction * taxTotal);
+        }
       }
     }
   }
@@ -12846,6 +13069,9 @@ function withholdingSummary(company, filters = {}) {
         id: challan.id,
         date: challan.date,
         amount: challan.amount,
+        lateFee: challan.lateFee ?? 0,
+        interest: challan.interest ?? 0,
+        total: round2(challan.amount + (challan.lateFee ?? 0) + (challan.interest ?? 0)),
         reference: challan.reference,
         bsrCode: challan.bsrCode,
         section: section ? `${section.code} · ${section.label}` : 'Not linked',
@@ -12901,6 +13127,11 @@ function withholdingSummary(company, filters = {}) {
     outstanding: round2(payableToDate - paidToDate),
     challans,
     challanTotal: round2(challans.reduce((sum, challan) => sum + challan.amount, 0)),
+    challanLateFee: round2(challans.reduce((sum, challan) => sum + challan.lateFee, 0)),
+    challanInterest: round2(challans.reduce((sum, challan) => sum + challan.interest, 0)),
+    challanOutlay: round2(
+      challans.reduce((sum, challan) => sum + challan.amount + challan.lateFee + challan.interest, 0),
+    ),
     thresholdRows,
   };
 }
@@ -13288,6 +13519,8 @@ function sellerProfile(company) {
     address: gst.address ?? '',
     city: gst.city ?? '',
     pin: gst.pin ?? '',
+    phone: gst.phone ?? '',
+    email: gst.email ?? '',
     stateCode: gst.stateCode ?? '',
     stateName: gstStateName(gst.stateCode),
   };
@@ -13304,6 +13537,8 @@ function buyerProfile(company, voucher, document) {
     address: ledger?.address ?? '',
     city: ledger?.city ?? '',
     pin: ledger?.pin ?? '',
+    phone: ledger?.phone ?? '',
+    email: ledger?.email ?? '',
     stateCode: ledger?.stateCode || gstin.slice(0, 2) || document.placeOfSupply || '',
     stateName: gstStateName(ledger?.stateCode || gstin.slice(0, 2) || document.placeOfSupply),
   };
@@ -13322,15 +13557,18 @@ function partyIssues(label, party) {
 function eInvoiceLineRows(company, voucher, document) {
   const items = voucher.items ?? [];
   if (!items.length) {
+    const service = (voucher.lines ?? [])
+      .map((line) => (company.ledgers ?? []).find((ledger) => ledger.id === line.ledgerId))
+      .find((ledger) => ledger?.sacCode);
     return [
       {
-        description: document.ref || 'As per invoice',
-        hsn: '',
+        description: service?.name || document.ref || 'As per invoice',
+        hsn: service?.sacCode || '',
         qty: 1,
         unit: 'OTH',
         unitPrice: document.taxable,
         taxable: document.taxable,
-        missingHsn: true,
+        missingHsn: !service?.sacCode,
       },
     ];
   }
@@ -13401,8 +13639,8 @@ function eInvoicePayload(company, document, voucher, seller, buyer, lines) {
       Loc: seller.city,
       Pin: seller.pin,
       Stcd: seller.stateCode,
-      Ph: '',
-      Em: '',
+      Ph: seller.phone || '',
+      Em: seller.email || '',
     },
     BuyerDtls: {
       Gstin: buyer.gstin || 'URP',
@@ -13414,8 +13652,8 @@ function eInvoicePayload(company, document, voucher, seller, buyer, lines) {
       Loc: buyer.city,
       Pin: buyer.pin,
       Stcd: buyer.stateCode,
-      Ph: '',
-      Em: '',
+      Ph: buyer.phone || '',
+      Em: buyer.email || '',
     },
     ItemList: itemList,
     ValDtls: {
@@ -16387,6 +16625,10 @@ function mastersScreen() {
               <input name="gstin" maxlength="15" placeholder="Optional B2B GSTIN" value="${esc(editingLedger?.gstin ?? '')}">
             </label>
             <label class="field">
+              <span>SAC code (services)</span>
+              <input name="sacCode" inputmode="numeric" maxlength="8" placeholder="Optional 4, 6 or 8 digits" value="${esc(editingLedger?.sacCode ?? '')}">
+            </label>
+            <label class="field">
               <span>GST state</span>
               <select name="stateCode">
                 <option value=""${editingLedger?.stateCode ? '' : ' selected'}>Not set</option>
@@ -16407,6 +16649,14 @@ function mastersScreen() {
             <label class="field">
               <span>Party PIN code</span>
               <input name="pin" inputmode="numeric" maxlength="6" placeholder="6 digits" value="${esc(editingLedger?.pin ?? '')}">
+            </label>
+            <label class="field">
+              <span>Party phone (optional)</span>
+              <input name="phone" maxlength="30" placeholder="For e-invoice" value="${esc(editingLedger?.phone ?? '')}">
+            </label>
+            <label class="field">
+              <span>Party email (optional)</span>
+              <input name="email" type="email" maxlength="120" placeholder="For e-invoice" value="${esc(editingLedger?.email ?? '')}">
             </label>`
           : ''}
         ${active.tds?.enabled
@@ -18526,6 +18776,20 @@ function ordersScreen() {
       : '<p class="muted">No orders in this period. Record one below; orders do not post to the ledger or move stock.</p>'}`,
     'Open orders can prefill a sales or purchase voucher. Creating the voucher does not change the order status.',
   )}
+  ${openOrders.length
+    ? panel(
+        'Short-close an order',
+        `<form id="short-close-order-form" class="inline-form" novalidate>
+          <select name="orderId" aria-label="Order to short-close">${openOrders
+            .map((order) => `<option value="${esc(order.id)}">${order.type === 'Sales' ? 'SO' : 'PO'}-${order.no} · ${esc(parties.get(order.partyLedgerId)?.name ?? 'Unknown party')}</option>`)
+            .join('')}</select>
+          <input name="reason" maxlength="200" placeholder="Reason (optional)" aria-label="Short-close reason">
+          <button class="btn small" type="submit">Short-close remaining quantity</button>
+          <p id="short-close-error" class="form-error" role="alert"></p>
+        </form>`,
+        'Writes off the unfulfilled remainder with an optional reason. No stock moves and no voucher is posted; reopening clears the short-closed quantities.',
+      )
+    : ''}
   ${panel(
     'Quotations',
     `<form id="quotation-form" class="form-grid" novalidate>
@@ -20259,6 +20523,14 @@ function gstScreen() {
         <input name="pin" inputmode="numeric" maxlength="6" placeholder="6 digits" value="${esc(gst.pin ?? '')}">
       </label>
       <label class="field">
+        <span>Phone (optional)</span>
+        <input name="phone" maxlength="30" placeholder="For e-invoice" value="${esc(gst.phone ?? '')}">
+      </label>
+      <label class="field">
+        <span>Email (optional)</span>
+        <input name="email" type="email" maxlength="120" placeholder="For e-invoice" value="${esc(gst.email ?? '')}">
+      </label>
+      <label class="field">
         <span>Home state</span>
         <select name="stateCode">${stateOptions}</select>
       </label>
@@ -20271,7 +20543,7 @@ function gstScreen() {
       </div>
       <p id="gst-error" class="form-error" role="alert"></p>
     </form>
-    <p class="muted small">Enabling GST creates or reuses CGST, SGST, IGST and Cess ledgers under Duties &amp; Taxes. The home state decides CGST+SGST versus IGST from the place of supply.</p>
+    <p class="muted small">Enabling GST creates or reuses CGST, SGST, IGST and Cess ledgers under Duties &amp; Taxes. The home state decides CGST+SGST versus IGST from the place of supply. Phone and email are copied into draft e-invoice seller details.</p>
     <div class="table-scroll" tabindex="0"><table class="data-table compact">
       <thead><tr><th>Tax ledger</th><th>Ledger</th><th class="num">Closing (as on ${esc(dateLabel(to))})</th></tr></thead>
       <tbody>${ledgerRoleRows}</tbody>
@@ -20279,6 +20551,20 @@ function gstScreen() {
     gst.enabled
       ? `GST is enabled${gst.gstin ? ` for ${esc(gst.gstin)}` : ''}. Invoice tax is computed on save and posted to the tax ledgers.`
       : 'GST is off. Tax is not computed on vouchers until settings are saved with GST enabled.',
+  );
+
+  const taxLedgerPanel = panel(
+    'Tax ledger names',
+    `<form id="gst-tax-ledger-form" class="inline-form" novalidate>
+      <select name="role" aria-label="GST tax role">${Object.entries(GST_ROLES)
+        .map(([role, label]) => `<option value="${role}">${label}</option>`)
+        .join('')}</select>
+      <input name="name" maxlength="80" placeholder="Ledger name" aria-label="Tax ledger name" required>
+      <button class="btn small" type="submit">Create or rename</button>
+      <p id="gst-tax-ledger-error" class="form-error" role="alert"></p>
+    </form>
+    <p class="muted small">Each role points at one ordinary Duties &amp; Taxes ledger. Rename it here without changing posted vouchers; create a missing role ledger from the same form.</p>`,
+    'The role tag controls which ledger receives CGST, SGST, IGST or Cess.',
   );
 
   const ratesPanel = panel(
@@ -20360,7 +20646,7 @@ function gstScreen() {
   const cdnrTable = report.gstr1.cdnr.length
     ? `<h3 class="section-title">Credit notes <span class="count">${report.gstr1.cdnr.length}</span></h3>
       <div class="table-scroll" tabindex="0"><table class="data-table compact gst-report-table">
-        <thead><tr><th>Credit note</th><th>Date</th><th>Customer</th><th>GSTIN</th><th class="num">Taxable</th><th class="num">CGST</th><th class="num">SGST</th><th class="num">IGST</th><th class="num">Total</th></tr></thead>
+        <thead><tr><th>Credit note</th><th>Date</th><th>Customer</th><th>GSTIN</th><th>Original invoice</th><th class="num">Taxable</th><th class="num">CGST</th><th class="num">SGST</th><th class="num">IGST</th><th class="num">Total</th></tr></thead>
         <tbody>${report.gstr1.cdnr
           .map(
             (row) => `<tr class="clickable" data-action="open-voucher" data-id="${esc(row.id)}">
@@ -20368,6 +20654,7 @@ function gstScreen() {
               <td>${esc(dateLabel(row.date))}</td>
               <td>${esc(row.party)}</td>
               <td>${row.partyGstin ? esc(row.partyGstin) : '<span class="muted">B2C</span>'}</td>
+              <td>${row.originalRef ? esc(row.originalRef) : '<span class="muted">Not linked</span>'}</td>
               <td class="num">${money(row.taxable)}</td>
               <td class="num">${money(row.cgst)}</td>
               <td class="num">${money(row.sgst)}</td>
@@ -20376,7 +20663,7 @@ function gstScreen() {
             </tr>`,
           )
           .join('')}</tbody>
-        <tfoot><tr><td colspan="4">Reduces outward supplies</td><td class="num">${money(report.creditNotes.taxable)}</td><td class="num">${money(report.creditNotes.cgst)}</td><td class="num">${money(report.creditNotes.sgst)}</td><td class="num">${money(report.creditNotes.igst)}</td><td></td></tr></tfoot>
+        <tfoot><tr><td colspan="5">Reduces outward supplies</td><td class="num">${money(report.creditNotes.taxable)}</td><td class="num">${money(report.creditNotes.cgst)}</td><td class="num">${money(report.creditNotes.sgst)}</td><td class="num">${money(report.creditNotes.igst)}</td><td></td></tr></tfoot>
       </table></div>`
     : '';
 
@@ -20472,7 +20759,7 @@ function gstScreen() {
         : '<p class="muted">No voucher carries GST in this period. Open a sales or purchase voucher, choose a GST rate and save.</p>',
     )}`;
 
-  return `${setupPanel}${ratesPanel}${gst.enabled || report.count ? reportPanels : ''}
+  return `${setupPanel}${taxLedgerPanel}${ratesPanel}${gst.enabled || report.count ? reportPanels : ''}
     ${panel(
       'GST annual working paper',
       `<table class="data-table compact">
@@ -20978,6 +21265,9 @@ function tdsScreen() {
         <td class="muted small">${esc(challan.section)}</td>
         <td class="muted small">${esc(challan.bsrCode || '')}</td>
         <td class="num">${money(challan.amount)}</td>
+        <td class="num">${challan.lateFee ? money(challan.lateFee) : '—'}</td>
+        <td class="num">${challan.interest ? money(challan.interest) : '—'}</td>
+        <td class="num"><strong>${money(challan.total)}</strong></td>
         <td class="row-actions">
           <button class="btn small danger" type="button" data-action="delete-challan" data-id="${esc(challan.id)}">Delete</button>
         </td>
@@ -21000,18 +21290,20 @@ function tdsScreen() {
       <input name="amount" inputmode="decimal" placeholder="Amount" aria-label="Challan amount" required>
       <input name="reference" maxlength="40" placeholder="Challan reference" aria-label="Challan reference">
       <input name="bsrCode" maxlength="20" placeholder="BSR code" aria-label="BSR code">
+      <input name="lateFee" inputmode="decimal" placeholder="Late fee" aria-label="Late fee">
+      <input name="interest" inputmode="decimal" placeholder="Interest" aria-label="Interest">
       <select name="sectionId" aria-label="Challan section">${challanSectionOptions}</select>
       <button class="btn small" type="submit">Add challan</button>
       <p id="challan-error" class="form-error" role="alert"></p>
     </form>
     ${report.challans.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
-          <thead><tr><th>Date</th><th>Reference</th><th>Section</th><th>BSR</th><th class="num">Amount</th><th></th></tr></thead>
+          <thead><tr><th>Date</th><th>Reference</th><th>Section</th><th>BSR</th><th class="num">Tax</th><th class="num">Late fee</th><th class="num">Interest</th><th class="num">Total</th><th></th></tr></thead>
           <tbody>${challanRows}</tbody>
-          <tfoot><tr><td colspan="4">${report.challans.length} challan${report.challans.length === 1 ? '' : 's'} in this period</td><td class="num">${money(report.challanTotal)}</td><td></td></tr></tfoot>
+          <tfoot><tr><td colspan="4">${report.challans.length} challan${report.challans.length === 1 ? '' : 's'} in this period</td><td class="num">${money(report.challanTotal)}</td><td class="num">${money(report.challanLateFee)}</td><td class="num">${money(report.challanInterest)}</td><td class="num">${money(report.challanOutlay)}</td><td></td></tr></tfoot>
         </table></div>`
       : '<p class="muted">No challans in this period.</p>'}`,
-    'Challans record payments against the payable ledger for tracking only; they do not post a voucher or reconcile automatically.',
+    'Challans record tax, optional late fee and optional interest for tracking only; they do not post a voucher or reconcile automatically.',
   );
 
   const reportRows = report.documents
@@ -21268,6 +21560,8 @@ function payrollScreen() {
       <label class="field"><span>ESI rate %</span><input name="esiRate" inputmode="decimal" value="${esc(payroll.statutory?.esiRate ?? 0.75)}"></label>
       <label class="field"><span>ESI wage ceiling</span><input name="esiCeiling" inputmode="decimal" value="${esc(payroll.statutory?.esiCeiling ?? 21000)}"></label>
       <label class="field"><span>Professional tax</span><input name="ptAmount" inputmode="decimal" value="${esc(payroll.statutory?.ptAmount ?? 200)}"></label>
+      <label class="field"><span>Employer PF rate %</span><input name="employerPfRate" inputmode="decimal" value="${esc(payroll.statutory?.employerPfRate ?? 0)}"></label>
+      <label class="field"><span>Employer ESI rate %</span><input name="employerEsiRate" inputmode="decimal" value="${esc(payroll.statutory?.employerEsiRate ?? 0)}"></label>
       <div class="field form-actions">
         <button class="btn primary" type="submit">Save payroll settings</button>
       </div>
@@ -21449,18 +21743,19 @@ function payrollScreen() {
       <td class="num">${money(row.esi)}</td>
       <td class="num">${money(row.pt)}</td>
       <td class="num">${money(row.total)}</td>
+      <td class="num">${money(row.employerTotal)}</td>
     </tr>`)
     .join('');
   const statutoryPanel = panel(
     'Statutory calculator',
     `${statutory.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
-          <thead><tr><th>Employee</th><th class="num">Basic</th><th class="num">Gross</th><th class="num">PF</th><th class="num">ESI</th><th class="num">PT</th><th class="num">Total</th></tr></thead>
+          <thead><tr><th>Employee</th><th class="num">Basic</th><th class="num">Gross</th><th class="num">PF</th><th class="num">ESI</th><th class="num">PT</th><th class="num">Employee total</th><th class="num">Employer share</th></tr></thead>
           <tbody>${statutoryTable}</tbody>
         </table></div>
         <div class="form-actions"><button class="btn small" type="button" data-action="apply-statutory">Apply to pay structures</button></div>`
       : '<p class="muted">Add active employees with earnings to compute PF, ESI and PT.</p>'}`,
-    'PF uses Basic up to the wage ceiling, ESI applies to gross within its ceiling, and PT uses the fixed amount. Applying updates employee deduction amounts; a payroll run still posts explicitly.',
+    'PF uses Basic up to the wage ceiling, ESI applies to gross within its ceiling, and PT uses the fixed amount. Employer PF/ESI rates are optional; when set, a payroll run debits Salaries and credits the PF/ESI payable ledgers for the employer share. Applying updates employee deduction amounts; a payroll run still posts explicitly.',
   );
 
   const runsPanel = panel(
@@ -22184,7 +22479,7 @@ function bankReconScreen() {
           <select id="recon-adjust-ledger"><option value="">Choose ledger…</option>${adjustmentOptions}</select>
         </label>
       </div>
-      <p class="muted small">For an unmatched statement line, choose the other side and press Adjust. This posts a Journal to the bank ledger and marks the line matched.</p>
+      <p class="muted small">For an unmatched statement line, choose the other side and press Adjust. This posts a Journal to the bank ledger and marks the line matched. Auto-match uses narration overlap first, then date and amount; a tolerance allows small bank charges.</p>
       <div class="ratio-grid">
         <div class="ratio-card"><span class="ratio-label">Matched</span><strong>${report.matchedCount} / ${report.lines.length}</strong><span class="muted small">${report.matchedPercent}% of statement lines</span></div>
         <div class="ratio-card"><span class="ratio-label">Statement unmatched</span><strong>${report.unmatchedCount}</strong><span class="muted small">${money(report.unmatchedStatementAmount)} value</span></div>
@@ -22195,8 +22490,12 @@ function bankReconScreen() {
         ? `<p class="${report.statementDifference === 0 ? 'muted small' : 'off-text'}">Statement balances: opening ${money(report.balances.opening)}, closing ${money(report.balances.closing)}, movement ${money(report.statementNet)}. ${report.statementDifference === 0 ? 'Opening plus movement equals closing.' : `Difference ${money(report.statementDifference)} — the statement may be incomplete or mistyped.`}</p>`
         : ''}
       ${report.importedAt
-        ? `<div class="form-actions">
-             <button class="btn small primary" type="button" data-action="recon-auto"${canWrite ? '' : ' disabled'}>Auto-match by amount and date</button>
+        ? `<div class="filter-bar">
+             <label class="field inline-field"><span>Date window (days)</span><input id="recon-date-window" inputmode="numeric" min="0" max="60" value="7" aria-label="Auto-match date window"></label>
+             <label class="field inline-field"><span>Amount tolerance</span><input id="recon-amount-tolerance" inputmode="decimal" min="0" placeholder="0.00" aria-label="Auto-match amount tolerance"></label>
+           </div>
+           <div class="form-actions">
+             <button class="btn small primary" type="button" data-action="recon-auto"${canWrite ? '' : ' disabled'}>Auto-match by amount, date and narration</button>
              <button class="btn small danger" type="button" data-action="recon-clear"${canWrite ? '' : ' disabled'}>Clear statement</button>
            </div>`
         : ''}`,
@@ -23254,6 +23553,7 @@ function prepareDraft(type, source = null) {
       rateId: source?.gst?.rateId ?? '',
       partyGstin: source?.gst?.partyGstin ?? '',
       placeOfSupply: source?.gst?.placeOfSupply ?? '',
+      originalVoucherId: source?.gst?.originalVoucherId ?? '',
       reverseCharge: Boolean(source?.gst?.reverseCharge),
     },
     tds: {
@@ -23279,14 +23579,14 @@ function prepareDraft(type, source = null) {
 const VOUCHER_DRAFT_PREFIX = 'zc.voucherDraft.';
 let voucherDraftTimer = null;
 
-function voucherDraftKey(companyId, type) {
-  return `${VOUCHER_DRAFT_PREFIX}${companyId}.${type}`;
+function voucherDraftKey(companyId, type, voucherId = '') {
+  return `${VOUCHER_DRAFT_PREFIX}${companyId}.${type}${voucherId ? `.${voucherId}` : ''}`;
 }
 
-function readVoucherDraft(company, type) {
+function readVoucherDraft(company, type, voucherId = '') {
   if (!company?.id || typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(voucherDraftKey(company.id, type));
+    const raw = localStorage.getItem(voucherDraftKey(company.id, type, voucherId));
     if (!raw || raw.length > 200000) return null;
     const saved = JSON.parse(raw);
     if (!saved || saved.type !== type || !Array.isArray(saved.lines)) return null;
@@ -23296,23 +23596,23 @@ function readVoucherDraft(company, type) {
   }
 }
 
-function clearVoucherDraft(company, type) {
+function clearVoucherDraft(company, type, voucherId = '') {
   if (!company?.id || typeof localStorage === 'undefined') return;
   try {
-    localStorage.removeItem(voucherDraftKey(company.id, type));
+    localStorage.removeItem(voucherDraftKey(company.id, type, voucherId));
   } catch {
     // A full or unavailable storage area should not block voucher entry.
   }
 }
 
 function saveVoucherDraft() {
-  if (!draft || view.screen !== 'voucherNew' || view.editId || view.pendingEdit) return;
+  if (!draft || view.screen !== 'voucherNew') return;
   const active = company();
   const form = document.getElementById('voucher-form');
   if (!active?.id || !form || typeof localStorage === 'undefined') return;
   try {
     const snapshot = { ...readVoucherForm(), orderId: draft.orderId || '' };
-    localStorage.setItem(voucherDraftKey(active.id, snapshot.type), JSON.stringify(snapshot));
+    localStorage.setItem(voucherDraftKey(active.id, snapshot.type, view.editId || ''), JSON.stringify(snapshot));
   } catch {
     // Ignore quota errors; the draft is a convenience, not the save of record.
   }
@@ -23350,7 +23650,9 @@ async function openAlter(voucherId) {
     return false;
   }
   if (!(await acquireRecordLease('voucher', voucher.id))) return false;
-  prepareDraft(voucher.type, voucher);
+  const saved = readVoucherDraft(active, voucher.type, voucher.id);
+  prepareDraft(voucher.type, saved ?? voucher);
+  if (saved) setFlash('Restored your unsaved changes to this voucher.');
   navigate('voucherNew', { type: voucher.type, editId: voucher.id });
   return true;
 }
@@ -23483,6 +23785,7 @@ function formGst(form) {
     rateId: rate.value,
     partyGstin: form.querySelector('[name="gstPartyGstin"]')?.value ?? '',
     placeOfSupply: form.querySelector('[name="gstPlaceOfSupply"]')?.value ?? '',
+    originalVoucherId: form.querySelector('[name="gstOriginalVoucher"]')?.value ?? '',
     reverseCharge: Boolean(form.querySelector('[name="gstReverseCharge"]')?.checked),
   };
 }
@@ -23554,6 +23857,19 @@ function gstVoucherBlock(active) {
         `<option value="${code}"${draft.gst?.placeOfSupply === code ? ' selected' : ''}>${code} · ${esc(name)}</option>`,
     ),
   ].join('');
+  const originalType = draft.type === 'CreditNote' ? 'Sales' : draft.type === 'DebitNote' ? 'Purchase' : '';
+  const originalOptions = originalType
+    ? [
+        '<option value="">Not linked</option>',
+        ...(active.vouchers ?? [])
+          .filter((voucher) => voucher.type === originalType && voucher.id !== view.editId)
+          .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no)
+          .map(
+            (voucher) =>
+              `<option value="${esc(voucher.id)}"${draft.gst?.originalVoucherId === voucher.id ? ' selected' : ''}>${esc(voucher.bill?.ref || `${voucherLabel(voucher.type)} ${voucher.no}`)} · ${esc(dateLabel(voucher.date))}</option>`,
+          ),
+      ].join('')
+    : '';
   return `<div class="gst-block">
       <div class="inventory-head">
         <h2>GST</h2>
@@ -23565,6 +23881,7 @@ function gstVoucherBlock(active) {
           <input name="gstPartyGstin" maxlength="15" placeholder="Blank for B2C" value="${esc(draft.gst?.partyGstin ?? '')}">
         </label>
         <label class="field"><span>Place of supply</span><select name="gstPlaceOfSupply">${stateOptions}</select></label>
+        ${originalType ? `<label class="field"><span>Original ${originalType.toLowerCase()} invoice</span><select name="gstOriginalVoucher">${originalOptions}</select></label>` : ''}
         <label class="field gst-check">
           <input type="checkbox" name="gstReverseCharge"${draft.gst?.reverseCharge ? ' checked' : ''}>
           <span>Reverse charge</span>
@@ -24879,6 +25196,31 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'short-close-order-form') {
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = shortCloseOrder(active, data.get('orderId'), data.get('reason'));
+    if (!result.ok) {
+      showFormError(result.error, 'short-close-error');
+      return;
+    }
+    logAudit(
+      'order.shortClose',
+      `Short-closed ${result.order.type === 'Sales' ? 'SO' : 'PO'}-${result.order.no} with ${money(result.value)} remaining value.`,
+      active,
+      `${result.order.type === 'Sales' ? 'SO' : 'PO'}-${result.order.no}`,
+    );
+    persist();
+    setFlash(
+      `Short-closed ${result.order.type === 'Sales' ? 'SO' : 'PO'}-${result.order.no}; ${result.count} line(s) written off.`,
+    );
+    render();
+    return;
+  }
+
   if (form.id === 'order-form') {
     if (!can('voucher.write')) {
       requirePermission('voucher.write');
@@ -25165,6 +25507,29 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'gst-tax-ledger-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = saveGstTaxLedger(active, data.get('role'), data.get('name'));
+    if (!result.ok) {
+      showFormError(result.error, 'gst-tax-ledger-error');
+      return;
+    }
+    logAudit(
+      result.created ? 'gst.ledger.create' : 'gst.ledger.rename',
+      `${result.created ? 'Created' : 'Renamed'} ${GST_ROLES[data.get('role')]} tax ledger as "${result.ledger.name}".`,
+      active,
+      result.ledger.id,
+    );
+    persist();
+    setFlash(`${result.created ? 'Created' : 'Renamed'} ${GST_ROLES[data.get('role')]} tax ledger.`);
+    render();
+    return;
+  }
+
   if (form.id === 'gst-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -25179,6 +25544,8 @@ async function handleSubmit(event) {
       address: data.get('address'),
       city: data.get('city'),
       pin: data.get('pin'),
+      phone: data.get('phone'),
+      email: data.get('email'),
       stateCode: data.get('stateCode'),
     });
     if (!result.ok) {
@@ -25313,6 +25680,8 @@ async function handleSubmit(event) {
       amount: data.get('amount'),
       reference: data.get('reference'),
       bsrCode: data.get('bsrCode'),
+      lateFee: data.get('lateFee') || 0,
+      interest: data.get('interest') || 0,
       sectionId: data.get('sectionId'),
     });
     if (!result.ok) {
@@ -25337,7 +25706,16 @@ async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = savePayrollSettings(active, { enabled: data.get('enabled') === 'on' });
+    const result = savePayrollSettings(active, {
+      enabled: data.get('enabled') === 'on',
+      pfRate: data.get('pfRate'),
+      pfCeiling: data.get('pfCeiling'),
+      esiRate: data.get('esiRate'),
+      esiCeiling: data.get('esiCeiling'),
+      ptAmount: data.get('ptAmount'),
+      employerPfRate: data.get('employerPfRate'),
+      employerEsiRate: data.get('employerEsiRate'),
+    });
     if (!result.ok) {
       showFormError(result.error, 'payroll-error');
       return;
@@ -25701,7 +26079,8 @@ async function handleSubmit(event) {
       showFormError(result.error);
       return;
     }
-    clearVoucherDraft(active, draft.type);
+    clearVoucherDraft(active, draft.type, editingId || '');
+    if (editingId) clearVoucherDraft(active, draft.type);
     const instrumentNote = result.voucher.instrument
       ? ` · ${result.voucher.instrument.kind} ${result.voucher.instrument.number} dated ${dateLabel(result.voucher.instrument.date)}`
       : '';
@@ -26638,7 +27017,10 @@ async function handleClick(event) {
       const active = company();
       const ledgerId = selectedBankLedgerId();
       if (!active || !ledgerId) break;
-      const result = autoMatchBank(active, ledgerId);
+      const result = autoMatchBank(active, ledgerId, {
+        dateWindow: document.getElementById('recon-date-window')?.value,
+        tolerance: document.getElementById('recon-amount-tolerance')?.value,
+      });
       if (!result.ok) {
         setFlash(result.error, 'warn');
         render();

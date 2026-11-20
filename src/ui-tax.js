@@ -131,6 +131,14 @@ export function gstScreen() {
         <input name="pin" inputmode="numeric" maxlength="6" placeholder="6 digits" value="${esc(gst.pin ?? '')}">
       </label>
       <label class="field">
+        <span>Phone (optional)</span>
+        <input name="phone" maxlength="30" placeholder="For e-invoice" value="${esc(gst.phone ?? '')}">
+      </label>
+      <label class="field">
+        <span>Email (optional)</span>
+        <input name="email" type="email" maxlength="120" placeholder="For e-invoice" value="${esc(gst.email ?? '')}">
+      </label>
+      <label class="field">
         <span>Home state</span>
         <select name="stateCode">${stateOptions}</select>
       </label>
@@ -143,7 +151,7 @@ export function gstScreen() {
       </div>
       <p id="gst-error" class="form-error" role="alert"></p>
     </form>
-    <p class="muted small">Enabling GST creates or reuses CGST, SGST, IGST and Cess ledgers under Duties &amp; Taxes. The home state decides CGST+SGST versus IGST from the place of supply.</p>
+    <p class="muted small">Enabling GST creates or reuses CGST, SGST, IGST and Cess ledgers under Duties &amp; Taxes. The home state decides CGST+SGST versus IGST from the place of supply. Phone and email are copied into draft e-invoice seller details.</p>
     <div class="table-scroll" tabindex="0"><table class="data-table compact">
       <thead><tr><th>Tax ledger</th><th>Ledger</th><th class="num">Closing (as on ${esc(dateLabel(to))})</th></tr></thead>
       <tbody>${ledgerRoleRows}</tbody>
@@ -151,6 +159,20 @@ export function gstScreen() {
     gst.enabled
       ? `GST is enabled${gst.gstin ? ` for ${esc(gst.gstin)}` : ''}. Invoice tax is computed on save and posted to the tax ledgers.`
       : 'GST is off. Tax is not computed on vouchers until settings are saved with GST enabled.',
+  );
+
+  const taxLedgerPanel = panel(
+    'Tax ledger names',
+    `<form id="gst-tax-ledger-form" class="inline-form" novalidate>
+      <select name="role" aria-label="GST tax role">${Object.entries(GST_ROLES)
+        .map(([role, label]) => `<option value="${role}">${label}</option>`)
+        .join('')}</select>
+      <input name="name" maxlength="80" placeholder="Ledger name" aria-label="Tax ledger name" required>
+      <button class="btn small" type="submit">Create or rename</button>
+      <p id="gst-tax-ledger-error" class="form-error" role="alert"></p>
+    </form>
+    <p class="muted small">Each role points at one ordinary Duties &amp; Taxes ledger. Rename it here without changing posted vouchers; create a missing role ledger from the same form.</p>`,
+    'The role tag controls which ledger receives CGST, SGST, IGST or Cess.',
   );
 
   const ratesPanel = panel(
@@ -232,7 +254,7 @@ export function gstScreen() {
   const cdnrTable = report.gstr1.cdnr.length
     ? `<h3 class="section-title">Credit notes <span class="count">${report.gstr1.cdnr.length}</span></h3>
       <div class="table-scroll" tabindex="0"><table class="data-table compact gst-report-table">
-        <thead><tr><th>Credit note</th><th>Date</th><th>Customer</th><th>GSTIN</th><th class="num">Taxable</th><th class="num">CGST</th><th class="num">SGST</th><th class="num">IGST</th><th class="num">Total</th></tr></thead>
+        <thead><tr><th>Credit note</th><th>Date</th><th>Customer</th><th>GSTIN</th><th>Original invoice</th><th class="num">Taxable</th><th class="num">CGST</th><th class="num">SGST</th><th class="num">IGST</th><th class="num">Total</th></tr></thead>
         <tbody>${report.gstr1.cdnr
           .map(
             (row) => `<tr class="clickable" data-action="open-voucher" data-id="${esc(row.id)}">
@@ -240,6 +262,7 @@ export function gstScreen() {
               <td>${esc(dateLabel(row.date))}</td>
               <td>${esc(row.party)}</td>
               <td>${row.partyGstin ? esc(row.partyGstin) : '<span class="muted">B2C</span>'}</td>
+              <td>${row.originalRef ? esc(row.originalRef) : '<span class="muted">Not linked</span>'}</td>
               <td class="num">${money(row.taxable)}</td>
               <td class="num">${money(row.cgst)}</td>
               <td class="num">${money(row.sgst)}</td>
@@ -248,7 +271,7 @@ export function gstScreen() {
             </tr>`,
           )
           .join('')}</tbody>
-        <tfoot><tr><td colspan="4">Reduces outward supplies</td><td class="num">${money(report.creditNotes.taxable)}</td><td class="num">${money(report.creditNotes.cgst)}</td><td class="num">${money(report.creditNotes.sgst)}</td><td class="num">${money(report.creditNotes.igst)}</td><td></td></tr></tfoot>
+        <tfoot><tr><td colspan="5">Reduces outward supplies</td><td class="num">${money(report.creditNotes.taxable)}</td><td class="num">${money(report.creditNotes.cgst)}</td><td class="num">${money(report.creditNotes.sgst)}</td><td class="num">${money(report.creditNotes.igst)}</td><td></td></tr></tfoot>
       </table></div>`
     : '';
 
@@ -344,7 +367,7 @@ export function gstScreen() {
         : '<p class="muted">No voucher carries GST in this period. Open a sales or purchase voucher, choose a GST rate and save.</p>',
     )}`;
 
-  return `${setupPanel}${ratesPanel}${gst.enabled || report.count ? reportPanels : ''}
+  return `${setupPanel}${taxLedgerPanel}${ratesPanel}${gst.enabled || report.count ? reportPanels : ''}
     ${panel(
       'GST annual working paper',
       `<table class="data-table compact">
@@ -850,6 +873,9 @@ export function tdsScreen() {
         <td class="muted small">${esc(challan.section)}</td>
         <td class="muted small">${esc(challan.bsrCode || '')}</td>
         <td class="num">${money(challan.amount)}</td>
+        <td class="num">${challan.lateFee ? money(challan.lateFee) : '—'}</td>
+        <td class="num">${challan.interest ? money(challan.interest) : '—'}</td>
+        <td class="num"><strong>${money(challan.total)}</strong></td>
         <td class="row-actions">
           <button class="btn small danger" type="button" data-action="delete-challan" data-id="${esc(challan.id)}">Delete</button>
         </td>
@@ -872,18 +898,20 @@ export function tdsScreen() {
       <input name="amount" inputmode="decimal" placeholder="Amount" aria-label="Challan amount" required>
       <input name="reference" maxlength="40" placeholder="Challan reference" aria-label="Challan reference">
       <input name="bsrCode" maxlength="20" placeholder="BSR code" aria-label="BSR code">
+      <input name="lateFee" inputmode="decimal" placeholder="Late fee" aria-label="Late fee">
+      <input name="interest" inputmode="decimal" placeholder="Interest" aria-label="Interest">
       <select name="sectionId" aria-label="Challan section">${challanSectionOptions}</select>
       <button class="btn small" type="submit">Add challan</button>
       <p id="challan-error" class="form-error" role="alert"></p>
     </form>
     ${report.challans.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
-          <thead><tr><th>Date</th><th>Reference</th><th>Section</th><th>BSR</th><th class="num">Amount</th><th></th></tr></thead>
+          <thead><tr><th>Date</th><th>Reference</th><th>Section</th><th>BSR</th><th class="num">Tax</th><th class="num">Late fee</th><th class="num">Interest</th><th class="num">Total</th><th></th></tr></thead>
           <tbody>${challanRows}</tbody>
-          <tfoot><tr><td colspan="4">${report.challans.length} challan${report.challans.length === 1 ? '' : 's'} in this period</td><td class="num">${money(report.challanTotal)}</td><td></td></tr></tfoot>
+          <tfoot><tr><td colspan="4">${report.challans.length} challan${report.challans.length === 1 ? '' : 's'} in this period</td><td class="num">${money(report.challanTotal)}</td><td class="num">${money(report.challanLateFee)}</td><td class="num">${money(report.challanInterest)}</td><td class="num">${money(report.challanOutlay)}</td><td></td></tr></tfoot>
         </table></div>`
       : '<p class="muted">No challans in this period.</p>'}`,
-    'Challans record payments against the payable ledger for tracking only; they do not post a voucher or reconcile automatically.',
+    'Challans record tax, optional late fee and optional interest for tracking only; they do not post a voucher or reconcile automatically.',
   );
 
   const reportRows = report.documents

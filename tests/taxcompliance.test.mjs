@@ -52,6 +52,8 @@ function fixture() {
     address: '12 Market Road',
     city: 'Pune',
     pin: '411001',
+    phone: '+91 20 5555 0100',
+    email: 'billing@address.example',
     stateCode: '27',
   });
   assert.equal(setup.ok, true, setup.error);
@@ -64,6 +66,8 @@ function fixture() {
     address: '4 Industrial Estate',
     city: 'Pune',
     pin: '411014',
+    phone: '+91 98765 43210',
+    email: 'buyer@acme.example',
   });
   const supplier = party(company, 'Consultant', 'sundryCreditors', { pan: 'ABCDE1234F' });
   const item = addStockItem(company, {
@@ -118,12 +122,17 @@ test('GST registration and party ledgers store the address fields e-invoices nee
     address: '12 Market Road',
     city: 'Pune',
     pin: '411001',
+    phone: '+91 20 5555 0100',
+    email: 'Billing@Address.example',
     stateCode: '27',
   });
   assert.equal(result.ok, true, result.error);
   assert.equal(company.gst.tradeName, 'Address Trading');
   assert.equal(company.gst.address, '12 Market Road');
   assert.equal(company.gst.pin, '411001');
+  assert.equal(company.gst.phone, '+91 20 5555 0100');
+  assert.equal(company.gst.email, 'billing@address.example');
+  assert.equal(saveGstSettings(company, { enabled: false, email: 'not-an-email' }).ok, false);
 
   assert.equal(saveGstSettings(company, { enabled: false, pin: '4110' }).ok, false);
   assert.equal(
@@ -145,9 +154,13 @@ test('GST registration and party ledgers store the address fields e-invoices nee
     address: '4 Industrial Estate',
     city: 'Pune',
     pin: '411014',
+    phone: '+91 98765 43210',
+    email: 'buyer@acme.example',
   });
   assert.equal(customer.address, '4 Industrial Estate');
   assert.equal(customer.pin, '411014');
+  assert.equal(customer.phone, '+91 98765 43210');
+  assert.equal(customer.email, 'buyer@acme.example');
 
   const updated = updateLedger(company, customer.id, { pin: '4110' });
   assert.equal(updated.ok, false);
@@ -178,7 +191,11 @@ test('e-invoice register builds a ready NIC-style draft for a B2B intra-state sa
   assert.equal(row.payload.DocDtls.No, 'Sales 1');
   assert.equal(row.payload.DocDtls.Dt, '05/04/2026');
   assert.equal(row.payload.SellerDtls.LglNm, 'Compliance Co Private Limited');
+  assert.equal(row.payload.SellerDtls.Ph, '+91 20 5555 0100');
+  assert.equal(row.payload.SellerDtls.Em, 'billing@address.example');
   assert.equal(row.payload.BuyerDtls.Pos, '27');
+  assert.equal(row.payload.BuyerDtls.Ph, '+91 98765 43210');
+  assert.equal(row.payload.BuyerDtls.Em, 'buyer@acme.example');
   assert.equal(row.payload.ItemList[0].HsnCd, '6109');
   assert.equal(row.payload.ItemList[0].Unit, 'NOS');
   assert.equal(row.payload.ItemList[0].CgstAmt, 90);

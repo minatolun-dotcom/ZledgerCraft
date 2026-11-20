@@ -252,14 +252,22 @@ test('withholding summary reports sections, parties, quarters and thresholds', (
   tdsPurchase(company, { supplier, purchases, base: 10000, date: '2026-04-10' });
   tdsPurchase(company, { supplier, purchases, base: 20000, date: '2026-07-10' });
 
+  assert.equal(
+    addTaxChallan(company, { kind: 'TDS', date: '2026-05-05', amount: 500, lateFee: -1 }).ok,
+    false,
+  );
   const challan = addTaxChallan(company, {
     kind: 'TDS',
     date: '2026-05-05',
     amount: 500,
+    lateFee: 25,
+    interest: 12.5,
     reference: 'CH-1',
     sectionId: section(company, '194J').id,
   });
   assert.equal(challan.ok, true, challan.error);
+  assert.equal(challan.challan.lateFee, 25);
+  assert.equal(challan.challan.interest, 12.5);
 
   const report = withholdingSummary(company, { kind: 'TDS', from: '2026-04-01', to: '2026-09-30' });
   assert.equal(report.count, 2);
@@ -286,6 +294,14 @@ test('withholding summary reports sections, parties, quarters and thresholds', (
   assert.equal(threshold.crossed, true);
   assert.equal(report.challans.length, 1);
   assert.equal(report.challans[0].section.startsWith('194J'), true);
+  assert.equal(report.challans[0].lateFee, 25);
+  assert.equal(report.challans[0].interest, 12.5);
+  assert.equal(report.challans[0].total, 537.5);
+  assert.equal(report.challanLateFee, 25);
+  assert.equal(report.challanInterest, 12.5);
+  assert.equal(report.challanOutlay, 537.5);
+  assert.equal(report.paidToDate, 500);
+  assert.equal(report.outstanding, 2500);
   assert.equal(report.documents[0].pan, 'ABCDE1234F');
 });
 

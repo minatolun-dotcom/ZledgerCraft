@@ -354,14 +354,15 @@ disabled.
   and deduction against the month. An attendance CSV (`Employee,PaidDays`) can
   preload those paid-days values by employee name or code for review. A
   statutory calculator applies configurable PF/ESI rates, wage ceilings and a
-  fixed professional-tax amount to employee deduction amounts on request;
-  employer contributions are not computed. Changing an employee's pay structure
-  appends a dated salary revision with the full snapshot; revisions do not have
-  future effective dates.
-- Ledgers with opening Dr/Cr, optional party GSTIN/GST state, optional party
-  address/city/PIN for e-invoices and optional PAN for deductee reporting. Alter
-  a ledger's name, group or opening; delete a ledger only when no voucher uses
-  it.
+  fixed professional-tax amount to employee deduction amounts on request.
+  Optional employer PF/ESI rates add the employer share to the calculator and
+  post it to the PF/ESI payable ledgers when payroll runs. Changing an employee's
+  pay structure appends a dated salary revision with the full snapshot; revisions
+  do not have future effective dates.
+- Ledgers with opening Dr/Cr, optional party GSTIN/GST state, optional SAC code
+  for services, optional party address/city/PIN/phone/email for e-invoices and
+  optional PAN for deductee reporting. Alter a ledger's name, group or opening;
+  delete a ledger only when no voucher uses it.
 
 **Vouchers**
 - Contra, Payment, Receipt, Journal, Sales, Purchase, **Credit Note** and
@@ -370,9 +371,10 @@ disabled.
   equal credits, every amount is positive, and the date falls in the year.
 - Alter any voucher in place (numbering is kept unless the type changes),
   duplicate it, or delete it.
-- An unfinished new voucher is saved in browser storage as you type and restored
-  when the same company and voucher type are reopened. Saving or discarding the
-  draft clears it; drafts do not follow you to another browser or device.
+- An unfinished new or altered voucher is saved in browser storage as you type
+  and restored for the same company, voucher type and voucher id. Saving or
+  discarding the draft clears it; drafts do not follow you to another browser or
+  device.
 - Cheque/DD details on payment, receipt and contra vouchers: instrument type,
   number, instrument date and bank ledger. The selected bank must also appear on
   a voucher line. Instrument dates later than the voucher are marked post-dated;
@@ -398,7 +400,10 @@ disabled.
   Tax is computed from the taxable side, CGST+SGST or IGST plus cess are posted
   to the tax ledgers, and the party/cash line becomes the tax-inclusive total.
   The voucher form previews taxable value, tax split and gross before saving;
-  the voucher view records the rate, supply type and GSTIN.
+  the voucher view records the rate, supply type and GSTIN. Credit and debit
+  notes can link to the original sales or purchase invoice, and the link appears
+  in the GSTR-1 credit-note working paper. Tax ledgers can be created or renamed
+  from the GST registration panel.
 - TDS on purchase vouchers and TCS on sales vouchers: choose a section and the
   deductee PAN (prefilled from the party ledger). The deduction is computed from
   the taxable side, posted to TDS Payable or TCS Payable, and the party/cash line
@@ -415,8 +420,9 @@ disabled.
   not a bank-validated payment instruction.
 - Printable payslips for a run with company, employee, earnings, deductions and
   net pay, and a salary register by month, employee and pay head with Print/CSV/Excel.
-  PF, ESI and professional tax are manually entered deductions with reporting
-  tags; no return, challan or certificate is produced.
+  PF, ESI and professional tax are entered or calculated as employee deductions
+  with reporting tags. Optional employer PF/ESI shares post to their payable
+  ledgers; no return, challan or certificate is produced.
 
 **Inventory**
 - Units of measure, stock groups, stock items (opening quantity, rate, optional
@@ -463,9 +469,11 @@ disabled.
   (Open/Closed/Cancelled), filters and a Create voucher action that prefills the
   remaining quantity and links it to the order. Further vouchers can fulfil the
   balance; the order closes only when every line is fulfilled, and deleting a
-  linked voucher recalculates fulfilment. Closing or cancelling records an
-  optional reason, and overdue delivery dates are flagged. Orders do not post
-  to the ledger or move stock.
+  linked voucher recalculates fulfilment. An order can be short-closed with the
+  remaining quantity explicitly written off and an optional reason; reopening
+  restores that remainder. Closing or cancelling records an optional reason, and
+  overdue delivery dates are flagged. Orders do not post to the ledger or move
+  stock.
 - Quotations with party, validity date and item lines, kept in their own
   sequence. An open quotation can be converted to a linked sales order; it
   does not create a voucher or move stock by itself.
@@ -496,8 +504,9 @@ disabled.
 - Trial Balance, Trading/P&L Account and Balance Sheet, each with an as-on date.
 - Cash Book / Bank Book, per ledger or combined.
 - Bank Reconciliation for any ledger under Bank Accounts: import a statement
-  (`Date,Description,Reference,Debit,Credit`), auto-match by signed amount and a
-  seven-day date window, match or unmatch manually, and see matched, unmatched
+  (`Date,Description,Reference,Debit,Credit`), auto-match by signed amount, a
+  configurable date window and amount tolerance with narration-word ranking,
+  match or unmatch manually, and see matched, unmatched
   statement lines, unmatched bank vouchers, inflow/outflow and book balance.
   Optional opening and closing balances check that the statement file is
   complete. An unmatched line can post a Journal against a chosen adjustment
@@ -526,7 +535,8 @@ disabled.
 - TDS/TCS register for a period: deducted or collected amounts, section and
   party summaries, quarterly totals, a threshold watch for the financial year to
   date, and a voucher list with PAN and drill-down. Tax challans can be recorded
-  and deleted, with payable to date, challans paid and outstanding shown. A
+  with optional late fee and interest and deleted, with payable to date,
+  challans paid, late fee, interest and outstanding shown. A
   deductee-and-quarter certificate working paper shows PAN, sections, base and
   tax for preparing Form 16A/27D-style certificates. Nothing is filed, generated
   as a certificate or acknowledged by TRACES.
@@ -535,8 +545,9 @@ disabled.
   filed annual return.
 - GST returns as working papers for a period: GSTR-1 outward supplies by rate
   (sales less credit notes), B2B invoices with GSTIN and place of supply, B2C
-  supplies by rate, credit notes, an HSN/SAC summary with quantity split by
-  UQC, taxable value and apportioned tax, and a GSTR-3B summary with outward tax, reverse
+  supplies by rate, credit notes with optional original-invoice links, an HSN/SAC
+  summary with quantity split by UQC, taxable value and apportioned tax, and a
+  GSTR-3B summary with outward tax, reverse
   charge, input tax credit and net payable per head. Totals are shown for every
   section and the lump-sum GST voucher list links back to the vouchers. Nothing
   is filed, uploaded or reconciled with GSTR-2B.
@@ -763,10 +774,10 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | TallyPrime area | Status |
 | --- | --- |
 | Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, stock ageing, reorder watch, price list, dated stock counts with book/counted differences and batch-level count lines, partially fulfilled sales/purchase orders, BOM recipes, production and wastage; no multi-level BOM, job work, FIFO/expiry batch costing, WIP accounting or stock posting to the financial statements |
-| GST registration, rates and tax on vouchers | Partial — GSTIN and home state, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and invoice-level tax on four voucher types; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
+| GST registration, rates and tax on vouchers | Partial — GSTIN and home state, registration/party contacts, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and SAC on service ledgers, invoice-level tax on four voucher types and credit/debit-note invoice links; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way drafts with saved Part B details and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, validity tracking, GSTR-2B reconciliation, annual return or Form 3CD |
-| TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
-| Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit and paid-days proration, casual/sick/earned leave balances and a leave register, bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV; no automatic leave-to-paid-days link, overtime, arrears, formula or percentage pay heads, employer PF/ESI contributions, state PT slabs, ECR/returns, Form 24Q/16 or bank payment workflow |
+| TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking with optional late fee/interest; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
+| Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit and paid-days proration, casual/sick/earned leave balances and a leave register, bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV, employee and optional employer PF/ESI, and a fixed PT amount; no automatic leave-to-paid-days link, overtime, arrears, general formula language, state PT slabs, ECR/returns, Form 24Q/16 or bank payment workflow |
 | Bank reconciliation and statement import | Covered — CSV, OFX, QIF and MT940 statement import, optional opening/closing balance validation, auto/manual matching, adjustment posting and book balance; no Excel or live bank feeds |
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque/DD advice, receipt deposit-slip and contra advice previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no magnetic-ink cheque stationery presets or bank-issued advice formats |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary, break-up and an unallocated-line reconciliation; no merging categories or split allocations |

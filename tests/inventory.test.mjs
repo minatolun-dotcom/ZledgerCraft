@@ -33,6 +33,7 @@ import {
   orderRemainingItems,
   postStockCount,
   setOrderStatus,
+  shortCloseOrder,
   stockBatchesOnHand,
   stockOnHand,
   updateStockItem,
@@ -1019,6 +1020,21 @@ test('orders record sales and purchase commitments without moving stock', () => 
   assert.equal(closed.order.closeReason, 'Customer cancelled the rest');
   assert.equal(stockSummary(company).rows[0].reservedQty, 0);
   assert.equal(stockSummary(company).rows[0].availableQty, 10);
+  assert.equal(setOrderStatus(company, order.order.id, 'Open').ok, true);
+  assert.equal(stockSummary(company).rows[0].reservedQty, 3);
+
+  const short = shortCloseOrder(company, order.order.id, 'Only part was supplied');
+  assert.equal(short.ok, true, short.error);
+  assert.equal(short.order.status, 'Closed');
+  assert.equal(short.order.closeReason, 'Only part was supplied');
+  assert.equal(short.count, 1);
+  assert.equal(short.order.items[0].closedQty, 3);
+  assert.equal(orderRemainingItems(short.order).length, 0);
+  assert.equal(stockSummary(company).rows[0].reservedQty, 0);
+  assert.equal(shortCloseOrder(company, order.order.id).ok, false);
+  assert.equal(setOrderStatus(company, order.order.id, 'Open').ok, true);
+  assert.equal(orderRemainingItems(order.order).length, 1, 'reopening restores the remainder');
+  assert.equal(stockSummary(company).rows[0].reservedQty, 3);
   assert.equal(setOrderStatus(company, order.order.id, 'Unknown').ok, false);
 
   const purchase = addOrder(company, {

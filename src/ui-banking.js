@@ -468,7 +468,7 @@ export function bankReconScreen() {
           <select id="recon-adjust-ledger"><option value="">Choose ledger…</option>${adjustmentOptions}</select>
         </label>
       </div>
-      <p class="muted small">For an unmatched statement line, choose the other side and press Adjust. This posts a Journal to the bank ledger and marks the line matched.</p>
+      <p class="muted small">For an unmatched statement line, choose the other side and press Adjust. This posts a Journal to the bank ledger and marks the line matched. Auto-match uses narration overlap first, then date and amount; a tolerance allows small bank charges.</p>
       <div class="ratio-grid">
         <div class="ratio-card"><span class="ratio-label">Matched</span><strong>${report.matchedCount} / ${report.lines.length}</strong><span class="muted small">${report.matchedPercent}% of statement lines</span></div>
         <div class="ratio-card"><span class="ratio-label">Statement unmatched</span><strong>${report.unmatchedCount}</strong><span class="muted small">${money(report.unmatchedStatementAmount)} value</span></div>
@@ -479,8 +479,12 @@ export function bankReconScreen() {
         ? `<p class="${report.statementDifference === 0 ? 'muted small' : 'off-text'}">Statement balances: opening ${money(report.balances.opening)}, closing ${money(report.balances.closing)}, movement ${money(report.statementNet)}. ${report.statementDifference === 0 ? 'Opening plus movement equals closing.' : `Difference ${money(report.statementDifference)} — the statement may be incomplete or mistyped.`}</p>`
         : ''}
       ${report.importedAt
-        ? `<div class="form-actions">
-             <button class="btn small primary" type="button" data-action="recon-auto"${canWrite ? '' : ' disabled'}>Auto-match by amount and date</button>
+        ? `<div class="filter-bar">
+             <label class="field inline-field"><span>Date window (days)</span><input id="recon-date-window" inputmode="numeric" min="0" max="60" value="7" aria-label="Auto-match date window"></label>
+             <label class="field inline-field"><span>Amount tolerance</span><input id="recon-amount-tolerance" inputmode="decimal" min="0" placeholder="0.00" aria-label="Auto-match amount tolerance"></label>
+           </div>
+           <div class="form-actions">
+             <button class="btn small primary" type="button" data-action="recon-auto"${canWrite ? '' : ' disabled'}>Auto-match by amount, date and narration</button>
              <button class="btn small danger" type="button" data-action="recon-clear"${canWrite ? '' : ' disabled'}>Clear statement</button>
            </div>`
         : ''}`,

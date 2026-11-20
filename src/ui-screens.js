@@ -1024,6 +1024,10 @@ export function mastersScreen() {
               <input name="gstin" maxlength="15" placeholder="Optional B2B GSTIN" value="${esc(editingLedger?.gstin ?? '')}">
             </label>
             <label class="field">
+              <span>SAC code (services)</span>
+              <input name="sacCode" inputmode="numeric" maxlength="8" placeholder="Optional 4, 6 or 8 digits" value="${esc(editingLedger?.sacCode ?? '')}">
+            </label>
+            <label class="field">
               <span>GST state</span>
               <select name="stateCode">
                 <option value=""${editingLedger?.stateCode ? '' : ' selected'}>Not set</option>
@@ -1044,6 +1048,14 @@ export function mastersScreen() {
             <label class="field">
               <span>Party PIN code</span>
               <input name="pin" inputmode="numeric" maxlength="6" placeholder="6 digits" value="${esc(editingLedger?.pin ?? '')}">
+            </label>
+            <label class="field">
+              <span>Party phone (optional)</span>
+              <input name="phone" maxlength="30" placeholder="For e-invoice" value="${esc(editingLedger?.phone ?? '')}">
+            </label>
+            <label class="field">
+              <span>Party email (optional)</span>
+              <input name="email" type="email" maxlength="120" placeholder="For e-invoice" value="${esc(editingLedger?.email ?? '')}">
             </label>`
           : ''}
         ${active.tds?.enabled

@@ -2961,6 +2961,9 @@ export function gstReturns(company, filters = {}) {
   for (const voucher of rows) {
     const gst = voucher.gst;
     const taxTotal = round2(gst.cgst + gst.sgst + gst.igst + gst.cess);
+    const original = gst.originalVoucherId
+      ? (company.vouchers ?? []).find((entry) => entry.id === gst.originalVoucherId)
+      : null;
     const document = {
       id: voucher.id,
       type: voucher.type,
@@ -2975,6 +2978,9 @@ export function gstReturns(company, filters = {}) {
       rate: gst.rate,
       cessRate: gst.cessRate,
       reverseCharge: Boolean(gst.reverseCharge),
+      originalVoucherId: original?.id ?? '',
+      originalRef: original ? original.bill?.ref || `${VOUCHER_TYPES[original.type]?.label ?? original.type} ${original.no}` : '',
+      originalNo: original?.no ?? '',
       taxable: gst.taxable,
       cgst: gst.cgst,
       sgst: gst.sgst,
@@ -3006,25 +3012,43 @@ export function gstReturns(company, filters = {}) {
     }
 
     // HSN summary covers outward invoices and their credit notes.
-    if ((voucher.type === 'Sales' || voucher.type === 'CreditNote') && voucher.items?.length) {
+    if (voucher.type === 'Sales' || voucher.type === 'CreditNote') {
       const direction = voucher.type === 'Sales' ? 1 : -1;
-      for (const line of voucher.items) {
-        const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
-        const hsn = item?.hsn || 'Unclassified';
-        const unit = uqcFor(company, item?.unitId);
-        const key = `${hsn}|${unit}`;
-        let bucket = hsnMap.get(key);
-        if (!bucket) {
-          bucket = { hsn, unit, description: item?.name ?? '', qty: 0, taxable: 0, tax: 0 };
-          hsnMap.set(key, bucket);
-        } else if (!bucket.description && item?.name) {
-          bucket.description = item.name;
+      if (voucher.items?.length) {
+        for (const line of voucher.items) {
+          const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
+          const hsn = item?.hsn || 'Unclassified';
+          const unit = uqcFor(company, item?.unitId);
+          const key = `${hsn}|${unit}`;
+          let bucket = hsnMap.get(key);
+          if (!bucket) {
+            bucket = { hsn, unit, description: item?.name ?? '', qty: 0, taxable: 0, tax: 0 };
+            hsnMap.set(key, bucket);
+          } else if (!bucket.description && item?.name) {
+            bucket.description = item.name;
+          }
+          const lineAmount = round2(line.amount ?? round2((line.qty ?? 0) * (line.rate ?? 0)));
+          const share = gst.taxable > 0 ? lineAmount / gst.taxable : 0;
+          bucket.qty = round3(bucket.qty + direction * (line.qty ?? 0));
+          bucket.taxable = round2(bucket.taxable + direction * lineAmount);
+          bucket.tax = round2(bucket.tax + direction * round2(taxTotal * share));
         }
-        const lineAmount = round2(line.amount ?? round2((line.qty ?? 0) * (line.rate ?? 0)));
-        const share = gst.taxable > 0 ? lineAmount / gst.taxable : 0;
-        bucket.qty = round3(bucket.qty + direction * (line.qty ?? 0));
-        bucket.taxable = round2(bucket.taxable + direction * lineAmount);
-        bucket.tax = round2(bucket.tax + direction * round2(taxTotal * share));
+      } else {
+        const serviceEntry = (voucher.lines ?? [])
+          .map((line) => ({ line, ledger: (company.ledgers ?? []).find((ledger) => ledger.id === line.ledgerId) }))
+          .find((entry) => entry.ledger?.sacCode);
+        if (serviceEntry) {
+          const hsn = serviceEntry.ledger.sacCode;
+          const key = `${hsn}|OTH`;
+          let bucket = hsnMap.get(key);
+          if (!bucket) {
+            bucket = { hsn, unit: 'OTH', description: serviceEntry.ledger.name, qty: 0, taxable: 0, tax: 0 };
+            hsnMap.set(key, bucket);
+          }
+          bucket.qty = round3(bucket.qty + direction);
+          bucket.taxable = round2(bucket.taxable + direction * gst.taxable);
+          bucket.tax = round2(bucket.tax + direction * taxTotal);
+        }
       }
     }
   }
@@ -3252,6 +3276,9 @@ export function withholdingSummary(company, filters = {}) {
         id: challan.id,
         date: challan.date,
         amount: challan.amount,
+        lateFee: challan.lateFee ?? 0,
+        interest: challan.interest ?? 0,
+        total: round2(challan.amount + (challan.lateFee ?? 0) + (challan.interest ?? 0)),
         reference: challan.reference,
         bsrCode: challan.bsrCode,
         section: section ? `${section.code} · ${section.label}` : 'Not linked',
@@ -3307,6 +3334,11 @@ export function withholdingSummary(company, filters = {}) {
     outstanding: round2(payableToDate - paidToDate),
     challans,
     challanTotal: round2(challans.reduce((sum, challan) => sum + challan.amount, 0)),
+    challanLateFee: round2(challans.reduce((sum, challan) => sum + challan.lateFee, 0)),
+    challanInterest: round2(challans.reduce((sum, challan) => sum + challan.interest, 0)),
+    challanOutlay: round2(
+      challans.reduce((sum, challan) => sum + challan.amount + challan.lateFee + challan.interest, 0),
+    ),
     thresholdRows,
   };
 }
@@ -3694,6 +3726,8 @@ function sellerProfile(company) {
     address: gst.address ?? '',
     city: gst.city ?? '',
     pin: gst.pin ?? '',
+    phone: gst.phone ?? '',
+    email: gst.email ?? '',
     stateCode: gst.stateCode ?? '',
     stateName: gstStateName(gst.stateCode),
   };
@@ -3710,6 +3744,8 @@ function buyerProfile(company, voucher, document) {
     address: ledger?.address ?? '',
     city: ledger?.city ?? '',
     pin: ledger?.pin ?? '',
+    phone: ledger?.phone ?? '',
+    email: ledger?.email ?? '',
     stateCode: ledger?.stateCode || gstin.slice(0, 2) || document.placeOfSupply || '',
     stateName: gstStateName(ledger?.stateCode || gstin.slice(0, 2) || document.placeOfSupply),
   };
@@ -3728,15 +3764,18 @@ function partyIssues(label, party) {
 function eInvoiceLineRows(company, voucher, document) {
   const items = voucher.items ?? [];
   if (!items.length) {
+    const service = (voucher.lines ?? [])
+      .map((line) => (company.ledgers ?? []).find((ledger) => ledger.id === line.ledgerId))
+      .find((ledger) => ledger?.sacCode);
     return [
       {
-        description: document.ref || 'As per invoice',
-        hsn: '',
+        description: service?.name || document.ref || 'As per invoice',
+        hsn: service?.sacCode || '',
         qty: 1,
         unit: 'OTH',
         unitPrice: document.taxable,
         taxable: document.taxable,
-        missingHsn: true,
+        missingHsn: !service?.sacCode,
       },
     ];
   }
@@ -3807,8 +3846,8 @@ function eInvoicePayload(company, document, voucher, seller, buyer, lines) {
       Loc: seller.city,
       Pin: seller.pin,
       Stcd: seller.stateCode,
-      Ph: '',
-      Em: '',
+      Ph: seller.phone || '',
+      Em: seller.email || '',
     },
     BuyerDtls: {
       Gstin: buyer.gstin || 'URP',
@@ -3820,8 +3859,8 @@ function eInvoicePayload(company, document, voucher, seller, buyer, lines) {
       Loc: buyer.city,
       Pin: buyer.pin,
       Stcd: buyer.stateCode,
-      Ph: '',
-      Em: '',
+      Ph: buyer.phone || '',
+      Em: buyer.email || '',
     },
     ItemList: itemList,
     ValDtls: {

@@ -158,6 +158,20 @@ export function ordersScreen() {
       : '<p class="muted">No orders in this period. Record one below; orders do not post to the ledger or move stock.</p>'}`,
     'Open orders can prefill a sales or purchase voucher. Creating the voucher does not change the order status.',
   )}
+  ${openOrders.length
+    ? panel(
+        'Short-close an order',
+        `<form id="short-close-order-form" class="inline-form" novalidate>
+          <select name="orderId" aria-label="Order to short-close">${openOrders
+            .map((order) => `<option value="${esc(order.id)}">${order.type === 'Sales' ? 'SO' : 'PO'}-${order.no} · ${esc(parties.get(order.partyLedgerId)?.name ?? 'Unknown party')}</option>`)
+            .join('')}</select>
+          <input name="reason" maxlength="200" placeholder="Reason (optional)" aria-label="Short-close reason">
+          <button class="btn small" type="submit">Short-close remaining quantity</button>
+          <p id="short-close-error" class="form-error" role="alert"></p>
+        </form>`,
+        'Writes off the unfulfilled remainder with an optional reason. No stock moves and no voucher is posted; reopening clears the short-closed quantities.',
+      )
+    : ''}
   ${panel(
     'Quotations',
     `<form id="quotation-form" class="form-grid" novalidate>

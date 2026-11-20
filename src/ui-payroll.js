@@ -147,6 +147,8 @@ export function payrollScreen() {
       <label class="field"><span>ESI rate %</span><input name="esiRate" inputmode="decimal" value="${esc(payroll.statutory?.esiRate ?? 0.75)}"></label>
       <label class="field"><span>ESI wage ceiling</span><input name="esiCeiling" inputmode="decimal" value="${esc(payroll.statutory?.esiCeiling ?? 21000)}"></label>
       <label class="field"><span>Professional tax</span><input name="ptAmount" inputmode="decimal" value="${esc(payroll.statutory?.ptAmount ?? 200)}"></label>
+      <label class="field"><span>Employer PF rate %</span><input name="employerPfRate" inputmode="decimal" value="${esc(payroll.statutory?.employerPfRate ?? 0)}"></label>
+      <label class="field"><span>Employer ESI rate %</span><input name="employerEsiRate" inputmode="decimal" value="${esc(payroll.statutory?.employerEsiRate ?? 0)}"></label>
       <div class="field form-actions">
         <button class="btn primary" type="submit">Save payroll settings</button>
       </div>
@@ -328,18 +330,19 @@ export function payrollScreen() {
       <td class="num">${money(row.esi)}</td>
       <td class="num">${money(row.pt)}</td>
       <td class="num">${money(row.total)}</td>
+      <td class="num">${money(row.employerTotal)}</td>
     </tr>`)
     .join('');
   const statutoryPanel = panel(
     'Statutory calculator',
     `${statutory.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
-          <thead><tr><th>Employee</th><th class="num">Basic</th><th class="num">Gross</th><th class="num">PF</th><th class="num">ESI</th><th class="num">PT</th><th class="num">Total</th></tr></thead>
+          <thead><tr><th>Employee</th><th class="num">Basic</th><th class="num">Gross</th><th class="num">PF</th><th class="num">ESI</th><th class="num">PT</th><th class="num">Employee total</th><th class="num">Employer share</th></tr></thead>
           <tbody>${statutoryTable}</tbody>
         </table></div>
         <div class="form-actions"><button class="btn small" type="button" data-action="apply-statutory">Apply to pay structures</button></div>`
       : '<p class="muted">Add active employees with earnings to compute PF, ESI and PT.</p>'}`,
-    'PF uses Basic up to the wage ceiling, ESI applies to gross within its ceiling, and PT uses the fixed amount. Applying updates employee deduction amounts; a payroll run still posts explicitly.',
+    'PF uses Basic up to the wage ceiling, ESI applies to gross within its ceiling, and PT uses the fixed amount. Employer PF/ESI rates are optional; when set, a payroll run debits Salaries and credits the PF/ESI payable ledgers for the employer share. Applying updates employee deduction amounts; a payroll run still posts explicitly.',
   );
 
   const runsPanel = panel(

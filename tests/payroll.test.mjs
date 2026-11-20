@@ -301,6 +301,27 @@ test('statutory calculator applies capped PF and professional tax', () => {
   assert.equal(payrollStatutoryRows(company, '2026-04')[0].pf, 1000);
 });
 
+test('optional employer PF and ESI are posted to their payable ledgers', () => {
+  const { company } = fixture();
+  standardEmployee(company);
+  assert.equal(savePayrollSettings(company, { enabled: true, employerPfRate: 12, employerEsiRate: 3.25 }).ok, true);
+  const rows = payrollStatutoryRows(company, '2026-04');
+  assert.equal(rows[0].employerPf, 1800);
+  assert.equal(rows[0].employerEsi, 0);
+
+  const run = runPayroll(company, { month: '2026-04' });
+  assert.equal(run.ok, true, run.error);
+  assert.equal(run.run.totals.employerPf, 1800);
+  assert.equal(run.run.totals.employerCost, 1800);
+  const pf = findLedgerByName(company, 'Provident Fund Payable');
+  const salaries = findLedgerByName(company, 'Salaries');
+  const debit = run.voucher.lines.find((line) => line.ledgerId === salaries.id && line.side === 'Dr');
+  const credit = run.voucher.lines.find((line) => line.ledgerId === pf.id && line.side === 'Cr');
+  assert.equal(debit.amount, 41800);
+  assert.equal(credit.amount, 6000);
+  assert.equal(trialBalance(company, '2026-04-30').balanced, true);
+});
+
 test('attendance CSV matches employees by name or code', () => {
   const { company } = fixture();
   const asha = standardEmployee(company);

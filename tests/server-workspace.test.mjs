@@ -77,8 +77,27 @@ function fixture() {
           },
         ],
         godowns: [{ id: 'gd1', name: 'Main Location', primary: true }],
-        budgets: [{ id: 'bud1', name: 'Sales budget', targetType: 'ledger', targetId: 'led1', yearId: 'year1', amount: 1000 }],
-        currencies: [{ id: 'cur1', code: 'USD', name: 'US Dollar', symbol: '$', rates: [{ date: '2026-04-01', rate: 83 }] }],
+        budgets: [
+          {
+            id: 'bud1',
+            name: 'Sales budget',
+            targetType: 'ledger',
+            targetId: 'led1',
+            yearId: 'year1',
+            amount: 1000,
+            createdAt: '2026-03-05T00:00:00.000Z',
+          },
+        ],
+        currencies: [
+          {
+            id: 'cur1',
+            code: 'USD',
+            name: 'US Dollar',
+            symbol: '$',
+            rates: [{ date: '2026-04-01', rate: 83 }],
+            createdAt: '2026-03-04T00:00:00.000Z',
+          },
+        ],
       },
       {
         id: 'co2',
@@ -353,13 +372,15 @@ test('schema version 1 workspaces migrate their JSON collections into rows', () 
   db.prepare('DELETE FROM units').run();
   db.prepare('DELETE FROM stock_groups').run();
   db.prepare('DELETE FROM godowns').run();
+  db.prepare('DELETE FROM budgets').run();
+  db.prepare('DELETE FROM currencies').run();
   db.prepare('DELETE FROM stock_items').run();
   db.prepare('UPDATE workspace_meta SET schema_version = 1').run();
 
   const upgraded = new WorkspaceStore(db);
   assert.equal(
     db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version,
-    8,
+    9,
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM account_groups').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM financial_years').get().count, 2);
@@ -368,6 +389,8 @@ test('schema version 1 workspaces migrate their JSON collections into rows', () 
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM units').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stock_groups').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM godowns').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM budgets').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM currencies').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stock_items').get().count, 1);
   assert.deepEqual(upgraded.read().state, expected);
 });
@@ -389,7 +412,7 @@ test('schema version 2 promotes ledger JSON fields into typed columns', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 2').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
   const row = db.prepare('SELECT * FROM ledgers WHERE id = ?').get('led1');
   assert.equal(row.opening, 0);
   assert.equal(row.opening_type, 'Dr');
@@ -416,7 +439,7 @@ test('schema version 3 promotes company and stock item JSON fields into typed co
   db.prepare('UPDATE workspace_meta SET schema_version = 3').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
   const company = db.prepare('SELECT * FROM companies WHERE id = ?').get('co1');
   assert.equal(company.created_at, '2026-03-01T00:00:00.000Z');
   assert.equal(JSON.parse(company.data).name, undefined);
@@ -450,7 +473,7 @@ test('schema version 4 moves account groups out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 4').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'groups'").get().count,
     0,
@@ -482,7 +505,7 @@ test('schema version 5 moves financial years out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 5').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'years'").get().count,
     0,
@@ -520,7 +543,7 @@ test('schema version 6 moves cost masters out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 6').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
   for (const collection of ['costCategories', 'costCentres']) {
     assert.equal(
       db.prepare('SELECT COUNT(*) AS count FROM company_records WHERE collection = ?').get(collection)
@@ -569,7 +592,7 @@ test('schema version 7 moves inventory masters out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 7').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
   for (const collection of ['units', 'stockGroups', 'godowns']) {
     assert.equal(
       db.prepare('SELECT COUNT(*) AS count FROM company_records WHERE collection = ?').get(collection)
@@ -601,7 +624,61 @@ test('schema version 7 moves inventory masters out of collection rows', () => {
   assert.deepEqual(upgraded.read().state, expected);
 });
 
-test('normalized writes keep promoted company, group, year, cost master, inventory master, stock item and ledger columns in sync', () => {
+test('schema version 8 moves budgets and currencies out of collection rows', () => {
+  const original = fixture();
+  const { db, store } = legacyStore(original);
+  store.migrateLegacy();
+  const expected = store.read().state;
+  const budget = original.companies[0].budgets[0];
+  const currency = original.companies[0].currencies[0];
+  db.prepare('DELETE FROM budgets').run();
+  db.prepare('DELETE FROM currencies').run();
+  db.prepare(
+    `INSERT INTO company_records
+       (company_id, collection, id, position, name, parent_id, reference_id, amount, data)
+     VALUES (?, 'budgets', ?, 0, ?, ?, ?, ?, ?)`,
+  ).run('co1', budget.id, budget.name, budget.targetId, budget.yearId, budget.amount, JSON.stringify(budget));
+  db.prepare(
+    `INSERT INTO company_records
+       (company_id, collection, id, position, name, parent_id, reference_id, amount, data)
+     VALUES (?, 'currencies', ?, 0, ?, NULL, NULL, NULL, ?)`,
+  ).run('co1', currency.id, currency.name, JSON.stringify(currency));
+  db.prepare('UPDATE workspace_meta SET schema_version = 8').run();
+
+  const upgraded = new WorkspaceStore(db);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
+  for (const collection of ['budgets', 'currencies']) {
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM company_records WHERE collection = ?').get(collection)
+        .count,
+      0,
+    );
+  }
+  const budgetRow = db.prepare('SELECT * FROM budgets WHERE id = ?').get('bud1');
+  assert.equal(budgetRow.name, 'Sales budget');
+  assert.equal(budgetRow.target_type, 'ledger');
+  assert.equal(budgetRow.target_id, 'led1');
+  assert.equal(budgetRow.year_id, 'year1');
+  assert.equal(budgetRow.amount, 1000);
+  assert.equal(budgetRow.created_at, '2026-03-05T00:00:00.000Z');
+  const budgetData = JSON.parse(budgetRow.data);
+  for (const field of ['id', 'name', 'targetType', 'targetId', 'yearId', 'amount', 'createdAt']) {
+    assert.equal(budgetData[field], undefined, `${field} should not remain in budget JSON`);
+  }
+  const currencyRow = db.prepare('SELECT * FROM currencies WHERE id = ?').get('cur1');
+  assert.equal(currencyRow.code, 'USD');
+  assert.equal(currencyRow.name, 'US Dollar');
+  assert.equal(currencyRow.symbol, '$');
+  assert.equal(currencyRow.created_at, '2026-03-04T00:00:00.000Z');
+  const currencyData = JSON.parse(currencyRow.data);
+  for (const field of ['id', 'code', 'name', 'symbol', 'createdAt']) {
+    assert.equal(currencyData[field], undefined, `${field} should not remain in currency JSON`);
+  }
+  assert.deepEqual(currencyData.rates, [{ date: '2026-04-01', rate: 83 }]);
+  assert.deepEqual(upgraded.read().state, expected);
+});
+
+test('normalized writes keep promoted company, group, year, cost master, inventory master, budget, currency, stock item and ledger columns in sync', () => {
   const { db, store } = legacyStore(fixture());
   store.migrateLegacy();
   const before = store.read();
@@ -632,6 +709,22 @@ test('normalized writes keep promoted company, group, year, cost master, invento
     code: 'SG-1',
   });
   Object.assign(next.companies[0].godowns[0], { name: 'Warehouse', primary: true });
+  Object.assign(next.companies[0].budgets[0], {
+    name: 'Sales plan',
+    targetType: 'group',
+    targetId: 'grp1',
+    yearId: 'year1',
+    amount: 1250.5,
+    createdAt: '2026-05-04T00:00:00.000Z',
+    note: 'Quarterly',
+  });
+  Object.assign(next.companies[0].currencies[0], {
+    code: 'EUR',
+    name: 'Euro',
+    symbol: '€',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    note: 'Travel',
+  });
   Object.assign(next.companies[0].stockItems[0], {
     name: 'Gadget',
     hsn: '5678',
@@ -693,6 +786,27 @@ test('normalized writes keep promoted company, group, year, cost master, invento
   assert.equal(godown.name, 'Warehouse');
   assert.equal(godown.is_primary, 1);
   assert.equal(JSON.parse(godown.data).name, undefined);
+  const budget = db.prepare('SELECT * FROM budgets WHERE id = ?').get('bud1');
+  assert.equal(budget.name, 'Sales plan');
+  assert.equal(budget.target_type, 'group');
+  assert.equal(budget.target_id, 'grp1');
+  assert.equal(budget.year_id, 'year1');
+  assert.equal(budget.amount, 1250.5);
+  assert.equal(budget.created_at, '2026-05-04T00:00:00.000Z');
+  const budgetData = JSON.parse(budget.data);
+  assert.equal(budgetData.name, undefined);
+  assert.equal(budgetData.amount, undefined);
+  assert.equal(budgetData.note, 'Quarterly');
+  const currency = db.prepare('SELECT * FROM currencies WHERE id = ?').get('cur1');
+  assert.equal(currency.code, 'EUR');
+  assert.equal(currency.name, 'Euro');
+  assert.equal(currency.symbol, '€');
+  assert.equal(currency.created_at, '2026-05-05T00:00:00.000Z');
+  const currencyData = JSON.parse(currency.data);
+  assert.equal(currencyData.code, undefined);
+  assert.equal(currencyData.name, undefined);
+  assert.equal(currencyData.note, 'Travel');
+  assert.deepEqual(currencyData.rates, [{ date: '2026-04-01', rate: 83 }]);
   const stockItem = db.prepare('SELECT * FROM stock_items WHERE id = ?').get('item1');
   assert.equal(stockItem.name, 'Gadget');
   assert.equal(stockItem.hsn, '5678');

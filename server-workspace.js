@@ -1,13 +1,14 @@
 // ZledgerCraft - relational workspace storage.
 // Companies, account groups, financial years, cost masters, inventory masters,
-// ledgers, vouchers and stock items are canonical rows. Every other company
-// collection is stored as one ordered record row with searchable hints, while
-// the complete record JSON preserves fields the engine has not promoted to
-// columns yet. Expiring leases provide advisory-but-enforced record ownership.
+// budgets, currencies, ledgers, vouchers and stock items are canonical rows.
+// Every other company collection is stored as one ordered record row with
+// searchable hints, while the complete record JSON preserves fields the engine
+// has not promoted to columns yet. Expiring leases provide advisory-but-enforced
+// record ownership.
 import { createHash, randomBytes } from 'node:crypto';
 import { deepEqual, mergeWorkspaceStates, repairVoucherNumbers } from './server-merge.js';
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 const HISTORY_LIMIT = 20;
 // Header fields that are useful as typed columns. The complete JSON is still
 // kept for compatibility, but these values are removed from it when present.
@@ -52,6 +53,20 @@ const PROMOTED_GODOWN_FIELDS = [
   ['name', 'name'],
   ['is_primary', 'primary'],
 ];
+const PROMOTED_BUDGET_FIELDS = [
+  ['name', 'name'],
+  ['target_type', 'targetType'],
+  ['target_id', 'targetId'],
+  ['year_id', 'yearId'],
+  ['amount', 'amount'],
+  ['created_at', 'createdAt'],
+];
+const PROMOTED_CURRENCY_FIELDS = [
+  ['code', 'code'],
+  ['name', 'name'],
+  ['symbol', 'symbol'],
+  ['created_at', 'createdAt'],
+];
 const PROMOTED_COMPANY_COLUMNS = [['created_at', 'TEXT']];
 const PROMOTED_STOCK_COLUMNS = [['created_at', 'TEXT']];
 const PROMOTED_LEDGER_COLUMNS = [
@@ -70,12 +85,10 @@ const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 const MAX_LEASE_MS = 10 * 60 * 1000;
 
 // Top-level company arrays stored in company_records. Account groups, financial
-// years, cost masters, inventory masters and stock items have their own tables
-// because they are queried by parent, dates, category, group, unit and HSN
-// independently.
+// years, cost masters, inventory masters, budgets, currencies and stock items
+// have their own tables because they are queried by parent, dates, category,
+// group, unit, target, year and HSN independently.
 const RECORD_COLLECTIONS = [
-  'budgets',
-  'currencies',
   'stockTransfers',
   'orders',
   'boms',
@@ -251,6 +264,48 @@ function godownRows(rows) {
   return byCompany;
 }
 
+function budgetRows(rows) {
+  const byCompany = new Map();
+  for (const row of rows) {
+    if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
+    const data = JSON.parse(row.data);
+    const budget = {
+      ...data,
+      id: row.id,
+      name: row.name ?? data.name,
+      targetType: row.target_type ?? data.targetType,
+      targetId: row.target_id ?? data.targetId,
+      yearId: row.year_id ?? data.yearId,
+      amount: row.amount === null || row.amount === undefined ? number(data.amount) : number(row.amount),
+    };
+    if (row.created_at !== null && row.created_at !== undefined && row.created_at !== '') {
+      budget.createdAt = row.created_at;
+    }
+    byCompany.get(row.company_id).push(budget);
+  }
+  return byCompany;
+}
+
+function currencyRows(rows) {
+  const byCompany = new Map();
+  for (const row of rows) {
+    if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
+    const data = JSON.parse(row.data);
+    const currency = {
+      ...data,
+      id: row.id,
+      code: row.code ?? data.code,
+      name: row.name ?? data.name,
+      symbol: row.symbol ?? data.symbol,
+    };
+    if (row.created_at !== null && row.created_at !== undefined && row.created_at !== '') {
+      currency.createdAt = row.created_at;
+    }
+    byCompany.get(row.company_id).push(currency);
+  }
+  return byCompany;
+}
+
 function stockRows(rows) {
   const byCompany = new Map();
   for (const row of rows) {
@@ -303,6 +358,8 @@ function stateFromRows({
   units = [],
   stockGroups = [],
   godowns = [],
+  budgets = [],
+  currencies = [],
   records = [],
   stockItems = [],
 }) {
@@ -324,6 +381,8 @@ function stateFromRows({
   const unitsByCompany = unitRows(units);
   const stockGroupsByCompany = stockGroupRows(stockGroups);
   const godownsByCompany = godownRows(godowns);
+  const budgetsByCompany = budgetRows(budgets);
+  const currenciesByCompany = currencyRows(currencies);
   const recordsByCompany = collectionRows(records);
   const stockByCompany = stockRows(stockItems);
 
@@ -403,6 +462,10 @@ function stateFromRows({
     if (storedStockGroups) company.stockGroups = storedStockGroups;
     const storedGodowns = godownsByCompany.get(row.id);
     if (storedGodowns) company.godowns = storedGodowns;
+    const storedBudgets = budgetsByCompany.get(row.id);
+    if (storedBudgets) company.budgets = storedBudgets;
+    const storedCurrencies = currenciesByCompany.get(row.id);
+    if (storedCurrencies) company.currencies = storedCurrencies;
     const storedStockItems = stockByCompany.get(row.id);
     if (storedStockItems) company.stockItems = storedStockItems;
     company.ledgers = ledgersByCompany.get(row.id) ?? [];
@@ -448,6 +511,8 @@ export function readWorkspaceSnapshot(db) {
       units: optionalRows(db, 'SELECT * FROM units ORDER BY company_id, position'),
       stockGroups: optionalRows(db, 'SELECT * FROM stock_groups ORDER BY company_id, position'),
       godowns: optionalRows(db, 'SELECT * FROM godowns ORDER BY company_id, position'),
+      budgets: optionalRows(db, 'SELECT * FROM budgets ORDER BY company_id, position'),
+      currencies: optionalRows(db, 'SELECT * FROM currencies ORDER BY company_id, position'),
       ledgers: select('SELECT * FROM ledgers ORDER BY position'),
       vouchers: select('SELECT * FROM vouchers ORDER BY position'),
       lines: select('SELECT * FROM voucher_lines ORDER BY position'),
@@ -574,6 +639,30 @@ export class WorkspaceStore {
         data TEXT NOT NULL,
         PRIMARY KEY (company_id, id)
       );
+      CREATE TABLE IF NOT EXISTS budgets (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        name TEXT,
+        target_type TEXT,
+        target_id TEXT,
+        year_id TEXT,
+        amount REAL,
+        created_at TEXT,
+        data TEXT NOT NULL,
+        PRIMARY KEY (company_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS currencies (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        code TEXT,
+        name TEXT,
+        symbol TEXT,
+        created_at TEXT,
+        data TEXT NOT NULL,
+        PRIMARY KEY (company_id, id)
+      );
       CREATE TABLE IF NOT EXISTS ledgers (
         company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
         id TEXT NOT NULL,
@@ -660,6 +749,10 @@ export class WorkspaceStore {
       CREATE INDEX IF NOT EXISTS units_company ON units(company_id, position);
       CREATE INDEX IF NOT EXISTS stock_groups_company ON stock_groups(company_id, position);
       CREATE INDEX IF NOT EXISTS godowns_company ON godowns(company_id, position);
+      CREATE INDEX IF NOT EXISTS budgets_company ON budgets(company_id, position);
+      CREATE INDEX IF NOT EXISTS budgets_target ON budgets(company_id, target_type, target_id, year_id);
+      CREATE INDEX IF NOT EXISTS currencies_company ON currencies(company_id, position);
+      CREATE INDEX IF NOT EXISTS currencies_code ON currencies(company_id, code);
       CREATE INDEX IF NOT EXISTS ledgers_company ON ledgers(company_id, position);
       CREATE INDEX IF NOT EXISTS vouchers_company ON vouchers(company_id, position);
       CREATE INDEX IF NOT EXISTS voucher_lines_voucher ON voucher_lines(voucher_id, position);
@@ -695,6 +788,8 @@ export class WorkspaceStore {
     this.units = this.db.prepare('SELECT * FROM units ORDER BY company_id, position');
     this.stockGroups = this.db.prepare('SELECT * FROM stock_groups ORDER BY company_id, position');
     this.godowns = this.db.prepare('SELECT * FROM godowns ORDER BY company_id, position');
+    this.budgets = this.db.prepare('SELECT * FROM budgets ORDER BY company_id, position');
+    this.currencies = this.db.prepare('SELECT * FROM currencies ORDER BY company_id, position');
     this.ledgers = this.db.prepare('SELECT * FROM ledgers ORDER BY position');
     this.vouchers = this.db.prepare('SELECT * FROM vouchers ORDER BY position');
     this.lines = this.db.prepare('SELECT * FROM voucher_lines ORDER BY position');
@@ -748,6 +843,15 @@ export class WorkspaceStore {
       INSERT INTO godowns (company_id, id, position, name, is_primary, data)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
+    this.insertBudget = this.db.prepare(`
+      INSERT INTO budgets
+        (company_id, id, position, name, target_type, target_id, year_id, amount, created_at, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.insertCurrency = this.db.prepare(`
+      INSERT INTO currencies (company_id, id, position, code, name, symbol, created_at, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
     this.insertLedger = this.db.prepare(`
       INSERT INTO ledgers
         (company_id, id, position, name, group_id, opening, opening_type,
@@ -785,6 +889,8 @@ export class WorkspaceStore {
     this.clearUnits = this.db.prepare('DELETE FROM units');
     this.clearStockGroups = this.db.prepare('DELETE FROM stock_groups');
     this.clearGodowns = this.db.prepare('DELETE FROM godowns');
+    this.clearBudgets = this.db.prepare('DELETE FROM budgets');
+    this.clearCurrencies = this.db.prepare('DELETE FROM currencies');
     this.clearRecords = this.db.prepare('DELETE FROM company_records');
     this.clearStockItems = this.db.prepare('DELETE FROM stock_items');
     this.clearUsers = this.db.prepare('DELETE FROM workspace_users');
@@ -858,6 +964,8 @@ export class WorkspaceStore {
       units: this.units.all(),
       stockGroups: this.stockGroups.all(),
       godowns: this.godowns.all(),
+      budgets: this.budgets.all(),
+      currencies: this.currencies.all(),
       ledgers: this.ledgers.all(),
       vouchers: this.vouchers.all(),
       lines: this.lines.all(),
@@ -958,6 +1066,8 @@ export class WorkspaceStore {
       this.clearUnits.run();
       this.clearStockGroups.run();
       this.clearGodowns.run();
+      this.clearBudgets.run();
+      this.clearCurrencies.run();
       this.clearCompanies.run();
       this.clearUsers.run();
       this.clearLog.run();
@@ -985,6 +1095,8 @@ export class WorkspaceStore {
       this.clearUnits.run();
       this.clearStockGroups.run();
       this.clearGodowns.run();
+      this.clearBudgets.run();
+      this.clearCurrencies.run();
       this.clearCompanies.run();
       this.clearUsers.run();
       this.clearLog.run();
@@ -1036,6 +1148,10 @@ export class WorkspaceStore {
         if (hasStockGroups) delete companyData.stockGroups;
         const hasGodowns = Array.isArray(company.godowns) && company.godowns.length > 0;
         if (hasGodowns) delete companyData.godowns;
+        const hasBudgets = Array.isArray(company.budgets) && company.budgets.length > 0;
+        if (hasBudgets) delete companyData.budgets;
+        const hasCurrencies = Array.isArray(company.currencies) && company.currencies.length > 0;
+        if (hasCurrencies) delete companyData.currencies;
         const hasStockItems = Array.isArray(company.stockItems) && company.stockItems.length > 0;
         if (hasStockItems) delete companyData.stockItems;
         this.insertCompany.run(
@@ -1157,6 +1273,42 @@ export class WorkspaceStore {
               text(godown.name) || null,
               godown.primary ? 1 : 0,
               JSON.stringify(godownData),
+            );
+          }
+        }
+        if (hasBudgets) {
+          for (const [position, budget] of company.budgets.entries()) {
+            const budgetData = { ...budget };
+            delete budgetData.id;
+            for (const [, field] of PROMOTED_BUDGET_FIELDS) delete budgetData[field];
+            this.insertBudget.run(
+              text(company.id),
+              text(budget.id) || `budgets-${position}`,
+              position,
+              text(budget.name) || null,
+              text(budget.targetType) || null,
+              text(budget.targetId) || null,
+              text(budget.yearId) || null,
+              optionalNumber(budget.amount),
+              optionalText(budget.createdAt),
+              JSON.stringify(budgetData),
+            );
+          }
+        }
+        if (hasCurrencies) {
+          for (const [position, currency] of company.currencies.entries()) {
+            const currencyData = { ...currency };
+            delete currencyData.id;
+            for (const [, field] of PROMOTED_CURRENCY_FIELDS) delete currencyData[field];
+            this.insertCurrency.run(
+              text(company.id),
+              text(currency.id) || `currencies-${position}`,
+              position,
+              text(currency.code) || null,
+              text(currency.name) || null,
+              text(currency.symbol) || null,
+              optionalText(currency.createdAt),
+              JSON.stringify(currencyData),
             );
           }
         }

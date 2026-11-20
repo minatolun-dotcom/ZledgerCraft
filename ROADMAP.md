@@ -50,9 +50,9 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 App-level encryption (passphrase-encrypted JSON downloads and optional
 AES-256-GCM encryption for server/R2 backups are complete; live-workspace
 encryption remains), incremental master-column promotion (company headers,
-account groups, financial years, cost masters, inventory masters, stock-item
-fields and ledger opening/tax/address/GST-role fields are now typed SQLite
-columns), APIs/webhooks
+account groups, financial years, cost masters, inventory masters,
+budgets/currencies, stock-item fields and ledger opening/tax/address/GST-role
+fields are now typed SQLite columns), APIs/webhooks
 and statutory integrations. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
 now complete.
@@ -84,8 +84,8 @@ Working now:
 - Optional local server workspace in `data/workspace.sqlite`, shared across
   browser profiles on the same machine, with browser storage as the fallback and
   local mirror. Companies, account groups, financial years, cost masters,
-  inventory masters, ledgers, vouchers and voucher lines are relational rows;
-  other company masters stay in a JSON column. Legacy `workspace.json` and
+  inventory masters, budgets, currencies, ledgers, vouchers and voucher lines
+  are relational rows; other company collections stay in a JSON column. Legacy `workspace.json` and
   the old whole-workspace blob are migrated automatically and removed. Saves
   carry a revision; a stale session gets a conflict banner and must reload
   instead of overwriting another session. The workspace database is excluded
@@ -338,6 +338,26 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-20 — Phase 17: budget and currency normalization
+
+- Moved budgets and currencies out of the generic `company_records` collection
+  table into dedicated `budgets` and `currencies` tables. Budget names, targets,
+  financial-year links and amounts, and currency codes, names and symbols are
+  typed columns; creation times are typed too. Remaining record JSON is kept as
+  a compatibility fallback, including currency rate history.
+- Raised the normalized SQLite schema to version 9. Version-8 databases migrate
+  in place: both collections are read from the old collection rows, written to
+  the new tables, and the old rows are removed.
+- Reads preserve budget and currency order and rebuild the same arrays used by
+  budget variance, forex entry, voucher conversion and guarded deletes. Backups
+  without the new tables still fall back to `company_records` and company JSON.
+- Postgres remains one JSONB workspace document; this phase changes SQLite
+  storage only.
+- Verification: v8-to-v9 migration, typed target/amount/code restoration, JSON
+  stripping, rate-history preservation, unpromoted JSON preservation,
+  write-side synchronization and full round-trip tests; 255 tests (254 pass, 1
+  skipped) and an 880.5 kB single-file build pass.
 
 ### 2026-11-20 — Phase 16: inventory-master normalization
 

@@ -405,7 +405,8 @@ disabled.
   weighted-average cost; Godown balances with transfer-aware quantities; Batch
   balances with expiry and value at item average cost; and a per-item movement
   report with running balances. Opening stock can be split into named batches
-  with expiry dates, either in the item form or from Tally batch masters.
+  with expiry dates, either in the item form or from Tally batch masters, and
+  an expiring-batches panel lists stock due or past expiry within 90 days.
 - Sales and purchase orders with party, delivery date, up to 50 item lines
   (each with godown, batch, expiry, quantity and rate), status
   (Open/Closed/Cancelled), filters and a Create voucher action that prefills the

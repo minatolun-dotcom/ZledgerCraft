@@ -9,6 +9,7 @@ import {
 } from './store.js';
 import {
   batchStockSummary,
+  expiringBatches,
   godownStockSummary,
   stockMovements,
   stockSummary,
@@ -184,6 +185,7 @@ export function inventoryScreen() {
   const report = stockSummary(active, { from, to });
   const godownReport = godownStockSummary(active, { from, to });
   const batchReport = batchStockSummary(active, { from, to });
+  const expiryReport = expiringBatches(active, { asOn: to, days: 90 });
   const transfers = [...(active.stockTransfers ?? [])].sort(
     (a, b) => b.date.localeCompare(a.date) || b.no - a.no,
   );
@@ -345,6 +347,19 @@ export function inventoryScreen() {
     })
     .join('');
 
+  const expiryRows = expiryReport.rows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.name)}</strong></td>
+        <td>${esc(row.batchNo)}</td>
+        <td>${esc(dateLabel(row.expiryDate))}</td>
+        <td class="${row.expired ? 'neg' : ''}">${row.expired ? `Expired ${Math.abs(row.daysLeft)} day${Math.abs(row.daysLeft) === 1 ? '' : 's'} ago` : `${row.daysLeft} day${row.daysLeft === 1 ? '' : 's'}`}</td>
+        <td class="num">${fmtQty(row.closingQty)} ${esc(row.unit)}</td>
+        <td class="num">${money(row.closingValue)}</td>
+      </tr>`,
+    )
+    .join('');
+
   const bomRows = boms
     .map((bom) => {
       const output = items.find((item) => item.id === bom.outputItemId);
@@ -433,6 +448,18 @@ export function inventoryScreen() {
             <tbody>${batchRows}</tbody>
           </table>`,
           'Batch balances are quantity-based; values use the item weighted-average cost. Expiry is the latest date entered on a batch line.',
+        )
+      : ''}
+    ${expiryReport.rows.length
+      ? panel(
+          'Expiring batches',
+          `<p class="muted">${expiryReport.totals.count} batch${expiryReport.totals.count === 1 ? '' : 'es'} with stock expire within 90 days of ${esc(dateLabel(to))}${expiryReport.totals.expired ? `; ${expiryReport.totals.expired} already expired` : ''}.</p>
+          <table class="data-table compact">
+            <thead><tr><th>Item</th><th>Batch</th><th>Expiry</th><th>Days</th><th class="num">Quantity</th><th class="num">Value</th></tr></thead>
+            <tbody>${expiryRows}</tbody>
+            <tfoot><tr><td colspan="4">Value at risk</td><td class="num">${fmtQty(expiryReport.totals.closingQty)}</td><td class="num">${money(expiryReport.totals.closingValue)}</td></tr></tfoot>
+          </table>`,
+          'Uses batch expiry dates from stock lines and opening batches. Move, sell or write off expiring lots before they lapse; the app does not post a write-off automatically.',
         )
       : ''}
     ${panel(

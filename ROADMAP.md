@@ -344,6 +344,16 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 25: expiring-batch report
+
+- Inventory now shows batches with stock whose expiry falls within 90 days of
+  the report end date, including already-expired lots, sorted by expiry, with
+  days remaining, quantity and value at risk.
+- The report reads the same batch balances as the batch panel, so opening
+  batches, purchases, sales, transfers and production output all count.
+- Verification: upcoming, expired and wide-window cases; 264 tests (263 pass,
+  1 skipped) and a 900.7 kB build pass.
+
 ### 2026-11-20 — Phase 24: editable opening batches
 
 - Stock items can now have their opening stock split across batch names, with

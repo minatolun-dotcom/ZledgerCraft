@@ -33,6 +33,7 @@ import {
 import {
   balanceSheet,
   batchStockSummary,
+  expiringBatches,
   godownStockSummary,
   statistics,
   stockMovements,
@@ -587,6 +588,42 @@ test('batch-tracked items require batches and report batch balances', () => {
   assert.equal(after.length, 1);
   assert.equal(after[0].batchNo, 'Opening');
   assert.equal(after[0].openingQty, 8);
+});
+
+test('expiring batches reports lots inside the window and marks expired ones', () => {
+  const company = createCompany('Expiry Co', '2026-04-01').company;
+  const unit = company.units.find((entry) => entry.symbol === 'Nos');
+  const item = addStockItem(company, {
+    name: 'Expiring Syrup',
+    stockGroupId: company.stockGroups[0].id,
+    unitId: unit.id,
+    openingRate: 50,
+    batchTracking: true,
+    openingBatches: [
+      { batchNo: 'SOON', qty: 2, expiryDate: '2026-05-01' },
+      { batchNo: 'LATER', qty: 3, expiryDate: '2027-05-01' },
+    ],
+  }).item;
+  assert.equal(item.openingQty, 5);
+
+  const upcoming = expiringBatches(company, { asOn: '2026-04-15', days: 30 });
+  assert.equal(upcoming.rows.length, 1);
+  assert.equal(upcoming.rows[0].batchNo, 'SOON');
+  assert.equal(upcoming.rows[0].daysLeft, 16);
+  assert.equal(upcoming.rows[0].expired, false);
+  assert.equal(upcoming.rows[0].closingQty, 2);
+  assert.equal(upcoming.totals.count, 1);
+  assert.equal(upcoming.totals.closingValue, 100);
+
+  const expired = expiringBatches(company, { asOn: '2026-06-01', days: 30 });
+  assert.equal(expired.rows[0].batchNo, 'SOON');
+  assert.equal(expired.rows[0].expired, true);
+  assert.equal(expired.rows[0].daysLeft, -31);
+  assert.equal(expired.totals.expired, 1);
+
+  const wide = expiringBatches(company, { asOn: '2026-04-15', days: 400 });
+  assert.equal(wide.rows.length, 2, 'both lots fall inside a wide window');
+  assert.equal(wide.rows[1].batchNo, 'LATER');
 });
 
 test('orders record sales and purchase commitments without moving stock', () => {

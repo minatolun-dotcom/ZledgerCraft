@@ -1935,6 +1935,43 @@ export function batchStockSummary(company, filters = {}) {
   return { from, to, rows, totals: { closingQty: round3(rows.reduce((sum, row) => sum + row.closingQty, 0)) } };
 }
 
+function batchDaysBetween(from, to) {
+  const start = Date.UTC(Number(from.slice(0, 4)), Number(from.slice(5, 7)) - 1, Number(from.slice(8, 10)));
+  const end = Date.UTC(Number(to.slice(0, 4)), Number(to.slice(5, 7)) - 1, Number(to.slice(8, 10)));
+  return Math.round((end - start) / 86400000);
+}
+
+/** Batch stock whose expiry falls within the next `days`, including expired lots. */
+export function expiringBatches(company, filters = {}) {
+  const asOn = filters.asOn || new Date().toISOString().slice(0, 10);
+  const days = Number.isFinite(Number(filters.days)) ? Math.max(0, Number(filters.days)) : 90;
+  const limitDate = new Date(Date.UTC(
+    Number(asOn.slice(0, 4)),
+    Number(asOn.slice(5, 7)) - 1,
+    Number(asOn.slice(8, 10)) + days,
+  )).toISOString().slice(0, 10);
+  const summary = batchStockSummary(company, { to: asOn });
+  const rows = summary.rows
+    .filter((row) => row.expiryDate && row.closingQty > 0 && row.expiryDate <= limitDate)
+    .map((row) => ({
+      ...row,
+      daysLeft: batchDaysBetween(asOn, row.expiryDate),
+      expired: row.expiryDate < asOn,
+    }))
+    .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate) || a.name.localeCompare(b.name));
+  return {
+    asOn,
+    days,
+    rows,
+    totals: {
+      count: rows.length,
+      expired: rows.filter((row) => row.expired).length,
+      closingQty: round3(rows.reduce((sum, row) => sum + row.closingQty, 0)),
+      closingValue: round2(rows.reduce((sum, row) => sum + row.closingValue, 0)),
+    },
+  };
+}
+
 /** Voucher-wise movement for one stock item, with a running balance. */
 export function stockMovements(company, itemId, filters = {}) {
   const item = (company.stockItems ?? []).find((entry) => entry.id === itemId);

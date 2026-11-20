@@ -4,8 +4,11 @@ import {
   VOUCHER_TYPES,
   booksStart,
   addCostCategory,
+  addCostCentre,
+  addCurrency,
   addCurrencyRate,
   addGodown,
+  addPayHead,
   addLedger,
   addStockGroup,
   addStockItem,
@@ -350,6 +353,9 @@ export function importMasterCsv(text, type, target = null) {
     stockGroups: 'stock group',
     godowns: 'godown',
     costCategories: 'cost category',
+    costCentres: 'cost centre',
+    payHeads: 'pay head',
+    currencies: 'currency',
   }[type];
   if (!label) return { ok: false, error: 'Choose a valid master-data type.' };
   const parsed = csvObjects(text);
@@ -371,9 +377,37 @@ export function importMasterCsv(text, type, target = null) {
     } else if (type === 'godowns') {
       result = addGodown(clone, { name });
       if (result.ok) additions.push({ name });
-    } else {
+    } else if (type === 'costCategories') {
       result = addCostCategory(clone, { name });
       if (result.ok) additions.push({ name });
+    } else if (type === 'costCentres') {
+      const categoryName = String(record.category ?? '').trim();
+      const category = clone.costCategories.find((item) => item.name.toLowerCase() === categoryName.toLowerCase());
+      if (!category) return { ok: false, error: `Row ${record.__row}: cost category "${categoryName}" was not found.` };
+      result = addCostCentre(clone, { name, categoryId: category.id });
+      if (result.ok) additions.push({ name, categoryId: category.id });
+    } else if (type === 'payHeads') {
+      const ledgerName = String(record.ledger ?? '').trim();
+      const ledger = clone.ledgers.find((item) => item.name.toLowerCase() === ledgerName.toLowerCase());
+      if (!ledger) return { ok: false, error: `Row ${record.__row}: ledger "${ledgerName}" was not found.` };
+      const input = {
+        name,
+        kind: String(record.kind ?? '').trim(),
+        ledgerId: ledger.id,
+        statutory: String(record.statutory ?? '').trim(),
+      };
+      result = addPayHead(clone, input);
+      if (result.ok) additions.push(input);
+    } else {
+      const input = {
+        code: String(record.code ?? '').trim().toUpperCase(),
+        name,
+        symbol: String(record.symbol ?? '').trim(),
+        date: parseStatementDate(record.date) || undefined,
+        rate: record.rate,
+      };
+      result = addCurrency(clone, input);
+      if (result.ok) additions.push(input);
     }
     if (!result.ok) return { ok: false, error: `Row ${record.__row}: ${result.error}` };
   }
@@ -382,6 +416,9 @@ export function importMasterCsv(text, type, target = null) {
     stockGroups: (input) => addStockGroup(active, input),
     godowns: (input) => addGodown(active, input),
     costCategories: (input) => addCostCategory(active, input),
+    costCentres: (input) => addCostCentre(active, input),
+    payHeads: (input) => addPayHead(active, input),
+    currencies: (input) => addCurrency(active, input),
   };
   for (const input of additions) {
     const result = builders[type](input);

@@ -103,6 +103,10 @@ test('master CSV import handles units, groups, godowns and cost categories atomi
   assert.equal(importMasterCsv('Name\nTrading', 'stockGroups', company).ok, true);
   assert.equal(importMasterCsv('Name\nWarehouse', 'godowns', company).ok, true);
   assert.equal(importMasterCsv('Name\nMarketing', 'costCategories', company).ok, true);
+  assert.equal(importMasterCsv('Name,Category\nRetail,Marketing', 'costCentres', company).ok, true);
+  const currency = importMasterCsv('Code,Name,Symbol,Rate,Date\nUSD,US Dollar,$,83,2026-04-01', 'currencies', company);
+  assert.equal(currency.ok, true, currency.error);
+  assert.equal(company.currencies.some((item) => item.code === 'USD'), true);
   const before = company.units.length;
   assert.equal(importMasterCsv('Name,Symbol\nGood,GD\nBad', 'units', company).ok, false);
   assert.equal(company.units.length, before);

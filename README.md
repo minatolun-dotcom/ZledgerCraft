@@ -657,7 +657,7 @@ disabled.
 - CSV import for ledgers (`Name,Group,Opening,Type`), stock items (`Name,Group,Unit,Opening,Rate,Reorder,Selling,Purchase,HSN,Batch`), multi-line balanced
   vouchers (`Date,Type,No,Ledger,Side,Amount,Narration`) and bank statements
   (`Date,Description,Reference,Debit,Credit`), dated currency rates
-  (`Code,Date,Rate`), plus units, stock groups, godowns and cost categories through a type-selected master import. Bank statements also accept OFX, QIF and MT940 files. Excel `.xlsx` workbooks can load
+  (`Code,Date,Rate`), plus units, stock groups, godowns, cost categories, cost centres, pay heads and currencies through a type-selected master import. Bank statements also accept OFX, QIF and MT940 files. Excel `.xlsx` workbooks can load
   ledgers, vouchers, stock items, currency rates or bank statements into the same review boxes: named sheets such as `Ledgers` or `Vouchers` are preferred, otherwise the first worksheet is used. Date-styled cells become YYYY-MM-DD. The workbook is converted to the same CSV text and imported through the same all-or-nothing path.
 - Tally XML import for account groups, ledgers, stock groups, stock items with
   opening stock, balanced accounting vouchers, and voucher stock lines. Common

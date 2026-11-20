@@ -420,9 +420,10 @@ export function importScreen() {
   )}
   ${panel(
     'Import other masters from CSV',
-    `<p class="muted">Choose the master type, then import a CSV with <code>Name</code> and, for units, <code>Symbol</code>. Existing names are rejected and the whole file is atomic.</p>
-    <label class="field"><span>Master type</span><select id="master-import-type"><option value="units">Units</option><option value="stockGroups">Stock groups</option><option value="godowns">Godowns</option><option value="costCategories">Cost categories</option></select></label>
+    `<p class="muted">Choose the master type. Units need <code>Name,Symbol</code>; cost centres need <code>Name,Category</code>; pay heads need <code>Name,Kind,Ledger,Statutory</code>; currencies need <code>Code,Name,Symbol,Rate,Date</code>; other masters need <code>Name</code>. Existing names are rejected and the whole file is atomic.</p>
+    <label class="field"><span>Master type</span><select id="master-import-type"><option value="units">Units</option><option value="stockGroups">Stock groups</option><option value="godowns">Godowns</option><option value="costCategories">Cost categories</option><option value="costCentres">Cost centres</option><option value="payHeads">Pay heads</option><option value="currencies">Currencies</option></select></label>
     <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="master-csv"></label>
+    <label class="field"><span>Excel workbook (.xlsx)</span><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" data-xlsx-target="master-csv" data-xlsx-sheet="Masters"></label>
     <textarea id="master-csv" class="backup-box import-box" rows="6" placeholder="Name,Symbol\nBoxes,Box\nDozens,Doz" aria-label="Other master import CSV"></textarea>
     <div class="form-actions"><button class="btn small primary" type="button" data-action="import-masters"${can('master.write') ? '' : ' disabled'}>Import masters</button></div>`,
   )}

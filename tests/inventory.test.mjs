@@ -6,6 +6,7 @@ import {
   addLedger,
   addManufacture,
   addOrder,
+  addStockCount,
   addStockGroup,
   addStockItem,
   addStockTransfer,
@@ -16,12 +17,14 @@ import {
   deleteGodown,
   deleteManufacture,
   deleteOrder,
+  deleteStockCount,
   deleteStockGroup,
   deleteStockItem,
   deleteStockTransfer,
   deleteUnit,
   deleteVoucher,
   defaultGodownId,
+  emptyState,
   exportState,
   findLedgerByName,
   importState,
@@ -206,6 +209,74 @@ test('reorder levels flag items at or below the level', () => {
   assert.equal(cleared.ok, true, cleared.error);
   assert.equal(cleared.item.reorderLevel, undefined);
   assert.equal(updateStockItem(company, item.id, { reorderLevel: -1 }).ok, false);
+});
+
+test('stock counts snapshot book quantities without moving stock', () => {
+  const { company, item, purchase } = inventoryFixture();
+  purchase('2026-04-02', 4, 100);
+  const godownId = defaultGodownId(company);
+
+  const count = addStockCount(company, {
+    date: '2026-04-30',
+    godownId,
+    narration: 'Month end',
+    rows: [{ stockItemId: item.id, countedQty: 12 }],
+  });
+  assert.equal(count.ok, true, count.error);
+  assert.equal(count.count.no, 1);
+  assert.equal(count.count.rows[0].systemQty, 14);
+  assert.equal(count.count.rows[0].countedQty, 12);
+  assert.equal(count.count.rows[0].difference, -2);
+  assert.equal(stockOnHand(company, item.id, '2026-04-30', { godownId }), 14);
+  assert.equal(stockSummary(company).rows[0].closingQty, 14);
+
+  const warehouse = addGodown(company, { name: 'Warehouse' }).godown;
+  const empty = addStockCount(company, {
+    date: '2026-04-30',
+    godownId: warehouse.id,
+    rows: [{ stockItemId: item.id, countedQty: 2 }],
+  });
+  assert.equal(empty.ok, true, empty.error);
+  assert.equal(empty.count.rows[0].systemQty, 0);
+  assert.equal(empty.count.rows[0].difference, 2);
+
+  assert.equal(
+    addStockCount(company, { date: '2026-04-30', godownId, rows: [] }).ok,
+    false,
+  );
+  assert.equal(
+    addStockCount(company, { date: '2026-04-30', godownId, rows: [{ stockItemId: item.id, countedQty: -1 }] }).ok,
+    false,
+  );
+  assert.equal(
+    addStockCount(company, { date: '2026-04-30', godownId, rows: [{ stockItemId: 'missing', countedQty: 1 }] }).ok,
+    false,
+  );
+  assert.equal(
+    addStockCount(company, {
+      date: '2026-04-30',
+      godownId,
+      rows: [
+        { stockItemId: item.id, countedQty: 1 },
+        { stockItemId: item.id, countedQty: 2 },
+      ],
+    }).ok,
+    false,
+  );
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  const restoredCounts = restored.state.companies[0].stockCounts;
+  assert.equal(restoredCounts.length, 2);
+  assert.equal(restoredCounts[0].rows[0].difference, -2);
+  assert.equal(restoredCounts[0].narration, 'Month end');
+
+  const removed = deleteStockCount(company, count.count.id);
+  assert.equal(removed.ok, true, removed.error);
+  assert.equal(company.stockCounts.length, 1);
 });
 
 test('voucher inventory lines must match the voucher total and the item masters', () => {

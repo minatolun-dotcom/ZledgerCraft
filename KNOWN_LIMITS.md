@@ -98,10 +98,10 @@ README. When a new limit is introduced, add it here in the same change.
 | ID | Limit | Current behaviour / consequence |
 | --- | --- | --- |
 | KL-41 | Inventory is still shallow | Units, stock groups/items, item lines on four voucher types and weighted-average valuation, now with godowns, batches, transfers, orders, BOMs and production. No physical stock count, batch-wise cost layers, WIP or stock posting to the financial statements. |
-| KL-42 | Godowns and batches added; physical stock and batch costing missing | Godowns, transfers, optional batch tracking and expiry dates exist, and stock items carry an optional reorder level with low-stock flags. There is no physical stock count, batch-wise valuation, FIFO/expiry consumption, automatic reordering, wastage or job work. BOM components cannot be batch-tracked. |
+| KL-42 | Godowns and batches added; batch costing still missing | Godowns, transfers, optional batch tracking and expiry dates exist, and stock items carry an optional reorder level with low-stock flags. Dated counts record book and counted quantities by godown, but they do not post adjustments, count batches or value differences. There is no batch-wise valuation, FIFO/expiry consumption, automatic reordering, wastage or job work. BOM components cannot be batch-tracked. |
 | KL-43 | Orders added; full order cycle missing | Sales/purchase orders carry up to 50 item lines, status and a voucher prefill that links and closes the order. There are no quotations, delivery/receipt notes, rejection notes, fulfilment/part-shipment tracking, reorder levels, price lists, discounts or additional costs. |
 | KL-44 | Stock is operational only | Stock value, including manufactured output, is not posted into the P&L or balance sheet; those statements stay ledger-driven. Labour, overhead and WIP adjustments would need an explicit journal until stock posting is implemented. |
-| KL-45 | Limited stock reporting | Stock Summary (with reorder-level low-stock flags), godown balances, batch balances and per-item movements exist. No separate reorder report, stock ageing, price-list, batch-cost or value-analysis reports. |
+| KL-45 | Limited stock reporting | Stock Summary (with reorder-level low-stock flags), godown balances, batch balances, per-item movements and a stock count register with counted/book differences exist. No separate reorder report, stock ageing, price-list, batch-cost or value-analysis reports. |
 | KL-46 | Simple units only | No alternate, compound or conversion units. |
 
 ## Statutory and missing modules

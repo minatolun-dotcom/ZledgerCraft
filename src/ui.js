@@ -28,6 +28,7 @@ import {
   addGroup,
   addLedger,
   addManufacture,
+  addStockCount,
   addStockGroup,
   addStockTransfer,
   addTaxChallan,
@@ -65,6 +66,7 @@ import {
   deleteTaxChallan,
   deleteLedger,
   deleteManufacture,
+  deleteStockCount,
   deleteStockGroup,
   deleteStockItem,
   deleteStockTransfer,
@@ -2791,6 +2793,60 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'stock-count-start-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const date = String(data.get('date') ?? '');
+    const godownId = String(data.get('godownId') ?? '');
+    if (!date || !godownId) {
+      setFlash('Choose a count date and godown.', 'warn');
+      render();
+      return;
+    }
+    view.stockCountDraft = { date, godownId };
+    view.stockCountId = null;
+    render();
+    return;
+  }
+
+  if (form.id === 'stock-count-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const rows = [...form.querySelectorAll('[data-count-item]')].map((input) => ({
+      stockItemId: input.dataset.countItem,
+      countedQty: input.value,
+    }));
+    const result = addStockCount(active, {
+      date: data.get('date'),
+      godownId: data.get('godownId'),
+      narration: data.get('narration'),
+      rows,
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'stock-count-error');
+      return;
+    }
+    const differences = result.count.rows.filter((row) => Math.abs(row.difference) >= 0.0005).length;
+    logAudit(
+      'stockCount.create',
+      `Recorded stock count SC-${result.count.no} with ${result.count.rows.length} item${result.count.rows.length === 1 ? '' : 's'} and ${differences} difference${differences === 1 ? '' : 's'}.`,
+      active,
+      `SC-${result.count.no}`,
+    );
+    persist();
+    view.stockCountDraft = null;
+    view.stockCountId = result.count.id;
+    setFlash(`Stock count SC-${result.count.no} saved.`);
+    render();
+    return;
+  }
+
   if (form.id === 'stock-transfer-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -5196,6 +5252,44 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'view-stock-count': {
+      view.stockCountId = view.stockCountId === trigger.dataset.id ? null : trigger.dataset.id;
+      render();
+      break;
+    }
+
+    case 'cancel-stock-count': {
+      view.stockCountDraft = null;
+      render();
+      break;
+    }
+
+    case 'delete-stock-count': {
+      if (!can('master.delete')) {
+        requirePermission('master.delete');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Delete this stock count? Stock and ledger balances will not change.')) break;
+      const result = deleteStockCount(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'stockCount.delete',
+          `Deleted stock count SC-${result.count.no}.`,
+          active,
+          `SC-${result.count.no}`,
+        );
+        if (view.stockCountId === result.count.id) view.stockCountId = null;
+        persist();
+      }
+      setFlash(
+        result.ok ? `Stock count SC-${result.count.no} deleted.` : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
+      break;
+    }
+
     case 'delete-stock-transfer': {
       if (!can('master.delete')) {
         requirePermission('master.delete');

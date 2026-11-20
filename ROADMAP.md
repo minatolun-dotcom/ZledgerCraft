@@ -344,6 +344,17 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 41: physical stock counts
+
+- Dated count sheets by godown snapshot each item's book quantity, default the
+  counted quantity to it, and save counted quantities with the difference in a
+  count register. Counts can be viewed and deleted without touching stock.
+- Counts validate the date, financial year, godown, line limit, duplicate items
+  and non-negative quantities; they survive backup normalisation.
+- Verification: book-quantity snapshot and difference, empty godown, invalid
+  lines, backup round trip and deletion; 284 tests (283 pass, 1 skipped) and a
+  954.4 kB build pass.
+
 ### 2026-11-20 — Phase 40: statement balance validation
 
 - Bank statement import can take optional opening and closing balances; both

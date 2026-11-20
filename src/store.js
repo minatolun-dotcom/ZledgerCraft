@@ -790,6 +790,7 @@ export function loadState() {
   for (const company of parsed.companies) normalizePayroll(company);
   for (const company of parsed.companies) normalizeInstruments(company);
   for (const company of parsed.companies) normalizeBankReconciliations(company);
+  for (const company of parsed.companies) normalizeStockCounts(company);
   parsed.audit = normalizeAudit(parsed.audit);
   seedUsers(parsed);
   return parsed;
@@ -2533,6 +2534,7 @@ function seedInventoryMasters(company) {
     company.godowns = [{ id: uid('gdwn'), name: 'Main Location', primary: true }];
   }
   if (!Array.isArray(company.stockTransfers)) company.stockTransfers = [];
+  if (!Array.isArray(company.stockCounts)) company.stockCounts = [];
   if (!Array.isArray(company.orders)) company.orders = [];
   if (!Array.isArray(company.boms)) company.boms = [];
   if (!Array.isArray(company.manufactures)) company.manufactures = [];
@@ -2544,6 +2546,10 @@ function seedInventoryMasters(company) {
   company.counters.__manufacture = Math.max(
     Number(company.counters.__manufacture) || 0,
     ...company.manufactures.map((manufacture) => Number(manufacture.no) || 0),
+  );
+  company.counters.__stockCount = Math.max(
+    Number(company.counters.__stockCount) || 0,
+    ...company.stockCounts.map((count) => Number(count.no) || 0),
   );
   for (const type of ['Sales', 'Purchase']) {
     const key = type === 'Sales' ? '__salesOrder' : '__purchaseOrder';
@@ -3947,6 +3953,117 @@ export function deleteStockTransfer(company, transferId) {
   return { ok: true, transfer };
 }
 
+/**
+ * Records a physical stock count. Book quantities are snapped at the count
+ * date and godown, but counting never moves stock or posts an adjustment.
+ */
+export function addStockCount(company, input) {
+  const date = String(input.date ?? '');
+  if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid count date.' };
+  seedYears(company);
+  const year = yearForDate(company, date);
+  if (!year) return { ok: false, error: 'The count date must fall inside a financial year.' };
+  if (year.closed) return { ok: false, error: 'The financial year is closed. Reopen it before recording a count.' };
+  const godown = (company.godowns ?? []).find((entry) => entry.id === input.godownId);
+  if (!godown) return { ok: false, error: 'Choose the godown that was counted.' };
+  const requested = Array.isArray(input.rows) ? input.rows : [];
+  if (!requested.length) return { ok: false, error: 'Add at least one stock item to the count.' };
+  if (requested.length > 500) return { ok: false, error: 'A stock count can carry at most 500 item lines.' };
+  const rows = [];
+  const seen = new Set();
+  for (const raw of requested) {
+    const item = (company.stockItems ?? []).find((entry) => entry.id === raw?.stockItemId);
+    if (!item) return { ok: false, error: 'Choose a stock item for every count line.' };
+    if (seen.has(item.id)) return { ok: false, error: `"${item.name}" appears twice in the count.` };
+    seen.add(item.id);
+    const countedQty = parseQty(raw?.countedQty);
+    if (countedQty === null || countedQty < 0) {
+      return { ok: false, error: `Counted quantity for "${item.name}" must be zero or more.` };
+    }
+    const systemQty = round3(stockOnHand(company, item.id, date, { godownId: godown.id }));
+    rows.push({
+      stockItemId: item.id,
+      name: item.name,
+      unit: (company.units ?? []).find((unit) => unit.id === item.unitId)?.symbol ?? '',
+      systemQty,
+      countedQty,
+      difference: round3(countedQty - systemQty),
+    });
+  }
+  company.stockCounts = company.stockCounts ?? [];
+  company.counters = company.counters ?? {};
+  company.counters.__stockCount = Math.max(
+    Number(company.counters.__stockCount) || 0,
+    ...company.stockCounts.map((count) => Number(count.no) || 0),
+  ) + 1;
+  const count = {
+    id: uid('scnt'),
+    no: company.counters.__stockCount,
+    date,
+    godownId: godown.id,
+    godownName: godown.name,
+    narration: String(input.narration ?? '').trim().slice(0, 200),
+    rows,
+    createdAt: new Date().toISOString(),
+  };
+  company.stockCounts.push(count);
+  return { ok: true, count };
+}
+
+export function deleteStockCount(company, countId) {
+  const count = (company.stockCounts ?? []).find((entry) => entry.id === countId);
+  if (!count) return { ok: false, error: 'Stock count not found.' };
+  company.stockCounts = (company.stockCounts ?? []).filter((entry) => entry.id !== countId);
+  return { ok: true, count };
+}
+
+/** Repairs saved stock counts after load or backup import. */
+export function normalizeStockCounts(company) {
+  if (!Array.isArray(company.stockCounts)) {
+    company.stockCounts = [];
+    return company;
+  }
+  const items = new Map((company.stockItems ?? []).map((item) => [item.id, item]));
+  const units = new Map((company.units ?? []).map((unit) => [unit.id, unit]));
+  company.stockCounts = company.stockCounts
+    .filter((count) => count && count.id && isValidIsoDate(count.date))
+    .slice(-1000)
+    .map((count) => {
+      const rows = (Array.isArray(count.rows) ? count.rows : [])
+        .filter((row) => row && Number.isFinite(Number(row.countedQty)) && Number(row.countedQty) >= 0)
+        .map((row) => {
+          const item = items.get(row.stockItemId);
+          const countedQty = round3(Number(row.countedQty));
+          const systemQty = round3(Number(row.systemQty) || 0);
+          return {
+            stockItemId: String(row.stockItemId ?? ''),
+            name: item?.name ?? String(row.name ?? 'Unknown item'),
+            unit: item ? units.get(item.unitId)?.symbol ?? '' : String(row.unit ?? ''),
+            systemQty,
+            countedQty,
+            difference: round3(countedQty - systemQty),
+          };
+        });
+      return {
+        id: String(count.id),
+        no: Number(count.no) || 0,
+        date: count.date,
+        godownId: String(count.godownId ?? ''),
+        godownName: String(count.godownName ?? ''),
+        narration: String(count.narration ?? '').slice(0, 200),
+        rows,
+        createdAt: String(count.createdAt ?? new Date().toISOString()),
+      };
+    })
+    .filter((count) => count.rows.length > 0);
+  company.counters = company.counters ?? {};
+  company.counters.__stockCount = Math.max(
+    Number(company.counters.__stockCount) || 0,
+    ...company.stockCounts.map((count) => Number(count.no) || 0),
+  );
+  return company;
+}
+
 export function addOrder(company, input) {
   const type = input.type === 'Purchase' ? 'Purchase' : input.type === 'Sales' ? 'Sales' : '';
   if (!type) return { ok: false, error: 'Choose a sales or purchase order.' };
@@ -5199,6 +5316,36 @@ function validateImportedCompany(company) {
     }
   }
 
+  const countIds = new Set();
+  for (const count of company.stockCounts ?? []) {
+    if (!count || !count.id || !isValidIsoDate(count.date)) {
+      return `Company "${name}" has an invalid stock count.`;
+    }
+    if (countIds.has(count.id)) return `Company "${name}" has duplicate stock count ids.`;
+    countIds.add(count.id);
+    if (!godownIds.has(count.godownId)) {
+      return `Company "${name}": stock count ${count.no ?? ''} points at a missing godown.`;
+    }
+    if (!Array.isArray(count.rows) || count.rows.length === 0) {
+      return `Company "${name}": stock count ${count.no ?? ''} has no lines.`;
+    }
+    const countItems = new Set();
+    for (const row of count.rows) {
+      if (!stockItemIds.has(row.stockItemId)) {
+        return `Company "${name}": stock count ${count.no ?? ''} uses a missing stock item.`;
+      }
+      if (countItems.has(row.stockItemId)) {
+        return `Company "${name}": stock count ${count.no ?? ''} lists an item twice.`;
+      }
+      countItems.add(row.stockItemId);
+      const countedQty = parseQty(row.countedQty);
+      const systemQty = parseQty(row.systemQty ?? 0);
+      if (countedQty === null || countedQty < 0 || systemQty === null || systemQty < 0) {
+        return `Company "${name}": stock count ${count.no ?? ''} has an invalid quantity.`;
+      }
+    }
+  }
+
   const orderIds = new Set();
   for (const order of company.orders ?? []) {
     if (!order || !order.id || !['Sales', 'Purchase'].includes(order.type) || !isValidIsoDate(order.date)) {
@@ -5469,6 +5616,7 @@ export function importState(json) {
     normalizePayroll(mapped);
     normalizeInstruments(mapped);
     normalizeBankReconciliations(mapped);
+    normalizeStockCounts(mapped);
     return mapped;
   });
 

@@ -5,6 +5,7 @@ import {
   dateLabel,
   defaultGodownId,
   round2,
+  stockOnHand,
   todayIso,
 } from './store.js';
 import {
@@ -200,6 +201,84 @@ export function inventoryScreen() {
   const selectedItem = view.stockItemId ? items.find((item) => item.id === view.stockItemId) : null;
   const movement = selectedItem ? stockMovements(active, selectedItem.id, { from, to }) : null;
   const editing = view.editingItemId ? items.find((item) => item.id === view.editingItemId) : null;
+  const stockCounts = [...(active.stockCounts ?? [])].sort(
+    (a, b) => b.date.localeCompare(a.date) || b.no - a.no,
+  );
+  const selectedCount = view.stockCountId
+    ? stockCounts.find((count) => count.id === view.stockCountId) ?? null
+    : null;
+  const countDraft = view.stockCountDraft ?? null;
+  const countDraftRows = countDraft
+    ? items.map((item) => ({
+        item,
+        unit: (active.units ?? []).find((entry) => entry.id === item.unitId)?.symbol ?? '',
+        systemQty: stockOnHand(active, item.id, countDraft.date, { godownId: countDraft.godownId }),
+      }))
+    : [];
+
+  const stockCountRows = stockCounts
+    .map((count) => {
+      const differences = count.rows.filter((row) => Math.abs(row.difference) >= 0.0005).length;
+      return `<tr>
+        <td><strong>SC-${count.no}</strong></td>
+        <td>${esc(dateLabel(count.date))}</td>
+        <td>${esc(count.godownName || count.godownId)}</td>
+        <td class="num">${count.rows.length}</td>
+        <td class="num">${differences || '—'}</td>
+        <td class="row-actions">
+          <button class="btn small ghost" type="button" data-action="view-stock-count" data-id="${esc(count.id)}">View</button>
+          <button class="btn small danger" type="button" data-action="delete-stock-count" data-id="${esc(count.id)}">Delete</button>
+        </td>
+      </tr>`;
+    })
+    .join('');
+  const stockCountDetailRows = selectedCount
+    ? selectedCount.rows
+        .map((row) => {
+          const diff = Math.abs(row.difference) >= 0.0005 ? row.difference : 0;
+          return `<tr>
+            <td>${esc(row.name)}</td>
+            <td>${esc(row.unit)}</td>
+            <td class="num">${fmtQty(row.systemQty)}</td>
+            <td class="num">${fmtQty(row.countedQty)}</td>
+            <td class="num ${diff < 0 ? 'neg' : ''}">${diff > 0 ? '+' : ''}${fmtQty(diff)}</td>
+          </tr>`;
+        })
+        .join('')
+    : '';
+  const countDraftForm = countDraft
+    ? `<form id="stock-count-form" novalidate>
+        <input type="hidden" name="date" value="${esc(countDraft.date)}">
+        <input type="hidden" name="godownId" value="${esc(countDraft.godownId)}">
+        <p class="muted">Counting <strong>${esc(godowns.find((godown) => godown.id === countDraft.godownId)?.name ?? 'godown')}</strong> on ${esc(dateLabel(countDraft.date))}. Counted quantities start at the book quantity; change the ones that differ.</p>
+        ${items.length
+          ? `<div class="table-wrap"><table class="data-table compact">
+              <thead><tr><th>Item</th><th>Unit</th><th class="num">Book qty</th><th class="num">Counted qty</th></tr></thead>
+              <tbody>${countDraftRows
+                .map(
+                  ({ item, unit, systemQty }) => `<tr>
+                    <td>${esc(item.name)}</td>
+                    <td>${esc(unit)}</td>
+                    <td class="num">${fmtQty(systemQty)}</td>
+                    <td class="num"><input name="counted-${esc(item.id)}" data-count-item="${esc(item.id)}" inputmode="decimal" value="${systemQty}" aria-label="Counted quantity for ${esc(item.name)}"></td>
+                  </tr>`,
+                )
+                .join('')}</tbody>
+            </table></div>
+            <label class="field"><span>Narration</span><input name="narration" maxlength="200" placeholder="Count team or notes"></label>
+            <div class="form-actions">
+              <button class="btn primary" type="submit">Save count</button>
+              <button class="btn ghost" type="button" data-action="cancel-stock-count">Cancel</button>
+            </div>`
+          : '<p class="muted">Create a stock item before starting a count.</p>'}
+        <p id="stock-count-error" class="form-error" role="alert"></p>
+      </form>`
+    : `<form id="stock-count-start-form" class="filter-bar" novalidate>
+        <label class="field inline-field"><span>Count date</span><input name="date" type="date" value="${esc(todayIso())}"></label>
+        <label class="field inline-field"><span>Godown</span><select name="godownId">${godownSelectOptions(defaultGodownId(active))}</select></label>
+        <button class="btn small" type="submit">Start count</button>
+      </form>
+      <p class="muted small">A count snapshots the book quantity by godown and records what was physically found. It does not move stock or post an adjustment.</p>`;
 
   const summaryRows = report.rows
     .map(
@@ -436,6 +515,27 @@ export function inventoryScreen() {
           </table>`
         : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,
       'Click an item to see its voucher-wise movement.',
+    )}
+    ${panel(
+      'Stock counts',
+      `${countDraftForm}
+      ${selectedCount
+        ? `<div class="stock-count-detail">
+            <h3>SC-${selectedCount.no} · ${esc(dateLabel(selectedCount.date))} · ${esc(selectedCount.godownName || selectedCount.godownId)}</h3>
+            ${selectedCount.narration ? `<p class="muted">${esc(selectedCount.narration)}</p>` : ''}
+            <table class="data-table compact">
+              <thead><tr><th>Item</th><th>Unit</th><th class="num">Book qty</th><th class="num">Counted</th><th class="num">Difference</th></tr></thead>
+              <tbody>${stockCountDetailRows}</tbody>
+            </table>
+          </div>`
+        : ''}
+      ${stockCounts.length
+        ? `<table class="data-table compact">
+            <thead><tr><th>Count</th><th>Date</th><th>Godown</th><th class="num">Items</th><th class="num">Differences</th><th></th></tr></thead>
+            <tbody>${stockCountRows}</tbody>
+          </table>`
+        : '<p class="muted">No stock counts recorded yet.</p>'}`,
+      'Counts are working papers. Differences are informational and do not change stock, stock value or the ledger.',
     )}
     ${panel(
       'Godown balances',

@@ -3133,6 +3133,7 @@ function loadState() {
   for (const company of parsed.companies) normalizePayroll(company);
   for (const company of parsed.companies) normalizeInstruments(company);
   for (const company of parsed.companies) normalizeBankReconciliations(company);
+  for (const company of parsed.companies) normalizeStockCounts(company);
   parsed.audit = normalizeAudit(parsed.audit);
   seedUsers(parsed);
   return parsed;
@@ -4876,6 +4877,7 @@ function seedInventoryMasters(company) {
     company.godowns = [{ id: uid('gdwn'), name: 'Main Location', primary: true }];
   }
   if (!Array.isArray(company.stockTransfers)) company.stockTransfers = [];
+  if (!Array.isArray(company.stockCounts)) company.stockCounts = [];
   if (!Array.isArray(company.orders)) company.orders = [];
   if (!Array.isArray(company.boms)) company.boms = [];
   if (!Array.isArray(company.manufactures)) company.manufactures = [];
@@ -4887,6 +4889,10 @@ function seedInventoryMasters(company) {
   company.counters.__manufacture = Math.max(
     Number(company.counters.__manufacture) || 0,
     ...company.manufactures.map((manufacture) => Number(manufacture.no) || 0),
+  );
+  company.counters.__stockCount = Math.max(
+    Number(company.counters.__stockCount) || 0,
+    ...company.stockCounts.map((count) => Number(count.no) || 0),
   );
   for (const type of ['Sales', 'Purchase']) {
     const key = type === 'Sales' ? '__salesOrder' : '__purchaseOrder';
@@ -6290,6 +6296,117 @@ function deleteStockTransfer(company, transferId) {
   return { ok: true, transfer };
 }
 
+/**
+ * Records a physical stock count. Book quantities are snapped at the count
+ * date and godown, but counting never moves stock or posts an adjustment.
+ */
+function addStockCount(company, input) {
+  const date = String(input.date ?? '');
+  if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid count date.' };
+  seedYears(company);
+  const year = yearForDate(company, date);
+  if (!year) return { ok: false, error: 'The count date must fall inside a financial year.' };
+  if (year.closed) return { ok: false, error: 'The financial year is closed. Reopen it before recording a count.' };
+  const godown = (company.godowns ?? []).find((entry) => entry.id === input.godownId);
+  if (!godown) return { ok: false, error: 'Choose the godown that was counted.' };
+  const requested = Array.isArray(input.rows) ? input.rows : [];
+  if (!requested.length) return { ok: false, error: 'Add at least one stock item to the count.' };
+  if (requested.length > 500) return { ok: false, error: 'A stock count can carry at most 500 item lines.' };
+  const rows = [];
+  const seen = new Set();
+  for (const raw of requested) {
+    const item = (company.stockItems ?? []).find((entry) => entry.id === raw?.stockItemId);
+    if (!item) return { ok: false, error: 'Choose a stock item for every count line.' };
+    if (seen.has(item.id)) return { ok: false, error: `"${item.name}" appears twice in the count.` };
+    seen.add(item.id);
+    const countedQty = parseQty(raw?.countedQty);
+    if (countedQty === null || countedQty < 0) {
+      return { ok: false, error: `Counted quantity for "${item.name}" must be zero or more.` };
+    }
+    const systemQty = round3(stockOnHand(company, item.id, date, { godownId: godown.id }));
+    rows.push({
+      stockItemId: item.id,
+      name: item.name,
+      unit: (company.units ?? []).find((unit) => unit.id === item.unitId)?.symbol ?? '',
+      systemQty,
+      countedQty,
+      difference: round3(countedQty - systemQty),
+    });
+  }
+  company.stockCounts = company.stockCounts ?? [];
+  company.counters = company.counters ?? {};
+  company.counters.__stockCount = Math.max(
+    Number(company.counters.__stockCount) || 0,
+    ...company.stockCounts.map((count) => Number(count.no) || 0),
+  ) + 1;
+  const count = {
+    id: uid('scnt'),
+    no: company.counters.__stockCount,
+    date,
+    godownId: godown.id,
+    godownName: godown.name,
+    narration: String(input.narration ?? '').trim().slice(0, 200),
+    rows,
+    createdAt: new Date().toISOString(),
+  };
+  company.stockCounts.push(count);
+  return { ok: true, count };
+}
+
+function deleteStockCount(company, countId) {
+  const count = (company.stockCounts ?? []).find((entry) => entry.id === countId);
+  if (!count) return { ok: false, error: 'Stock count not found.' };
+  company.stockCounts = (company.stockCounts ?? []).filter((entry) => entry.id !== countId);
+  return { ok: true, count };
+}
+
+/** Repairs saved stock counts after load or backup import. */
+function normalizeStockCounts(company) {
+  if (!Array.isArray(company.stockCounts)) {
+    company.stockCounts = [];
+    return company;
+  }
+  const items = new Map((company.stockItems ?? []).map((item) => [item.id, item]));
+  const units = new Map((company.units ?? []).map((unit) => [unit.id, unit]));
+  company.stockCounts = company.stockCounts
+    .filter((count) => count && count.id && isValidIsoDate(count.date))
+    .slice(-1000)
+    .map((count) => {
+      const rows = (Array.isArray(count.rows) ? count.rows : [])
+        .filter((row) => row && Number.isFinite(Number(row.countedQty)) && Number(row.countedQty) >= 0)
+        .map((row) => {
+          const item = items.get(row.stockItemId);
+          const countedQty = round3(Number(row.countedQty));
+          const systemQty = round3(Number(row.systemQty) || 0);
+          return {
+            stockItemId: String(row.stockItemId ?? ''),
+            name: item?.name ?? String(row.name ?? 'Unknown item'),
+            unit: item ? units.get(item.unitId)?.symbol ?? '' : String(row.unit ?? ''),
+            systemQty,
+            countedQty,
+            difference: round3(countedQty - systemQty),
+          };
+        });
+      return {
+        id: String(count.id),
+        no: Number(count.no) || 0,
+        date: count.date,
+        godownId: String(count.godownId ?? ''),
+        godownName: String(count.godownName ?? ''),
+        narration: String(count.narration ?? '').slice(0, 200),
+        rows,
+        createdAt: String(count.createdAt ?? new Date().toISOString()),
+      };
+    })
+    .filter((count) => count.rows.length > 0);
+  company.counters = company.counters ?? {};
+  company.counters.__stockCount = Math.max(
+    Number(company.counters.__stockCount) || 0,
+    ...company.stockCounts.map((count) => Number(count.no) || 0),
+  );
+  return company;
+}
+
 function addOrder(company, input) {
   const type = input.type === 'Purchase' ? 'Purchase' : input.type === 'Sales' ? 'Sales' : '';
   if (!type) return { ok: false, error: 'Choose a sales or purchase order.' };
@@ -7542,6 +7659,36 @@ function validateImportedCompany(company) {
     }
   }
 
+  const countIds = new Set();
+  for (const count of company.stockCounts ?? []) {
+    if (!count || !count.id || !isValidIsoDate(count.date)) {
+      return `Company "${name}" has an invalid stock count.`;
+    }
+    if (countIds.has(count.id)) return `Company "${name}" has duplicate stock count ids.`;
+    countIds.add(count.id);
+    if (!godownIds.has(count.godownId)) {
+      return `Company "${name}": stock count ${count.no ?? ''} points at a missing godown.`;
+    }
+    if (!Array.isArray(count.rows) || count.rows.length === 0) {
+      return `Company "${name}": stock count ${count.no ?? ''} has no lines.`;
+    }
+    const countItems = new Set();
+    for (const row of count.rows) {
+      if (!stockItemIds.has(row.stockItemId)) {
+        return `Company "${name}": stock count ${count.no ?? ''} uses a missing stock item.`;
+      }
+      if (countItems.has(row.stockItemId)) {
+        return `Company "${name}": stock count ${count.no ?? ''} lists an item twice.`;
+      }
+      countItems.add(row.stockItemId);
+      const countedQty = parseQty(row.countedQty);
+      const systemQty = parseQty(row.systemQty ?? 0);
+      if (countedQty === null || countedQty < 0 || systemQty === null || systemQty < 0) {
+        return `Company "${name}": stock count ${count.no ?? ''} has an invalid quantity.`;
+      }
+    }
+  }
+
   const orderIds = new Set();
   for (const order of company.orders ?? []) {
     if (!order || !order.id || !['Sales', 'Purchase'].includes(order.type) || !isValidIsoDate(order.date)) {
@@ -7812,6 +7959,7 @@ function importState(json) {
     normalizePayroll(mapped);
     normalizeInstruments(mapped);
     normalizeBankReconciliations(mapped);
+    normalizeStockCounts(mapped);
     return mapped;
   });
 
@@ -15574,6 +15722,84 @@ function inventoryScreen() {
   const selectedItem = view.stockItemId ? items.find((item) => item.id === view.stockItemId) : null;
   const movement = selectedItem ? stockMovements(active, selectedItem.id, { from, to }) : null;
   const editing = view.editingItemId ? items.find((item) => item.id === view.editingItemId) : null;
+  const stockCounts = [...(active.stockCounts ?? [])].sort(
+    (a, b) => b.date.localeCompare(a.date) || b.no - a.no,
+  );
+  const selectedCount = view.stockCountId
+    ? stockCounts.find((count) => count.id === view.stockCountId) ?? null
+    : null;
+  const countDraft = view.stockCountDraft ?? null;
+  const countDraftRows = countDraft
+    ? items.map((item) => ({
+        item,
+        unit: (active.units ?? []).find((entry) => entry.id === item.unitId)?.symbol ?? '',
+        systemQty: stockOnHand(active, item.id, countDraft.date, { godownId: countDraft.godownId }),
+      }))
+    : [];
+
+  const stockCountRows = stockCounts
+    .map((count) => {
+      const differences = count.rows.filter((row) => Math.abs(row.difference) >= 0.0005).length;
+      return `<tr>
+        <td><strong>SC-${count.no}</strong></td>
+        <td>${esc(dateLabel(count.date))}</td>
+        <td>${esc(count.godownName || count.godownId)}</td>
+        <td class="num">${count.rows.length}</td>
+        <td class="num">${differences || '—'}</td>
+        <td class="row-actions">
+          <button class="btn small ghost" type="button" data-action="view-stock-count" data-id="${esc(count.id)}">View</button>
+          <button class="btn small danger" type="button" data-action="delete-stock-count" data-id="${esc(count.id)}">Delete</button>
+        </td>
+      </tr>`;
+    })
+    .join('');
+  const stockCountDetailRows = selectedCount
+    ? selectedCount.rows
+        .map((row) => {
+          const diff = Math.abs(row.difference) >= 0.0005 ? row.difference : 0;
+          return `<tr>
+            <td>${esc(row.name)}</td>
+            <td>${esc(row.unit)}</td>
+            <td class="num">${fmtQty(row.systemQty)}</td>
+            <td class="num">${fmtQty(row.countedQty)}</td>
+            <td class="num ${diff < 0 ? 'neg' : ''}">${diff > 0 ? '+' : ''}${fmtQty(diff)}</td>
+          </tr>`;
+        })
+        .join('')
+    : '';
+  const countDraftForm = countDraft
+    ? `<form id="stock-count-form" novalidate>
+        <input type="hidden" name="date" value="${esc(countDraft.date)}">
+        <input type="hidden" name="godownId" value="${esc(countDraft.godownId)}">
+        <p class="muted">Counting <strong>${esc(godowns.find((godown) => godown.id === countDraft.godownId)?.name ?? 'godown')}</strong> on ${esc(dateLabel(countDraft.date))}. Counted quantities start at the book quantity; change the ones that differ.</p>
+        ${items.length
+          ? `<div class="table-wrap"><table class="data-table compact">
+              <thead><tr><th>Item</th><th>Unit</th><th class="num">Book qty</th><th class="num">Counted qty</th></tr></thead>
+              <tbody>${countDraftRows
+                .map(
+                  ({ item, unit, systemQty }) => `<tr>
+                    <td>${esc(item.name)}</td>
+                    <td>${esc(unit)}</td>
+                    <td class="num">${fmtQty(systemQty)}</td>
+                    <td class="num"><input name="counted-${esc(item.id)}" data-count-item="${esc(item.id)}" inputmode="decimal" value="${systemQty}" aria-label="Counted quantity for ${esc(item.name)}"></td>
+                  </tr>`,
+                )
+                .join('')}</tbody>
+            </table></div>
+            <label class="field"><span>Narration</span><input name="narration" maxlength="200" placeholder="Count team or notes"></label>
+            <div class="form-actions">
+              <button class="btn primary" type="submit">Save count</button>
+              <button class="btn ghost" type="button" data-action="cancel-stock-count">Cancel</button>
+            </div>`
+          : '<p class="muted">Create a stock item before starting a count.</p>'}
+        <p id="stock-count-error" class="form-error" role="alert"></p>
+      </form>`
+    : `<form id="stock-count-start-form" class="filter-bar" novalidate>
+        <label class="field inline-field"><span>Count date</span><input name="date" type="date" value="${esc(todayIso())}"></label>
+        <label class="field inline-field"><span>Godown</span><select name="godownId">${godownSelectOptions(defaultGodownId(active))}</select></label>
+        <button class="btn small" type="submit">Start count</button>
+      </form>
+      <p class="muted small">A count snapshots the book quantity by godown and records what was physically found. It does not move stock or post an adjustment.</p>`;
 
   const summaryRows = report.rows
     .map(
@@ -15810,6 +16036,27 @@ function inventoryScreen() {
           </table>`
         : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,
       'Click an item to see its voucher-wise movement.',
+    )}
+    ${panel(
+      'Stock counts',
+      `${countDraftForm}
+      ${selectedCount
+        ? `<div class="stock-count-detail">
+            <h3>SC-${selectedCount.no} · ${esc(dateLabel(selectedCount.date))} · ${esc(selectedCount.godownName || selectedCount.godownId)}</h3>
+            ${selectedCount.narration ? `<p class="muted">${esc(selectedCount.narration)}</p>` : ''}
+            <table class="data-table compact">
+              <thead><tr><th>Item</th><th>Unit</th><th class="num">Book qty</th><th class="num">Counted</th><th class="num">Difference</th></tr></thead>
+              <tbody>${stockCountDetailRows}</tbody>
+            </table>
+          </div>`
+        : ''}
+      ${stockCounts.length
+        ? `<table class="data-table compact">
+            <thead><tr><th>Count</th><th>Date</th><th>Godown</th><th class="num">Items</th><th class="num">Differences</th><th></th></tr></thead>
+            <tbody>${stockCountRows}</tbody>
+          </table>`
+        : '<p class="muted">No stock counts recorded yet.</p>'}`,
+      'Counts are working papers. Differences are informational and do not change stock, stock value or the ledger.',
     )}
     ${panel(
       'Godown balances',
@@ -20689,6 +20936,60 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'stock-count-start-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const date = String(data.get('date') ?? '');
+    const godownId = String(data.get('godownId') ?? '');
+    if (!date || !godownId) {
+      setFlash('Choose a count date and godown.', 'warn');
+      render();
+      return;
+    }
+    view.stockCountDraft = { date, godownId };
+    view.stockCountId = null;
+    render();
+    return;
+  }
+
+  if (form.id === 'stock-count-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const rows = [...form.querySelectorAll('[data-count-item]')].map((input) => ({
+      stockItemId: input.dataset.countItem,
+      countedQty: input.value,
+    }));
+    const result = addStockCount(active, {
+      date: data.get('date'),
+      godownId: data.get('godownId'),
+      narration: data.get('narration'),
+      rows,
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'stock-count-error');
+      return;
+    }
+    const differences = result.count.rows.filter((row) => Math.abs(row.difference) >= 0.0005).length;
+    logAudit(
+      'stockCount.create',
+      `Recorded stock count SC-${result.count.no} with ${result.count.rows.length} item${result.count.rows.length === 1 ? '' : 's'} and ${differences} difference${differences === 1 ? '' : 's'}.`,
+      active,
+      `SC-${result.count.no}`,
+    );
+    persist();
+    view.stockCountDraft = null;
+    view.stockCountId = result.count.id;
+    setFlash(`Stock count SC-${result.count.no} saved.`);
+    render();
+    return;
+  }
+
   if (form.id === 'stock-transfer-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -23094,6 +23395,44 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'view-stock-count': {
+      view.stockCountId = view.stockCountId === trigger.dataset.id ? null : trigger.dataset.id;
+      render();
+      break;
+    }
+
+    case 'cancel-stock-count': {
+      view.stockCountDraft = null;
+      render();
+      break;
+    }
+
+    case 'delete-stock-count': {
+      if (!can('master.delete')) {
+        requirePermission('master.delete');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Delete this stock count? Stock and ledger balances will not change.')) break;
+      const result = deleteStockCount(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'stockCount.delete',
+          `Deleted stock count SC-${result.count.no}.`,
+          active,
+          `SC-${result.count.no}`,
+        );
+        if (view.stockCountId === result.count.id) view.stockCountId = null;
+        persist();
+      }
+      setFlash(
+        result.ok ? `Stock count SC-${result.count.no} deleted.` : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
+      break;
+    }
+
     case 'delete-stock-transfer': {
       if (!can('master.delete')) {
         requirePermission('master.delete');

@@ -419,6 +419,10 @@ disabled.
   report with running balances. Opening stock can be split into named batches
   with expiry dates, either in the item form or from Tally batch masters, and
   an expiring-batches panel lists stock due or past expiry within 90 days.
+- Physical stock counts by godown: a dated count sheet snapshots the book
+  quantity, records counted quantities and shows differences in a count
+  register. Counts are working papers and do not move stock or post an
+  adjustment.
 - Sales and purchase orders with party, delivery date, up to 50 item lines
   (each with godown, batch, expiry, quantity and rate), status
   (Open/Closed/Cancelled), filters and a Create voucher action that prefills the
@@ -663,7 +667,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 
 | TallyPrime area | Status |
 | --- | --- |
-| Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, sales/purchase orders, BOM recipes and production; no multi-level BOM, wastage, job work, physical stock count, batch-wise costing, WIP accounting or stock posting to the financial statements |
+| Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, dated stock counts with book/counted differences, sales/purchase orders, BOM recipes and production; no multi-level BOM, wastage, job work, count adjustments, batch-wise costing, WIP accounting or stock posting to the financial statements |
 | GST registration, rates and tax on vouchers | Partial — GSTIN and home state, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and invoice-level tax on four voucher types; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way Part A drafts and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, Part B, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |

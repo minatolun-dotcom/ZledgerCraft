@@ -242,6 +242,7 @@ export function gstScreen() {
     .map(
       (row) => `<tr>
         <td><strong>${esc(row.hsn)}</strong>${row.description ? `<div class="muted small">${esc(row.description)}</div>` : ''}</td>
+        <td>${esc(row.unit)}</td>
         <td class="num">${fmtQty(row.qty)}</td>
         <td class="num">${money(row.taxable)}</td>
         <td class="num">${money(row.tax)}</td>
@@ -284,11 +285,11 @@ export function gstScreen() {
       `HSN / SAC summary <span class="count">${report.gstr1.hsn.length}</span>`,
       report.gstr1.hsn.length
         ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
-            <thead><tr><th>HSN / SAC</th><th class="num">Quantity</th><th class="num">Taxable</th><th class="num">Tax</th></tr></thead>
+            <thead><tr><th>HSN / SAC</th><th>UQC</th><th class="num">Quantity</th><th class="num">Taxable</th><th class="num">Tax</th></tr></thead>
             <tbody>${hsnRows}</tbody>
           </table></div>`
         : '<p class="muted">No stock-item invoices with GST in this period. Add an HSN/SAC code to stock items to build this summary.</p>',
-      'Outward stock lines only. Tax is apportioned from each invoice rate; quantities can mix units.',
+      'Outward stock lines only. Tax is apportioned from each invoice rate; quantities are split by unit quantity code (UQC).',
     )}
     ${panel(
       'GSTR-3B · summary return',

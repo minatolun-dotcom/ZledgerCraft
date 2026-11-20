@@ -344,6 +344,17 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 35: HSN summary by unit
+
+- The GSTR-1 HSN/SAC summary now groups stock lines by HSN/SAC and unit quantity
+  code (UQC) instead of summing quantities across mixed units, using the same
+  symbol-to-UQC mapping as e-invoice and e-way drafts (OTH fallback).
+- The summary table shows the UQC column, and the existing totals still add up
+  across rows.
+- Verification: a single invoice with two items sharing an HSN but using Nos and
+  Kg produces two rows with separate quantities and apportioned tax; 277 tests
+  (276 pass, 1 skipped) and a 924.6 kB build pass.
+
 ### 2026-11-20 — Phase 34: editable cost masters
 
 - Cost categories can be renamed and cost centres renamed or moved to another

@@ -459,8 +459,8 @@ disabled.
   is filed and no certificates are generated.
 - GST returns as working papers for a period: GSTR-1 outward supplies by rate
   (sales less credit notes), B2B invoices with GSTIN and place of supply, B2C
-  supplies by rate, credit notes, an HSN/SAC summary with quantity, taxable
-  value and apportioned tax, and a GSTR-3B summary with outward tax, reverse
+  supplies by rate, credit notes, an HSN/SAC summary with quantity split by
+  UQC, taxable value and apportioned tax, and a GSTR-3B summary with outward tax, reverse
   charge, input tax credit and net payable per head. Totals are shown for every
   section and the lump-sum GST voucher list links back to the vouchers. Nothing
   is filed, uploaded or reconciled with GSTR-2B.

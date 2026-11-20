@@ -281,6 +281,57 @@ test('GSTR-1 splits B2B and B2C supplies and builds an HSN summary', () => {
   assert.equal(report.totals.tax, 270);
 });
 
+test('HSN summary splits quantities by unit quantity code', () => {
+  const { company, customer, sales } = fixture();
+  const nos = company.units.find((unit) => unit.symbol === 'Nos');
+  const kg = company.units.find((unit) => unit.symbol === 'Kg');
+  const buttons = addStockItem(company, {
+    name: 'Buttons',
+    stockGroupId: company.stockGroups[0].id,
+    unitId: nos.id,
+    openingQty: 100,
+    openingRate: 10,
+    hsn: '9606',
+  });
+  assert.equal(buttons.ok, true, buttons.error);
+  const thread = addStockItem(company, {
+    name: 'Thread',
+    stockGroupId: company.stockGroups[0].id,
+    unitId: kg.id,
+    openingQty: 50,
+    openingRate: 100,
+    hsn: '9606',
+  });
+  assert.equal(thread.ok, true, thread.error);
+
+  const invoice = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-07',
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 1534 },
+      { ledgerId: sales.id, side: 'Cr', amount: 1300 },
+    ],
+    items: [
+      { stockItemId: buttons.item.id, qty: 10, rate: 100 },
+      { stockItemId: thread.item.id, qty: 3, rate: 100 },
+    ],
+    gst: { rateId: rateId(company, 18), placeOfSupply: '27', partyGstin: '27AAACR1234F1Z2' },
+  });
+  assert.equal(invoice.ok, true, invoice.error);
+
+  const report = gstReturns(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(report.gstr1.hsn.length, 2, 'one row per HSN and UQC pair');
+  const byUnit = Object.fromEntries(report.gstr1.hsn.map((row) => [row.unit, row]));
+  assert.equal(byUnit.NOS.qty, 10);
+  assert.equal(byUnit.NOS.taxable, 1000);
+  assert.equal(byUnit.NOS.tax, 180);
+  assert.equal(byUnit.KGS.qty, 3);
+  assert.equal(byUnit.KGS.taxable, 300);
+  assert.equal(byUnit.KGS.tax, 54);
+  assert.equal(report.gstr1.hsn.reduce((sum, row) => sum + row.taxable, 0), 1300);
+  assert.equal(report.gstr1.hsn.reduce((sum, row) => sum + row.tax, 0), 234);
+});
+
 test('reverse-charge purchases appear in both liability and ITC', () => {
   const { company, supplier, purchases } = fixture();
   const result = addVoucher(company, {

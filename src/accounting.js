@@ -2205,10 +2205,12 @@ export function gstReturns(company, filters = {}) {
       for (const line of voucher.items) {
         const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
         const hsn = item?.hsn || 'Unclassified';
-        let bucket = hsnMap.get(hsn);
+        const unit = uqcFor(company, item?.unitId);
+        const key = `${hsn}|${unit}`;
+        let bucket = hsnMap.get(key);
         if (!bucket) {
-          bucket = { hsn, description: item?.name ?? '', qty: 0, taxable: 0, tax: 0 };
-          hsnMap.set(hsn, bucket);
+          bucket = { hsn, unit, description: item?.name ?? '', qty: 0, taxable: 0, tax: 0 };
+          hsnMap.set(key, bucket);
         } else if (!bucket.description && item?.name) {
           bucket.description = item.name;
         }
@@ -2270,7 +2272,9 @@ export function gstReturns(company, filters = {}) {
       cdnr: documents.filter((entry) => entry.type === 'CreditNote'),
       cdnrTotal: creditNotes,
       rateRows: [...outwardRates.values()].sort(GST_RATE_SORT),
-      hsn: [...hsnMap.values()].sort((a, b) => a.hsn.localeCompare(b.hsn)),
+      hsn: [...hsnMap.values()].sort(
+        (a, b) => a.hsn.localeCompare(b.hsn) || a.unit.localeCompare(b.unit),
+      ),
     },
     itcRateRows: [...inwardRates.values()].sort(GST_RATE_SORT),
     gstr3b: {

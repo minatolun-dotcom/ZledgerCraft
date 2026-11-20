@@ -426,8 +426,9 @@ disabled.
   report with running balances. Opening stock can be split into named batches
   with expiry dates, either in the item form or from Tally batch masters, and
   an expiring-batches panel lists stock due or past expiry within 90 days.
-  Batch balances are valued at each batch's latest receipt rate, with the item
-  weighted-average rate as the fallback before a batch receipt.
+  Batch balances use a per-batch moving average: purchases add their receipt
+  rate, issues consume the batch average, and the item weighted-average rate
+  anchors a batch before its first receipt.
 - Physical stock counts by godown: a dated count sheet snapshots the book
   quantity, records counted quantities and shows differences in a count
   register. Batch-tracked items are counted lot by lot, with an unlisted-lot row

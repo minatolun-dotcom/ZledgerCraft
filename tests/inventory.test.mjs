@@ -814,7 +814,7 @@ test('batch-tracked items require batches and report batch balances', () => {
   );
 });
 
-test('batch values follow each batch latest receipt rate', () => {
+test('batch values use a per-batch moving average', () => {
   const company = createCompany('Batch Cost Co', '2026-04-01').company;
   const unit = company.units.find((entry) => entry.symbol === 'Nos');
   const item = addStockItem(company, {
@@ -845,10 +845,10 @@ test('batch values follow each batch latest receipt rate', () => {
     assert.equal(posted.ok, true, posted.error);
   }
   const rows = batchStockSummary(company).rows;
-  assert.equal(rows.find((row) => row.batchNo === 'A').rate, 20);
-  assert.equal(rows.find((row) => row.batchNo === 'A').closingValue, 140);
-  assert.equal(rows.find((row) => row.batchNo === 'B').rate, 30);
-  assert.equal(rows.find((row) => row.batchNo === 'B').closingValue, 210);
+  assert.equal(rows.find((row) => row.batchNo === 'A').rate, 12.86);
+  assert.equal(rows.find((row) => row.batchNo === 'A').closingValue, 90);
+  assert.equal(rows.find((row) => row.batchNo === 'B').rate, 15.71);
+  assert.equal(rows.find((row) => row.batchNo === 'B').closingValue, 110);
 });
 
 test('opening batches split opening stock and survive an opening quantity edit', () => {

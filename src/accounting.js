@@ -2233,19 +2233,31 @@ export function batchStockSummary(company, filters = {}) {
     const inward = new Map();
     const outward = new Map();
     const expiry = new Map();
-    const batchRates = new Map();
+    const liveQty = new Map();
+    const liveValue = new Map();
+    const fallbackRate = valuation.get(item.id)?.averageRate ?? item.openingRate ?? 0;
+    const batchCost = (key) => {
+      const qty = liveQty.get(key) ?? 0;
+      return qty > 0.0005 ? (liveValue.get(key) ?? 0) / qty : fallbackRate;
+    };
+    const moveBatch = (key, qty, rate) => {
+      liveQty.set(key, round3((liveQty.get(key) ?? 0) + qty));
+      liveValue.set(key, round2((liveValue.get(key) ?? 0) + qty * rate));
+    };
     const openingBatches = (item.openingBatches ?? []).filter(
       (batch) => String(batch.batchNo ?? '').trim() && Number(batch.qty) > 0,
     );
     if (openingBatches.length) {
       for (const batch of openingBatches) {
         opening.set(batch.batchNo, round3(batch.qty));
-        batchRates.set(batch.batchNo, round2(item.openingRate ?? 0));
+        liveQty.set(batch.batchNo, round3(batch.qty));
+        liveValue.set(batch.batchNo, round2(batch.qty * (item.openingRate ?? 0)));
         if (batch.expiryDate) expiry.set(batch.batchNo, batch.expiryDate);
       }
     } else if ((item.openingQty ?? 0) > 0) {
       opening.set(OPENING_BATCH, round3(item.openingQty));
-      batchRates.set(OPENING_BATCH, round2(item.openingRate ?? 0));
+      liveQty.set(OPENING_BATCH, round3(item.openingQty));
+      liveValue.set(OPENING_BATCH, round2(item.openingQty * (item.openingRate ?? 0)));
     }
     const keyFor = (batchNo) => batchNo || OPENING_BATCH;
 
@@ -2257,7 +2269,10 @@ export function batchStockSummary(company, filters = {}) {
           const key = keyFor(line.batchNo);
           const qty = round3(line.qty);
           if (line.expiryDate) expiry.set(key, line.expiryDate);
-          if (direction > 0 && Number(line.rate) > 0) batchRates.set(key, round2(line.rate));
+          const unitCost = direction > 0 && event.voucher.type === 'Purchase' && Number(line.rate) > 0
+            ? Number(line.rate)
+            : batchCost(key);
+          moveBatch(key, direction * qty, unitCost);
           if (event.date < from) quantityMapAdd(opening, key, direction * qty);
           else if (direction > 0) quantityMapAdd(inward, key, qty);
           else quantityMapAdd(outward, key, qty);
@@ -2280,6 +2295,7 @@ export function batchStockSummary(company, filters = {}) {
           if (line.stockItemId !== item.id) continue;
           const key = keyFor(line.batchNo);
           const qty = round3(line.difference);
+          moveBatch(key, qty, batchCost(key));
           if (event.date < from) quantityMapAdd(opening, key, qty);
           else if (qty >= 0) quantityMapAdd(inward, key, qty);
           else quantityMapAdd(outward, key, -qty);
@@ -2290,21 +2306,20 @@ export function batchStockSummary(company, filters = {}) {
           const key = keyFor(manufacture.outputBatchNo);
           const qty = round3(manufacture.outputQty);
           if (manufacture.expiryDate) expiry.set(key, manufacture.expiryDate);
+          moveBatch(key, qty, fallbackRate);
           if (event.date < from) quantityMapAdd(opening, key, qty);
           else quantityMapAdd(inward, key, qty);
         }
       }
     }
 
-    const fallbackRate = valuation.get(item.id)?.averageRate ?? item.openingRate ?? 0;
-    const keys = new Set([...opening.keys(), ...inward.keys(), ...outward.keys()]);
+    const keys = new Set([...opening.keys(), ...inward.keys(), ...outward.keys(), ...liveQty.keys()]);
     for (const key of keys) {
       const openingQty = round3(opening.get(key) ?? 0);
       const inQty = round3(inward.get(key) ?? 0);
       const outQty = round3(outward.get(key) ?? 0);
       const closingQty = round3(openingQty + inQty - outQty);
       if (openingQty === 0 && inQty === 0 && outQty === 0) continue;
-      const rate = batchRates.get(key) ?? fallbackRate;
       rows.push({
         itemId: item.id,
         name: item.name,
@@ -2315,8 +2330,8 @@ export function batchStockSummary(company, filters = {}) {
         inQty,
         outQty,
         closingQty,
-        rate,
-        closingValue: round2(closingQty * rate),
+        rate: round2(closingQty > 0 ? (liveValue.get(key) ?? 0) / closingQty : fallbackRate),
+        closingValue: closingQty > 0 ? round2(liveValue.get(key) ?? 0) : 0,
       });
     }
   }

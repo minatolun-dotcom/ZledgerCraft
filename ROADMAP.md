@@ -344,6 +344,18 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 24: editable opening batches
+
+- Stock items can now have their opening stock split across batch names, with
+  optional expiry dates, directly in the item form instead of only through a
+  Tally import. Adding rows switches the item to batch tracking.
+- The items table shows how many opening batches an item has. Clearing every
+  row removes the split and falls back to the `Opening` batch; changing the
+  opening quantity without matching rows drops the stale split.
+- Verification: existing opening-batch store and batch-balance tests still
+  pass, and the browser build includes the new form rows; 263 tests (262 pass,
+  1 skipped) and a 897.6 kB build pass.
+
 ### 2026-11-20 — Phase 23: multi-line orders
 
 - Sales and purchase orders now carry up to 50 item lines instead of one, each

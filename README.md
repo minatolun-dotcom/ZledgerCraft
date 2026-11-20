@@ -404,7 +404,8 @@ disabled.
 - Stock Summary with opening, inward, outward, closing quantity and value at
   weighted-average cost; Godown balances with transfer-aware quantities; Batch
   balances with expiry and value at item average cost; and a per-item movement
-  report with running balances.
+  report with running balances. Opening stock can be split into named batches
+  with expiry dates, either in the item form or from Tally batch masters.
 - Sales and purchase orders with party, delivery date, up to 50 item lines
   (each with godown, batch, expiry, quantity and rate), status
   (Open/Closed/Cancelled), filters and a Create voucher action that prefills the

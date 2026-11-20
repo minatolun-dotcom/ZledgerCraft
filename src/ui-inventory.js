@@ -133,6 +133,15 @@ export function ordersScreen() {
   )}`;
 }
 
+export function stockOpeningBatchRow(batch = {}) {
+  return `<div class="bom-row opening-batch-row">
+    <label class="field"><span>Batch name</span><input name="openingBatchNo" maxlength="30" placeholder="e.g. LOT-24" value="${esc(batch.batchNo ?? '')}" aria-label="Opening batch name"></label>
+    <label class="field"><span>Quantity</span><input name="openingBatchQty" inputmode="decimal" placeholder="0" value="${esc(batch.qty ?? '')}" aria-label="Opening batch quantity"></label>
+    <label class="field"><span>Expiry</span><input name="openingBatchExpiry" type="date" value="${esc(batch.expiryDate ?? '')}" aria-label="Opening batch expiry"></label>
+    <button class="btn small ghost" type="button" data-action="remove-opening-batch">Remove</button>
+  </div>`;
+}
+
 export function orderItemRow(active) {
   return `<div class="bom-row order-row">
     <label class="field"><span>Item</span><select name="orderItemId">${stockItemSelectOptions(active, '')}</select></label>
@@ -232,7 +241,7 @@ export function inventoryScreen() {
         <td class="muted">${esc(group?.name ?? 'Primary')}</td>
         <td>${esc(unit?.symbol ?? '')}</td>
         <td>${item.hsn ? esc(item.hsn) : '<span class="muted">—</span>'}</td>
-        <td>${item.batchTracking ? 'Yes' : '<span class="muted">No</span>'}</td>
+        <td>${item.batchTracking ? 'Yes' : '<span class="muted">No</span>'}${item.openingBatches?.length ? `<div class="muted small">${item.openingBatches.length} opening</div>` : ''}</td>
         <td class="num">${fmtQty(item.openingQty)}</td>
         <td class="num">${money(item.openingRate)}</td>
         <td class="row-actions">
@@ -556,6 +565,11 @@ export function inventoryScreen() {
           <input type="checkbox" name="batchTracking"${editing?.batchTracking ? ' checked' : ''}>
           <span>Track batches and expiry</span>
         </label>
+        <div class="bom-components">
+          <span class="muted small">Opening batches (optional; their quantities must add up to the opening quantity)</span>
+          <div id="stock-item-batches">${(editing?.openingBatches ?? []).map(stockOpeningBatchRow).join('')}</div>
+          <button class="btn small" type="button" data-action="add-opening-batch">Add batch</button>
+        </div>
         <div class="field form-actions">
           <button class="btn primary" type="submit">${editing ? 'Save item' : 'Create item'}</button>
           ${editing ? '<button class="btn ghost" type="button" data-action="cancel-stock-item">Cancel</button>' : ''}

@@ -211,6 +211,7 @@ import {
   orderItemRow,
   bomComponentRow,
   stockTransferItemRow,
+  stockOpeningBatchRow,
   inventoryScreen,
 } from './ui-inventory.js';
 import {
@@ -2578,6 +2579,13 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
+    const batchRows = [...form.querySelectorAll('#stock-item-batches .opening-batch-row')]
+      .map((row) => ({
+        batchNo: row.querySelector('[name="openingBatchNo"]')?.value ?? '',
+        qty: row.querySelector('[name="openingBatchQty"]')?.value ?? '',
+        expiryDate: row.querySelector('[name="openingBatchExpiry"]')?.value ?? '',
+      }))
+      .filter((row) => row.batchNo.trim() || row.qty.trim() || row.expiryDate);
     const payload = {
       name: data.get('name'),
       stockGroupId: data.get('stockGroupId'),
@@ -2587,6 +2595,11 @@ export async function handleSubmit(event) {
       hsn: data.get('hsn') || '',
       batchTracking: data.get('batchTracking') === 'on',
     };
+    if (batchRows.length) payload.openingBatches = batchRows;
+    else if (view.editingItemId) {
+      const existing = (active.stockItems ?? []).find((item) => item.id === view.editingItemId);
+      if (existing?.openingBatches?.length) payload.openingBatches = [];
+    }
     const result = view.editingItemId
       ? updateStockItem(active, view.editingItemId, payload)
       : addStockItem(active, payload);
@@ -4984,6 +4997,14 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'add-opening-batch': {
+      const container = document.getElementById('stock-item-batches');
+      if (container) container.insertAdjacentHTML('beforeend', stockOpeningBatchRow());
+      break;
+    }
+    case 'remove-opening-batch':
+      trigger.closest('.opening-batch-row')?.remove();
+      break;
     case 'add-order-line': {
       const container = document.getElementById('order-lines');
       const active = company();

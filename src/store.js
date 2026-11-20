@@ -3339,7 +3339,7 @@ function validateStockItemInput(company, input, ignoreId) {
   }
   if (batches.batches.length) {
     const batchQty = round3(batches.batches.reduce((sum, batch) => sum + batch.qty, 0));
-    const supplied = input.openingQty !== undefined && input.openingQty !== '';
+    const supplied = input.openingQty !== undefined && input.openingQty !== '' && openingQty > 0;
     if (supplied && Math.abs(openingQty - batchQty) >= 0.0005) {
       return {
         ok: false,

@@ -8,6 +8,7 @@ import {
   addVoucher,
   createCompany,
   deleteGstRate,
+  updateGstRate,
   emptyState,
   exportState,
   findLedgerByName,
@@ -480,6 +481,35 @@ test('GST rates are unique and used rates cannot be deleted', () => {
   const used = deleteGstRate(company, rateId(company, 18));
   assert.equal(used.ok, false);
   assert.match(used.error, /used by 1 voucher/);
+});
+
+test('GST rates can be edited without rewriting posted vouchers', () => {
+  const { company, customer, sales } = fixture();
+  const voucher = sale(company, { customer, sales, taxable: 1000 });
+  const id = rateId(company, 18);
+  assert.equal(voucher.gst.rate, 18);
+
+  const edited = updateGstRate(company, id, { label: '18% revised', rate: 20, cess: 1 });
+  assert.equal(edited.ok, true, edited.error);
+  assert.equal(edited.rate.label, '18% revised');
+  assert.equal(edited.rate.rate, 20);
+  assert.equal(edited.rate.cess, 1);
+  assert.equal(
+    company.vouchers[0].gst.rate,
+    18,
+    'a posted voucher keeps the rate it was saved with',
+  );
+
+  const duplicate = updateGstRate(company, id, { rate: 12, cess: 0 });
+  assert.equal(duplicate.ok, false);
+  assert.match(duplicate.error, /already exists/);
+  assert.equal(updateGstRate(company, id, { rate: 51 }).ok, false);
+  assert.equal(updateGstRate(company, id, { cess: 51 }).ok, false);
+  assert.equal(updateGstRate(company, 'missing', { rate: 5 }).ok, false);
+
+  const relabelled = updateGstRate(company, id, { label: '' });
+  assert.equal(relabelled.ok, true, relabelled.error);
+  assert.equal(relabelled.rate.label, '20% + 1% cess', 'an empty label falls back to the rate label');
 });
 
 test('GST settings, rates and voucher tax survive a backup round trip', () => {

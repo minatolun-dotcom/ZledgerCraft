@@ -344,6 +344,16 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 32: editable GST rates
+
+- The GST rate master now supports editing the label, rate and cess in place,
+  with the same 0–50% bounds and unique rate/cess rule as adding. Posted
+  vouchers keep the rate snapshot they were saved with.
+- Editing a rate still in use is allowed; deleting one still needs zero vouchers,
+  and an empty label falls back to the computed rate label.
+- Verification: edit, duplicate, bounds, missing rate, relabel and
+  posted-voucher-snapshot cases; 273 tests (272 pass, 1 skipped) and a 918.1 kB build pass.
+
 ### 2026-11-20 — Phase 31: cost-centre budgets
 
 - Budget targets now include cost centres. The master picker lists them under

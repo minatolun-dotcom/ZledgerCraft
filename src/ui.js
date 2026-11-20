@@ -24,6 +24,7 @@ import {
   addFinancialYear,
   booksStart,
   addGstRate,
+  updateGstRate,
   addGroup,
   addLedger,
   addManufacture,
@@ -2956,19 +2957,29 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = addGstRate(active, {
+    const editingRateId = view.editingGstRateId;
+    const payload = {
       label: data.get('label'),
       rate: data.get('rate'),
       cess: data.get('cess') || 0,
-    });
+    };
+    const result = editingRateId
+      ? updateGstRate(active, editingRateId, payload)
+      : addGstRate(active, payload);
     if (!result.ok) {
       showFormError(result.error, 'gst-rate-error');
       return;
     }
-    logAudit('gst.rate', `Added GST rate ${result.rate.label}.`, active, result.rate.label);
+    logAudit(
+      editingRateId ? 'gst.rate.update' : 'gst.rate',
+      `${editingRateId ? 'Updated' : 'Added'} GST rate ${result.rate.label}.`,
+      active,
+      result.rate.label,
+    );
     persist();
-    setFlash(`GST rate ${result.rate.label} added.`);
-    render();
+    setFlash(`GST rate ${result.rate.label} ${editingRateId ? 'updated' : 'added'}.`);
+    if (editingRateId) navigate('gst');
+    else render();
     return;
   }
 
@@ -3911,6 +3922,12 @@ async function handleClick(event) {
       navigate('payroll');
       break;
     }
+    case 'edit-gst-rate':
+      navigate('gst', { editingGstRateId: trigger.dataset.id });
+      break;
+    case 'cancel-gst-rate-edit':
+      navigate('gst');
+      break;
     case 'delete-gst-rate': {
       if (!can('master.delete')) {
         requirePermission('master.delete');

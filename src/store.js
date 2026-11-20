@@ -2056,6 +2056,27 @@ export function addGstRate(company, input = {}) {
   return { ok: true, rate: entry };
 }
 
+export function updateGstRate(company, rateId, input = {}) {
+  const entry = (company.gst?.rates ?? []).find((rate) => rate.id === rateId);
+  if (!entry) return { ok: false, error: 'GST rate not found.' };
+  const rate = parseAmount(input.rate === undefined ? entry.rate : input.rate);
+  const cess = parseAmount(input.cess === undefined ? entry.cess ?? 0 : input.cess);
+  if (rate === null || rate < 0 || rate > 50) return { ok: false, error: 'GST rate must be between 0% and 50%.' };
+  if (cess === null || cess < 0 || cess > 50) return { ok: false, error: 'Cess rate must be between 0% and 50%.' };
+  if (
+    (company.gst.rates ?? []).some(
+      (other) => other.id !== rateId && other.rate === rate && (other.cess ?? 0) === cess,
+    )
+  ) {
+    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists in the rate master.` };
+  }
+  const label = String(input.label ?? '').trim().slice(0, 40) || gstRateLabel(rate, cess);
+  entry.label = label;
+  entry.rate = rate;
+  entry.cess = cess;
+  return { ok: true, rate: entry };
+}
+
 export function deleteGstRate(company, rateId) {
   const rate = (company.gst?.rates ?? []).find((entry) => entry.id === rateId);
   if (!rate) return { ok: false, error: 'GST rate not found.' };

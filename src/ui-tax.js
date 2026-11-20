@@ -21,6 +21,7 @@ import {
 } from './accounting.js';
 import {
   state,
+  view,
   draft,
   filters,
   voucherLabel,
@@ -70,6 +71,9 @@ export function gstScreen() {
     })
     .join('');
 
+  const editingGstRate = view.editingGstRateId
+    ? (gst.rates ?? []).find((rate) => rate.id === view.editingGstRateId) ?? null
+    : null;
   const rateRows = (gst.rates ?? [])
     .map((rate) => {
       const used = active.vouchers.filter((voucher) => voucher.gst?.rateId === rate.id).length;
@@ -79,6 +83,7 @@ export function gstScreen() {
         <td class="num">${rate.cess ? `${rate.cess}%` : '—'}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
+          <button class="btn small" type="button" data-action="edit-gst-rate" data-id="${esc(rate.id)}">Edit</button>
           <button class="btn small danger" type="button" data-action="delete-gst-rate" data-id="${esc(rate.id)}"
             ${used > 0 ? 'disabled' : ''}>Delete</button>
         </td>
@@ -139,12 +144,14 @@ export function gstScreen() {
   const ratesPanel = panel(
     `GST rate master <span class="count">${(gst.rates ?? []).length}</span>`,
     `<form id="gst-rate-form" class="inline-form" novalidate>
-      <input name="label" maxlength="40" placeholder="Label (optional)" aria-label="GST rate label">
-      <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="GST rate percent" required>
-      <input name="cess" inputmode="decimal" placeholder="Cess %" aria-label="Cess percent">
-      <button class="btn small" type="submit">Add rate</button>
+      <input name="label" maxlength="40" placeholder="Label (optional)" aria-label="GST rate label" value="${esc(editingGstRate?.label ?? '')}">
+      <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="GST rate percent" value="${esc(editingGstRate?.rate ?? '')}" required>
+      <input name="cess" inputmode="decimal" placeholder="Cess %" aria-label="Cess percent" value="${esc(editingGstRate?.cess ?? '')}">
+      <button class="btn small" type="submit">${editingGstRate ? 'Save rate' : 'Add rate'}</button>
+      ${editingGstRate ? '<button class="btn small ghost" type="button" data-action="cancel-gst-rate-edit">Cancel</button>' : ''}
       <p id="gst-rate-error" class="form-error" role="alert"></p>
     </form>
+    <p class="muted small">Editing a rate changes future vouchers only; posted vouchers keep the rate they were saved with.</p>
     <div class="table-scroll" tabindex="0"><table class="data-table compact">
       <thead><tr><th>Rate</th><th class="num">GST</th><th class="num">Cess</th><th class="num">Vouchers</th><th></th></tr></thead>
       <tbody>${rateRows}</tbody>

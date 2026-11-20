@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   addEmployee,
+  addLeaveRecord,
   addPayHead,
   createCompany,
   deleteEmployee,
+  deleteLeaveRecord,
   deletePayHead,
   deletePayrollRun,
   emptyState,
+  employeeLeaveBalance,
   exportState,
   findLedgerByName,
   importState,
@@ -195,6 +198,28 @@ test('paid days prorate a payroll run and reject impossible attendance', () => {
   const invalid = runPayroll(company, { month: '2026-06', paidDays: { [asha.id]: 31 } });
   assert.equal(invalid.ok, false);
   assert.match(invalid.error, /paid days must be between 0 and 30/);
+});
+
+test('leave records reduce balances and reject overlaps', () => {
+  const { company } = fixture();
+  const asha = standardEmployee(company);
+  asha.leave = { CL: 12, SL: 6, EL: 0 };
+  const leave = addLeaveRecord(company, {
+    employeeId: asha.id,
+    type: 'CL',
+    from: '2026-04-10',
+    to: '2026-04-11',
+    notes: 'Personal',
+  });
+  assert.equal(leave.ok, true, leave.error);
+  assert.equal(leave.record.days, 2);
+  assert.equal(employeeLeaveBalance(company, asha.id).CL.remaining, 10);
+  assert.equal(
+    addLeaveRecord(company, { employeeId: asha.id, type: 'SL', from: '2026-04-11', to: '2026-04-12' }).ok,
+    false,
+  );
+  assert.equal(deleteLeaveRecord(company, leave.record.id).ok, true);
+  assert.equal(employeeLeaveBalance(company, asha.id).CL.remaining, 12);
 });
 
 test('one payroll run per month and only inside an open financial year', () => {

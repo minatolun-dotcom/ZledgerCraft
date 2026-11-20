@@ -4234,6 +4234,7 @@ function normalizePayroll(company) {
           : {}),
         active: employee.active !== false,
         pay,
+        leave: normalizeLeaveBalances(employee.leave),
       };
     })
     .filter(Boolean);
@@ -4304,12 +4305,25 @@ function normalizePayroll(company) {
     .filter(Boolean)
     .sort((a, b) => a.month.localeCompare(b.month));
 
+  const leaveRecords = (Array.isArray(source.leaveRecords) ? source.leaveRecords : [])
+    .filter((record) => record && record.id && isValidIsoDate(record.from) && isValidIsoDate(record.to) && record.to >= record.from)
+    .filter((record) => employees.some((employee) => employee.id === record.employeeId))
+    .map((record) => ({
+      id: String(record.id).slice(0, 80),
+      employeeId: String(record.employeeId).slice(0, 80),
+      type: ['CL', 'SL', 'EL'].includes(record.type) ? record.type : 'CL',
+      from: record.from,
+      to: record.to,
+      days: Math.min(366, Math.max(1, Math.round((new Date(record.to) - new Date(record.from)) / 86400000) + 1)),
+      ...(record.notes ? { notes: String(record.notes).slice(0, 200) } : {}),
+    }));
   const payable = payrollRoleLedger(company, 'salaryPayable');
   company.payroll = {
     enabled: Boolean(source.enabled),
     payHeads,
     employees,
     runs,
+    leaveRecords,
     ...(source.salaryPayableLedgerId &&
     (company.ledgers ?? []).some((ledger) => ledger.id === source.salaryPayableLedgerId)
       ? { salaryPayableLedgerId: String(source.salaryPayableLedgerId).slice(0, 80) }
@@ -4480,6 +4494,7 @@ function addEmployee(company, input = {}) {
     name,
     active: input.active !== false && input.active !== 'false',
     pay: checked.pay,
+    leave: normalizeLeaveBalances(input.leave),
   };
   const code = String(input.code ?? '').trim().slice(0, 20);
   const designation = String(input.designation ?? '').trim().slice(0, 60);
@@ -4527,6 +4542,7 @@ function updateEmployee(company, employeeId, input = {}) {
   employee.name = name;
   employee.active = input.active !== false && input.active !== 'false';
   employee.pay = checked.pay;
+  employee.leave = normalizeLeaveBalances(input.leave);
   const optional = { code: 20, designation: 60 };
   for (const [key, max] of Object.entries(optional)) {
     const value = String(input[key] ?? '').trim().slice(0, max);
@@ -4546,6 +4562,71 @@ function updateEmployee(company, employeeId, input = {}) {
   if (dateOfExit) employee.dateOfExit = dateOfExit;
   else delete employee.dateOfExit;
   return { ok: true, employee };
+}
+
+function normalizeLeaveBalances(input = {}) {
+  const result = {};
+  for (const type of ['CL', 'SL', 'EL']) {
+    const value = parseQty(input?.[type] ?? 0);
+    result[type] = value === null || value < 0 ? 0 : round3(value);
+  }
+  return result;
+}
+
+function employeeLeaveBalance(company, employeeId) {
+  const employee = (company.payroll?.employees ?? []).find((entry) => entry.id === employeeId);
+  if (!employee) return null;
+  const opening = normalizeLeaveBalances(employee.leave);
+  const records = (company.payroll?.leaveRecords ?? []).filter((record) => record.employeeId === employeeId);
+  const result = {};
+  for (const type of ['CL', 'SL', 'EL']) {
+    const used = round3(records.filter((record) => record.type === type).reduce((sum, record) => sum + record.days, 0));
+    result[type] = { opening: opening[type], used, remaining: round3(opening[type] - used) };
+  }
+  return result;
+}
+
+function addLeaveRecord(company, input = {}) {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before recording leave.' };
+  const employee = (company.payroll.employees ?? []).find((entry) => entry.id === input.employeeId);
+  if (!employee) return { ok: false, error: 'Choose an employee.' };
+  const type = ['CL', 'SL', 'EL'].includes(input.type) ? input.type : null;
+  if (!type) return { ok: false, error: 'Choose Casual, Sick or Earned leave.' };
+  const from = String(input.from ?? '');
+  const to = String(input.to ?? from);
+  if (!isValidIsoDate(from) || !isValidIsoDate(to) || to < from) {
+    return { ok: false, error: 'Enter a valid leave start and end date.' };
+  }
+  const days = Math.round((new Date(`${to}T00:00:00Z`) - new Date(`${from}T00:00:00Z`)) / 86400000) + 1;
+  if (days > 366) return { ok: false, error: 'A leave record cannot exceed 366 days.' };
+  const overlap = (company.payroll.leaveRecords ?? []).some(
+    (record) => record.employeeId === employee.id && record.from <= to && record.to >= from,
+  );
+  if (overlap) return { ok: false, error: 'This leave overlaps an existing leave record.' };
+  company.payroll.leaveRecords = company.payroll.leaveRecords ?? [];
+  const record = {
+    id: uid('leave'),
+    employeeId: employee.id,
+    type,
+    from,
+    to,
+    days,
+    ...(String(input.notes ?? '').trim() ? { notes: String(input.notes).trim().slice(0, 200) } : {}),
+  };
+  company.payroll.leaveRecords.push(record);
+  const balance = employeeLeaveBalance(company, employee.id);
+  if (balance[type].remaining < 0) {
+    company.payroll.leaveRecords.pop();
+    return { ok: false, error: `Only ${balance[type].opening - balance[type].used + days} ${type} day(s) remain for ${employee.name}.` };
+  }
+  return { ok: true, record, balance };
+}
+
+function deleteLeaveRecord(company, recordId) {
+  const record = (company.payroll?.leaveRecords ?? []).find((entry) => entry.id === recordId);
+  if (!record) return { ok: false, error: 'Leave record not found.' };
+  company.payroll.leaveRecords = company.payroll.leaveRecords.filter((entry) => entry.id !== recordId);
+  return { ok: true, record };
 }
 
 function deleteEmployee(company, employeeId) {
@@ -20189,6 +20270,9 @@ function payrollScreen() {
         <label class="field"><span>Bank name</span><input name="bankName" maxlength="60" value="${esc(editing?.bankName ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Bank account</span><input name="bankAccount" maxlength="20" inputmode="numeric" value="${esc(editing?.bankAccount ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>IFSC</span><input name="ifsc" maxlength="11" value="${esc(editing?.ifsc ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>Leave balance · Casual</span><input name="leaveCL" inputmode="decimal" value="${esc(editing?.leave?.CL ?? 0)}"></label>
+        <label class="field"><span>Leave balance · Sick</span><input name="leaveSL" inputmode="decimal" value="${esc(editing?.leave?.SL ?? 0)}"></label>
+        <label class="field"><span>Leave balance · Earned</span><input name="leaveEL" inputmode="decimal" value="${esc(editing?.leave?.EL ?? 0)}"></label>
         <label class="field"><span>Date of joining</span><input name="dateOfJoining" type="date" value="${esc(editing?.dateOfJoining ?? '')}"></label>
         <label class="field"><span>Date of exit</span><input name="dateOfExit" type="date" value="${esc(editing?.dateOfExit ?? '')}"><span class="muted small">Optional. Pay is prorated by calendar days in the joining and exit months.</span></label>
         <label class="field gst-check">
@@ -20304,9 +20388,35 @@ function payrollScreen() {
     )
     .join('');
   const summaryPanel = salaryRegisterPanel(report, from, to);
+  const leaveRecords = [...(payroll.leaveRecords ?? [])].sort(
+    (a, b) => b.from.localeCompare(a.from) || a.employeeId.localeCompare(b.employeeId),
+  );
+  const leaveRows = leaveRecords
+    .map((record) => {
+      const employee = employees.find((entry) => entry.id === record.employeeId);
+      return `<tr><td>${esc(employee?.name ?? 'Unknown')}</td><td><span class="badge">${esc(record.type)}</span></td><td>${esc(dateLabel(record.from))}</td><td>${esc(dateLabel(record.to))}</td><td class="num">${fmtQty(record.days)}</td><td class="muted small">${esc(record.notes || '—')}</td><td class="row-actions"><button class="btn small danger" type="button" data-action="delete-leave" data-id="${esc(record.id)}"${can('master.write') ? '' : ' disabled'}>Delete</button></td></tr>`;
+    })
+    .join('');
+  const leavePanel = panel(
+    'Leave register',
+    `<form id="leave-form" class="form-grid" novalidate>
+      <label class="field"><span>Employee</span><select name="employeeId">${employees.map((employee) => `<option value="${esc(employee.id)}">${esc(employee.name)}</option>`).join('')}</select></label>
+      <label class="field"><span>Leave type</span><select name="type"><option value="CL">Casual leave</option><option value="SL">Sick leave</option><option value="EL">Earned leave</option></select></label>
+      <label class="field"><span>From</span><input name="from" type="date" required></label>
+      <label class="field"><span>To</span><input name="to" type="date" required></label>
+      <label class="field"><span>Notes</span><input name="notes" maxlength="200" placeholder="Optional"></label>
+      <div class="form-actions"><button class="btn primary" type="submit"${can('master.write') ? '' : ' disabled'}>Record leave</button></div>
+      <p id="leave-error" class="form-error" role="alert"></p>
+    </form>
+    <p class="muted small">Balances: ${employees.map((employee) => { const balance = employeeLeaveBalance(active, employee.id); return `${esc(employee.name)} CL ${fmtQty(balance.CL.remaining)}, SL ${fmtQty(balance.SL.remaining)}, EL ${fmtQty(balance.EL.remaining)}`; }).join(' · ') || 'No employees'}.</p>
+    ${leaveRecords.length
+      ? `<table class="data-table compact"><thead><tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th class="num">Days</th><th>Notes</th><th></th></tr></thead><tbody>${leaveRows}</tbody></table>`
+      : '<p class="muted">No leave recorded yet.</p>'}`,
+    'Leave reduces available balances only; payroll paid days remain a separate attendance decision.',
+  );
 
   if (!payroll.enabled) return setupPanel;
-  return `${setupPanel}${headsPanel}${employeesPanel}${runsPanel}${report.count ? summaryPanel : ''}`;
+  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${runsPanel}${report.count ? summaryPanel : ''}`;
 }
 
 function salaryRegisterPanel(report, from, to, standalone = false) {
@@ -24001,6 +24111,30 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'leave-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = addLeaveRecord(active, {
+      employeeId: data.get('employeeId'),
+      type: data.get('type'),
+      from: data.get('from'),
+      to: data.get('to'),
+      notes: data.get('notes'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'leave-error');
+      return;
+    }
+    logAudit('leave.create', `Recorded ${result.record.days} day(s) of leave.`, active, result.record.id);
+    persist();
+    setFlash(`${result.record.days} day(s) of leave recorded.`);
+    navigate('payroll');
+    return;
+  }
+
   if (form.id === 'employee-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -24023,6 +24157,11 @@ async function handleSubmit(event) {
       dateOfExit: data.get('dateOfExit'),
       active: data.get('active') === 'on',
       pay,
+      leave: {
+        CL: data.get('leaveCL') || 0,
+        SL: data.get('leaveSL') || 0,
+        EL: data.get('leaveEL') || 0,
+      },
     };
     const editingId = view.employeeId;
     const result = editingId ? updateEmployee(active, editingId, payload) : addEmployee(active, payload);
@@ -24839,6 +24978,20 @@ async function handleClick(event) {
       if (result.ok) logAudit('employee.delete', `Deleted employee "${result.employee.name}".`, active, result.employee.name);
       persist();
       setFlash(result.ok ? `Employee "${result.employee.name}" deleted.` : result.error, result.ok ? 'ok' : 'warn');
+      render();
+      break;
+    }
+    case 'delete-leave': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Delete this leave record and restore the balance?')) break;
+      const result = deleteLeaveRecord(active, trigger.dataset.id);
+      if (result.ok) logAudit('leave.delete', `Deleted ${result.record.days} day(s) of leave.`, active, result.record.id);
+      persist();
+      setFlash(result.ok ? 'Leave record deleted.' : result.error, result.ok ? 'ok' : 'warn');
       render();
       break;
     }

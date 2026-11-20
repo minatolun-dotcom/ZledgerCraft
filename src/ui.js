@@ -29,6 +29,7 @@ import {
   addGstRate,
   updateGstRate,
   addGroup,
+  addLeaveRecord,
   addLedger,
   addManufacture,
   addStockCount,
@@ -71,6 +72,7 @@ import {
   deletePayrollRun,
   deleteTaxChallan,
   deleteLedger,
+  deleteLeaveRecord,
   deleteManufacture,
   deleteRecurringVoucher,
   deleteStockCount,
@@ -3368,6 +3370,30 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'leave-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = addLeaveRecord(active, {
+      employeeId: data.get('employeeId'),
+      type: data.get('type'),
+      from: data.get('from'),
+      to: data.get('to'),
+      notes: data.get('notes'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'leave-error');
+      return;
+    }
+    logAudit('leave.create', `Recorded ${result.record.days} day(s) of leave.`, active, result.record.id);
+    persist();
+    setFlash(`${result.record.days} day(s) of leave recorded.`);
+    navigate('payroll');
+    return;
+  }
+
   if (form.id === 'employee-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -3390,6 +3416,11 @@ export async function handleSubmit(event) {
       dateOfExit: data.get('dateOfExit'),
       active: data.get('active') === 'on',
       pay,
+      leave: {
+        CL: data.get('leaveCL') || 0,
+        SL: data.get('leaveSL') || 0,
+        EL: data.get('leaveEL') || 0,
+      },
     };
     const editingId = view.employeeId;
     const result = editingId ? updateEmployee(active, editingId, payload) : addEmployee(active, payload);
@@ -4206,6 +4237,20 @@ async function handleClick(event) {
       if (result.ok) logAudit('employee.delete', `Deleted employee "${result.employee.name}".`, active, result.employee.name);
       persist();
       setFlash(result.ok ? `Employee "${result.employee.name}" deleted.` : result.error, result.ok ? 'ok' : 'warn');
+      render();
+      break;
+    }
+    case 'delete-leave': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Delete this leave record and restore the balance?')) break;
+      const result = deleteLeaveRecord(active, trigger.dataset.id);
+      if (result.ok) logAudit('leave.delete', `Deleted ${result.record.days} day(s) of leave.`, active, result.record.id);
+      persist();
+      setFlash(result.ok ? 'Leave record deleted.' : result.error, result.ok ? 'ok' : 'warn');
       render();
       break;
     }

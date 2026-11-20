@@ -4,6 +4,7 @@ import {
   dateLabel,
   ledgerOptions,
   payrollBankTransferRows,
+  employeeLeaveBalance,
   payrollLedgers,
   payrollMonthEnd,
   round2,
@@ -20,6 +21,8 @@ import {
   voucherLabel,
   esc,
   company,
+  can,
+  fmtQty,
   money,
   balanceLabel,
   panel,
@@ -191,6 +194,9 @@ export function payrollScreen() {
         <label class="field"><span>Bank name</span><input name="bankName" maxlength="60" value="${esc(editing?.bankName ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Bank account</span><input name="bankAccount" maxlength="20" inputmode="numeric" value="${esc(editing?.bankAccount ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>IFSC</span><input name="ifsc" maxlength="11" value="${esc(editing?.ifsc ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>Leave balance · Casual</span><input name="leaveCL" inputmode="decimal" value="${esc(editing?.leave?.CL ?? 0)}"></label>
+        <label class="field"><span>Leave balance · Sick</span><input name="leaveSL" inputmode="decimal" value="${esc(editing?.leave?.SL ?? 0)}"></label>
+        <label class="field"><span>Leave balance · Earned</span><input name="leaveEL" inputmode="decimal" value="${esc(editing?.leave?.EL ?? 0)}"></label>
         <label class="field"><span>Date of joining</span><input name="dateOfJoining" type="date" value="${esc(editing?.dateOfJoining ?? '')}"></label>
         <label class="field"><span>Date of exit</span><input name="dateOfExit" type="date" value="${esc(editing?.dateOfExit ?? '')}"><span class="muted small">Optional. Pay is prorated by calendar days in the joining and exit months.</span></label>
         <label class="field gst-check">
@@ -306,9 +312,35 @@ export function payrollScreen() {
     )
     .join('');
   const summaryPanel = salaryRegisterPanel(report, from, to);
+  const leaveRecords = [...(payroll.leaveRecords ?? [])].sort(
+    (a, b) => b.from.localeCompare(a.from) || a.employeeId.localeCompare(b.employeeId),
+  );
+  const leaveRows = leaveRecords
+    .map((record) => {
+      const employee = employees.find((entry) => entry.id === record.employeeId);
+      return `<tr><td>${esc(employee?.name ?? 'Unknown')}</td><td><span class="badge">${esc(record.type)}</span></td><td>${esc(dateLabel(record.from))}</td><td>${esc(dateLabel(record.to))}</td><td class="num">${fmtQty(record.days)}</td><td class="muted small">${esc(record.notes || '—')}</td><td class="row-actions"><button class="btn small danger" type="button" data-action="delete-leave" data-id="${esc(record.id)}"${can('master.write') ? '' : ' disabled'}>Delete</button></td></tr>`;
+    })
+    .join('');
+  const leavePanel = panel(
+    'Leave register',
+    `<form id="leave-form" class="form-grid" novalidate>
+      <label class="field"><span>Employee</span><select name="employeeId">${employees.map((employee) => `<option value="${esc(employee.id)}">${esc(employee.name)}</option>`).join('')}</select></label>
+      <label class="field"><span>Leave type</span><select name="type"><option value="CL">Casual leave</option><option value="SL">Sick leave</option><option value="EL">Earned leave</option></select></label>
+      <label class="field"><span>From</span><input name="from" type="date" required></label>
+      <label class="field"><span>To</span><input name="to" type="date" required></label>
+      <label class="field"><span>Notes</span><input name="notes" maxlength="200" placeholder="Optional"></label>
+      <div class="form-actions"><button class="btn primary" type="submit"${can('master.write') ? '' : ' disabled'}>Record leave</button></div>
+      <p id="leave-error" class="form-error" role="alert"></p>
+    </form>
+    <p class="muted small">Balances: ${employees.map((employee) => { const balance = employeeLeaveBalance(active, employee.id); return `${esc(employee.name)} CL ${fmtQty(balance.CL.remaining)}, SL ${fmtQty(balance.SL.remaining)}, EL ${fmtQty(balance.EL.remaining)}`; }).join(' · ') || 'No employees'}.</p>
+    ${leaveRecords.length
+      ? `<table class="data-table compact"><thead><tr><th>Employee</th><th>Type</th><th>From</th><th>To</th><th class="num">Days</th><th>Notes</th><th></th></tr></thead><tbody>${leaveRows}</tbody></table>`
+      : '<p class="muted">No leave recorded yet.</p>'}`,
+    'Leave reduces available balances only; payroll paid days remain a separate attendance decision.',
+  );
 
   if (!payroll.enabled) return setupPanel;
-  return `${setupPanel}${headsPanel}${employeesPanel}${runsPanel}${report.count ? summaryPanel : ''}`;
+  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${runsPanel}${report.count ? summaryPanel : ''}`;
 }
 
 export function salaryRegisterPanel(report, from, to, standalone = false) {

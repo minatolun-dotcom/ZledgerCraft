@@ -1808,6 +1808,7 @@ export function normalizePayroll(company) {
           : {}),
         active: employee.active !== false,
         pay,
+        leave: normalizeLeaveBalances(employee.leave),
       };
     })
     .filter(Boolean);
@@ -1878,12 +1879,25 @@ export function normalizePayroll(company) {
     .filter(Boolean)
     .sort((a, b) => a.month.localeCompare(b.month));
 
+  const leaveRecords = (Array.isArray(source.leaveRecords) ? source.leaveRecords : [])
+    .filter((record) => record && record.id && isValidIsoDate(record.from) && isValidIsoDate(record.to) && record.to >= record.from)
+    .filter((record) => employees.some((employee) => employee.id === record.employeeId))
+    .map((record) => ({
+      id: String(record.id).slice(0, 80),
+      employeeId: String(record.employeeId).slice(0, 80),
+      type: ['CL', 'SL', 'EL'].includes(record.type) ? record.type : 'CL',
+      from: record.from,
+      to: record.to,
+      days: Math.min(366, Math.max(1, Math.round((new Date(record.to) - new Date(record.from)) / 86400000) + 1)),
+      ...(record.notes ? { notes: String(record.notes).slice(0, 200) } : {}),
+    }));
   const payable = payrollRoleLedger(company, 'salaryPayable');
   company.payroll = {
     enabled: Boolean(source.enabled),
     payHeads,
     employees,
     runs,
+    leaveRecords,
     ...(source.salaryPayableLedgerId &&
     (company.ledgers ?? []).some((ledger) => ledger.id === source.salaryPayableLedgerId)
       ? { salaryPayableLedgerId: String(source.salaryPayableLedgerId).slice(0, 80) }
@@ -2054,6 +2068,7 @@ export function addEmployee(company, input = {}) {
     name,
     active: input.active !== false && input.active !== 'false',
     pay: checked.pay,
+    leave: normalizeLeaveBalances(input.leave),
   };
   const code = String(input.code ?? '').trim().slice(0, 20);
   const designation = String(input.designation ?? '').trim().slice(0, 60);
@@ -2101,6 +2116,7 @@ export function updateEmployee(company, employeeId, input = {}) {
   employee.name = name;
   employee.active = input.active !== false && input.active !== 'false';
   employee.pay = checked.pay;
+  employee.leave = normalizeLeaveBalances(input.leave);
   const optional = { code: 20, designation: 60 };
   for (const [key, max] of Object.entries(optional)) {
     const value = String(input[key] ?? '').trim().slice(0, max);
@@ -2120,6 +2136,71 @@ export function updateEmployee(company, employeeId, input = {}) {
   if (dateOfExit) employee.dateOfExit = dateOfExit;
   else delete employee.dateOfExit;
   return { ok: true, employee };
+}
+
+function normalizeLeaveBalances(input = {}) {
+  const result = {};
+  for (const type of ['CL', 'SL', 'EL']) {
+    const value = parseQty(input?.[type] ?? 0);
+    result[type] = value === null || value < 0 ? 0 : round3(value);
+  }
+  return result;
+}
+
+export function employeeLeaveBalance(company, employeeId) {
+  const employee = (company.payroll?.employees ?? []).find((entry) => entry.id === employeeId);
+  if (!employee) return null;
+  const opening = normalizeLeaveBalances(employee.leave);
+  const records = (company.payroll?.leaveRecords ?? []).filter((record) => record.employeeId === employeeId);
+  const result = {};
+  for (const type of ['CL', 'SL', 'EL']) {
+    const used = round3(records.filter((record) => record.type === type).reduce((sum, record) => sum + record.days, 0));
+    result[type] = { opening: opening[type], used, remaining: round3(opening[type] - used) };
+  }
+  return result;
+}
+
+export function addLeaveRecord(company, input = {}) {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before recording leave.' };
+  const employee = (company.payroll.employees ?? []).find((entry) => entry.id === input.employeeId);
+  if (!employee) return { ok: false, error: 'Choose an employee.' };
+  const type = ['CL', 'SL', 'EL'].includes(input.type) ? input.type : null;
+  if (!type) return { ok: false, error: 'Choose Casual, Sick or Earned leave.' };
+  const from = String(input.from ?? '');
+  const to = String(input.to ?? from);
+  if (!isValidIsoDate(from) || !isValidIsoDate(to) || to < from) {
+    return { ok: false, error: 'Enter a valid leave start and end date.' };
+  }
+  const days = Math.round((new Date(`${to}T00:00:00Z`) - new Date(`${from}T00:00:00Z`)) / 86400000) + 1;
+  if (days > 366) return { ok: false, error: 'A leave record cannot exceed 366 days.' };
+  const overlap = (company.payroll.leaveRecords ?? []).some(
+    (record) => record.employeeId === employee.id && record.from <= to && record.to >= from,
+  );
+  if (overlap) return { ok: false, error: 'This leave overlaps an existing leave record.' };
+  company.payroll.leaveRecords = company.payroll.leaveRecords ?? [];
+  const record = {
+    id: uid('leave'),
+    employeeId: employee.id,
+    type,
+    from,
+    to,
+    days,
+    ...(String(input.notes ?? '').trim() ? { notes: String(input.notes).trim().slice(0, 200) } : {}),
+  };
+  company.payroll.leaveRecords.push(record);
+  const balance = employeeLeaveBalance(company, employee.id);
+  if (balance[type].remaining < 0) {
+    company.payroll.leaveRecords.pop();
+    return { ok: false, error: `Only ${balance[type].opening - balance[type].used + days} ${type} day(s) remain for ${employee.name}.` };
+  }
+  return { ok: true, record, balance };
+}
+
+export function deleteLeaveRecord(company, recordId) {
+  const record = (company.payroll?.leaveRecords ?? []).find((entry) => entry.id === recordId);
+  if (!record) return { ok: false, error: 'Leave record not found.' };
+  company.payroll.leaveRecords = company.payroll.leaveRecords.filter((entry) => entry.id !== recordId);
+  return { ok: true, record };
 }
 
 export function deleteEmployee(company, employeeId) {

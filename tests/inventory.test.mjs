@@ -812,7 +812,46 @@ test('batch-tracked items require batches and report batch balances', () => {
     batches.totals.closingValue,
     Math.round(batches.rows.reduce((sum, row) => sum + row.closingValue, 0) * 100) / 100,
   );
-});test('opening batches split opening stock and survive an opening quantity edit', () => {
+});
+
+test('batch values follow each batch latest receipt rate', () => {
+  const company = createCompany('Batch Cost Co', '2026-04-01').company;
+  const unit = company.units.find((entry) => entry.symbol === 'Nos');
+  const item = addStockItem(company, {
+    name: 'Costed Item',
+    stockGroupId: company.stockGroups[0].id,
+    unitId: unit.id,
+    openingQty: 10,
+    openingRate: 10,
+    batchTracking: true,
+    openingBatches: [
+      { batchNo: 'A', qty: 5 },
+      { batchNo: 'B', qty: 5 },
+    ],
+  }).item;
+  const cash = findLedgerByName(company, 'Cash');
+  const purchases = findLedgerByName(company, 'Purchases');
+  for (const [batchNo, rate] of [['A', 20], ['B', 30]]) {
+    const total = 2 * rate;
+    const posted = addVoucher(company, {
+      type: 'Purchase',
+      date: '2026-04-05',
+      lines: [
+        { ledgerId: purchases.id, side: 'Dr', amount: total },
+        { ledgerId: cash.id, side: 'Cr', amount: total },
+      ],
+      items: [{ stockItemId: item.id, qty: 2, rate, batchNo }],
+    });
+    assert.equal(posted.ok, true, posted.error);
+  }
+  const rows = batchStockSummary(company).rows;
+  assert.equal(rows.find((row) => row.batchNo === 'A').rate, 20);
+  assert.equal(rows.find((row) => row.batchNo === 'A').closingValue, 140);
+  assert.equal(rows.find((row) => row.batchNo === 'B').rate, 30);
+  assert.equal(rows.find((row) => row.batchNo === 'B').closingValue, 210);
+});
+
+test('opening batches split opening stock and survive an opening quantity edit', () => {
   const company = createCompany('Opening Batch Co', '2026-04-01').company;
   const unit = company.units.find((entry) => entry.symbol === 'Nos');
   const item = addStockItem(company, {

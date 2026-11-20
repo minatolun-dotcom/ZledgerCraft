@@ -741,7 +741,7 @@ export function inventoryScreen() {
             <tbody>${batchRows}</tbody>
             <tfoot><tr><td colspan="8">Batch closing value</td><td class="num">${money(batchReport.totals.closingValue)}</td></tr></tfoot>
           </table>`,
-          'Batch balances are quantity-based; values use the item weighted-average cost. Expiry is the latest date entered on a batch line.',
+          'Batch values use the latest receipt rate recorded against each batch, falling back to item weighted-average cost. Expiry is the latest date entered on a batch line.',
         )
       : ''}
     ${expiryReport.rows.length

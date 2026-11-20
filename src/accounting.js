@@ -2233,16 +2233,19 @@ export function batchStockSummary(company, filters = {}) {
     const inward = new Map();
     const outward = new Map();
     const expiry = new Map();
+    const batchRates = new Map();
     const openingBatches = (item.openingBatches ?? []).filter(
       (batch) => String(batch.batchNo ?? '').trim() && Number(batch.qty) > 0,
     );
     if (openingBatches.length) {
       for (const batch of openingBatches) {
         opening.set(batch.batchNo, round3(batch.qty));
+        batchRates.set(batch.batchNo, round2(item.openingRate ?? 0));
         if (batch.expiryDate) expiry.set(batch.batchNo, batch.expiryDate);
       }
     } else if ((item.openingQty ?? 0) > 0) {
       opening.set(OPENING_BATCH, round3(item.openingQty));
+      batchRates.set(OPENING_BATCH, round2(item.openingRate ?? 0));
     }
     const keyFor = (batchNo) => batchNo || OPENING_BATCH;
 
@@ -2254,6 +2257,7 @@ export function batchStockSummary(company, filters = {}) {
           const key = keyFor(line.batchNo);
           const qty = round3(line.qty);
           if (line.expiryDate) expiry.set(key, line.expiryDate);
+          if (direction > 0 && Number(line.rate) > 0) batchRates.set(key, round2(line.rate));
           if (event.date < from) quantityMapAdd(opening, key, direction * qty);
           else if (direction > 0) quantityMapAdd(inward, key, qty);
           else quantityMapAdd(outward, key, qty);
@@ -2292,7 +2296,7 @@ export function batchStockSummary(company, filters = {}) {
       }
     }
 
-    const rate = valuation.get(item.id)?.averageRate ?? item.openingRate ?? 0;
+    const fallbackRate = valuation.get(item.id)?.averageRate ?? item.openingRate ?? 0;
     const keys = new Set([...opening.keys(), ...inward.keys(), ...outward.keys()]);
     for (const key of keys) {
       const openingQty = round3(opening.get(key) ?? 0);
@@ -2300,6 +2304,7 @@ export function batchStockSummary(company, filters = {}) {
       const outQty = round3(outward.get(key) ?? 0);
       const closingQty = round3(openingQty + inQty - outQty);
       if (openingQty === 0 && inQty === 0 && outQty === 0) continue;
+      const rate = batchRates.get(key) ?? fallbackRate;
       rows.push({
         itemId: item.id,
         name: item.name,

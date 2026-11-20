@@ -182,6 +182,21 @@ test('a payroll run posts a balanced journal and stores the run snapshot', () =>
   assert.equal(summary.runs[0].voucherNo, voucher.no);
 });
 
+test('paid days prorate a payroll run and reject impossible attendance', () => {
+  const { company } = fixture();
+  const asha = standardEmployee(company);
+  const run = runPayroll(company, { month: '2026-05', paidDays: { [asha.id]: 15 } });
+  assert.equal(run.ok, true, run.error);
+  assert.equal(run.run.rows[0].paidDays, 15);
+  assert.equal(run.run.rows[0].monthDays, 31);
+  assert.equal(run.run.rows[0].gross, 19354.84);
+  assert.equal(run.run.rows[0].net, 17225.81);
+
+  const invalid = runPayroll(company, { month: '2026-06', paidDays: { [asha.id]: 31 } });
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.error, /paid days must be between 0 and 30/);
+});
+
 test('one payroll run per month and only inside an open financial year', () => {
   const { company } = fixture();
   standardEmployee(company);

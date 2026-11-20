@@ -344,6 +344,20 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 48: attendance, wastage and consolidation
+
+- Payroll runs accept paid days per employee, defaulting to the calendar days
+  available between joining and exit; every earning and deduction is prorated
+  against the month and impossible paid days are rejected.
+- Production accepts a wastage quantity that consumes extra BOM components while
+  finished-good output stays as entered, so wastage cost remains in finished
+  goods and total stock value is preserved.
+- A company consolidation report aggregates each company's income, expenses,
+  assets, liabilities, receivables, payables and cash with combined totals,
+  without inter-company elimination.
+- Verification: paid-days proration and validation, wastage consumption/value,
+  consolidation totals; 298 tests (297 pass, 1 skipped) and a 1,031.8 kB build.
+
 ### 2026-11-20 — Phase 47: forecasting and statutory working papers
 
 - Treasury: a 30-day cash-flow forecast from cash/bank balances and open

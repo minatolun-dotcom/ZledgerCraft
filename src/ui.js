@@ -214,6 +214,7 @@ import {
   cashBankScreen,
   registersScreen,
   outstandingScreen,
+  consolidationScreen,
   exceptionsScreen,
   partyLedgerList,
   billStatusBadge,
@@ -2146,6 +2147,8 @@ export function screenHtml() {
       return outstandingScreen();
     case 'exceptions':
       return exceptionsScreen();
+    case 'consolidation':
+      return consolidationScreen();
     case 'billRegister':
       return billRegisterScreen();
     case 'partyStatement':
@@ -2702,6 +2705,13 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'consolidation-form') {
+    const data = new FormData(form);
+    filters.consolidation = { asOn: data.get('asOn') || '' };
+    render();
+    return;
+  }
+
   if (form.id === 'exceptions-form') {
     const data = new FormData(form);
     filters.exceptions = { asOn: data.get('asOn') || '' };
@@ -2996,6 +3006,7 @@ export async function handleSubmit(event) {
       date: data.get('date'),
       bomId: data.get('bomId'),
       outputQty: data.get('outputQty'),
+      wastageQty: data.get('wastageQty') || 0,
       componentGodownId: data.get('componentGodownId'),
       outputGodownId: data.get('outputGodownId'),
       outputBatchNo: data.get('outputBatchNo'),
@@ -3352,7 +3363,11 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = runPayroll(active, { month: data.get('month'), date: data.get('date') });
+    const paidDays = {};
+    for (const input of form.querySelectorAll('[data-payroll-paid]')) {
+      paidDays[input.dataset.payrollPaid] = input.value;
+    }
+    const result = runPayroll(active, { month: data.get('month'), date: data.get('date'), paidDays });
     if (!result.ok) {
       showFormError(result.error, 'payroll-run-error');
       return;

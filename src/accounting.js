@@ -292,6 +292,49 @@ export function balanceSheet(company, filters = {}) {
   };
 }
 
+/** Company-wise totals across a group of companies; no inter-company elimination. */
+export function consolidationSummary(companies, filters = {}) {
+  const asOn = filters.asOn || '';
+  const rows = (companies ?? []).map((company) => {
+    const to = asOn && asOn >= company.fyStart && asOn <= company.fyEnd ? asOn : company.fyEnd;
+    const pnl = profitAndLoss(company, { from: company.fyStart, to });
+    const sheet = balanceSheet(company, { to });
+    const receivable = outstanding(company, { side: 'receivable', asOn: to });
+    const payable = outstanding(company, { side: 'payable', asOn: to });
+    const totals = ledgerTotals(company, { to });
+    const cash = round2(
+      cashBankLedgers(company).reduce((sum, ledger) => sum + (totals.get(ledger.id)?.closing ?? 0), 0),
+    );
+    return {
+      id: company.id,
+      name: company.name,
+      asOn: to,
+      income: round2(pnl.direct.incomeTotal + pnl.indirect.incomeTotal),
+      expenses: round2(pnl.direct.expenseTotal + pnl.indirect.expenseTotal),
+      netProfit: pnl.netProfit,
+      assets: sheet.assets.total,
+      liabilities: sheet.liabilities.total,
+      receivable: receivable.total,
+      payable: payable.total,
+      cash,
+    };
+  });
+  const sum = (key) => round2(rows.reduce((total, row) => total + row[key], 0));
+  return {
+    rows,
+    totals: {
+      income: sum('income'),
+      expenses: sum('expenses'),
+      netProfit: sum('netProfit'),
+      assets: sum('assets'),
+      liabilities: sum('liabilities'),
+      receivable: sum('receivable'),
+      payable: sum('payable'),
+      cash: sum('cash'),
+    },
+  };
+}
+
 /** Side-by-side P&L and balance-sheet figures for every financial year. */
 export function yearComparison(company) {
   const years = [...(company.years ?? [])].sort((a, b) => a.start.localeCompare(b.start));

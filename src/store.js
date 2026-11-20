@@ -2128,13 +2128,23 @@ export function runPayroll(company, input = {}) {
   const monthDays = Number(end.slice(8, 10));
   const monthStart = `${month}-01`;
   const rows = [];
+  const paidInput = input.paidDays && typeof input.paidDays === 'object' ? input.paidDays : {};
   for (const employee of employees) {
     const joined = employee.dateOfJoining && employee.dateOfJoining > monthStart ? employee.dateOfJoining : monthStart;
     const exited = employee.dateOfExit && employee.dateOfExit < end ? employee.dateOfExit : end;
     const workedDays = joined > exited ? 0 : payrollDaysBetween(joined, exited);
     if (workedDays === 0) continue;
-    const prorated = workedDays < monthDays;
-    const factor = prorated ? workedDays / monthDays : 1;
+    let paidDays = workedDays;
+    if (Object.prototype.hasOwnProperty.call(paidInput, employee.id)) {
+      const value = Number(paidInput[employee.id]);
+      if (!Number.isFinite(value) || value < 0 || value > workedDays + 0.0005) {
+        return { ok: false, error: `${employee.name}'s paid days must be between 0 and ${workedDays}.` };
+      }
+      paidDays = round2(value);
+    }
+    if (paidDays === 0) continue;
+    const prorated = paidDays < monthDays;
+    const factor = prorated ? paidDays / monthDays : 1;
     const earnings = [];
     const deductions = [];
     for (const entry of employee.pay ?? []) {
@@ -2161,7 +2171,9 @@ export function runPayroll(company, input = {}) {
       employeeId: employee.id,
       name: employee.name,
       ...(employee.code ? { code: employee.code } : {}),
-      ...(prorated ? { workedDays, monthDays } : {}),
+      ...(workedDays !== monthDays ? { workedDays } : {}),
+      paidDays,
+      monthDays,
       earnings,
       deductions,
       gross,
@@ -4636,6 +4648,10 @@ export function addManufacture(company, input) {
   if (outputQty === null || outputQty <= 0) {
     return { ok: false, error: 'Production quantity must be greater than zero.' };
   }
+  const wastageQty = parseQty(input.wastageQty ?? 0);
+  if (wastageQty === null || wastageQty < 0) {
+    return { ok: false, error: 'Wastage quantity must be zero or more.' };
+  }
   const componentGodown = (company.godowns ?? []).find((godown) => godown.id === input.componentGodownId);
   const outputGodown = (company.godowns ?? []).find((godown) => godown.id === input.outputGodownId);
   if (!componentGodown || !outputGodown) return { ok: false, error: 'Choose both the component and output godown.' };
@@ -4645,7 +4661,7 @@ export function addManufacture(company, input) {
   }
   const expiryDate = String(input.expiryDate ?? '').trim();
   if (expiryDate && !isValidIsoDate(expiryDate)) return { ok: false, error: 'Enter a valid batch expiry date.' };
-  const factor = outputQty / bom.outputQty;
+  const factor = (outputQty + wastageQty) / bom.outputQty;
   const components = [];
   for (const line of bom.components ?? []) {
     const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
@@ -4675,6 +4691,7 @@ export function addManufacture(company, input) {
     bomOutputQty: bom.outputQty,
     outputItemId: output.id,
     outputQty,
+    ...(wastageQty ? { wastageQty } : {}),
     componentGodownId: componentGodown.id,
     outputGodownId: outputGodown.id,
     components,
@@ -5939,10 +5956,14 @@ function validateImportedCompany(company) {
     if (stockItem?.batchTracking && !String(manufacture.outputBatchNo ?? '').trim()) {
       return `Company "${name}": production ${manufacture.no ?? ''} is missing a batch for "${stockItem.name}".`;
     }
+    const wastageQty = parseQty(manufacture.wastageQty ?? 0);
+    if (wastageQty === null || wastageQty < 0) {
+      return `Company "${name}": production ${manufacture.no ?? ''} has an invalid wastage quantity.`;
+    }
     if (manufacture.expiryDate !== undefined && !isValidIsoDate(manufacture.expiryDate)) {
       return `Company "${name}": production ${manufacture.no ?? ''} has an invalid batch expiry date.`;
     }
-    const factor = outputQty / parseQty(bom.outputQty);
+    const factor = (outputQty + wastageQty) / parseQty(bom.outputQty);
     const expected = new Map(
       (bom.components ?? []).map((line) => [line.stockItemId, round3((parseQty(line.qty) ?? 0) * factor)]),
     );

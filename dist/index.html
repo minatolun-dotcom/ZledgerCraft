@@ -4471,13 +4471,23 @@ function runPayroll(company, input = {}) {
   const monthDays = Number(end.slice(8, 10));
   const monthStart = `${month}-01`;
   const rows = [];
+  const paidInput = input.paidDays && typeof input.paidDays === 'object' ? input.paidDays : {};
   for (const employee of employees) {
     const joined = employee.dateOfJoining && employee.dateOfJoining > monthStart ? employee.dateOfJoining : monthStart;
     const exited = employee.dateOfExit && employee.dateOfExit < end ? employee.dateOfExit : end;
     const workedDays = joined > exited ? 0 : payrollDaysBetween(joined, exited);
     if (workedDays === 0) continue;
-    const prorated = workedDays < monthDays;
-    const factor = prorated ? workedDays / monthDays : 1;
+    let paidDays = workedDays;
+    if (Object.prototype.hasOwnProperty.call(paidInput, employee.id)) {
+      const value = Number(paidInput[employee.id]);
+      if (!Number.isFinite(value) || value < 0 || value > workedDays + 0.0005) {
+        return { ok: false, error: `${employee.name}'s paid days must be between 0 and ${workedDays}.` };
+      }
+      paidDays = round2(value);
+    }
+    if (paidDays === 0) continue;
+    const prorated = paidDays < monthDays;
+    const factor = prorated ? paidDays / monthDays : 1;
     const earnings = [];
     const deductions = [];
     for (const entry of employee.pay ?? []) {
@@ -4504,7 +4514,9 @@ function runPayroll(company, input = {}) {
       employeeId: employee.id,
       name: employee.name,
       ...(employee.code ? { code: employee.code } : {}),
-      ...(prorated ? { workedDays, monthDays } : {}),
+      ...(workedDays !== monthDays ? { workedDays } : {}),
+      paidDays,
+      monthDays,
       earnings,
       deductions,
       gross,
@@ -6979,6 +6991,10 @@ function addManufacture(company, input) {
   if (outputQty === null || outputQty <= 0) {
     return { ok: false, error: 'Production quantity must be greater than zero.' };
   }
+  const wastageQty = parseQty(input.wastageQty ?? 0);
+  if (wastageQty === null || wastageQty < 0) {
+    return { ok: false, error: 'Wastage quantity must be zero or more.' };
+  }
   const componentGodown = (company.godowns ?? []).find((godown) => godown.id === input.componentGodownId);
   const outputGodown = (company.godowns ?? []).find((godown) => godown.id === input.outputGodownId);
   if (!componentGodown || !outputGodown) return { ok: false, error: 'Choose both the component and output godown.' };
@@ -6988,7 +7004,7 @@ function addManufacture(company, input) {
   }
   const expiryDate = String(input.expiryDate ?? '').trim();
   if (expiryDate && !isValidIsoDate(expiryDate)) return { ok: false, error: 'Enter a valid batch expiry date.' };
-  const factor = outputQty / bom.outputQty;
+  const factor = (outputQty + wastageQty) / bom.outputQty;
   const components = [];
   for (const line of bom.components ?? []) {
     const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
@@ -7018,6 +7034,7 @@ function addManufacture(company, input) {
     bomOutputQty: bom.outputQty,
     outputItemId: output.id,
     outputQty,
+    ...(wastageQty ? { wastageQty } : {}),
     componentGodownId: componentGodown.id,
     outputGodownId: outputGodown.id,
     components,
@@ -8282,10 +8299,14 @@ function validateImportedCompany(company) {
     if (stockItem?.batchTracking && !String(manufacture.outputBatchNo ?? '').trim()) {
       return `Company "${name}": production ${manufacture.no ?? ''} is missing a batch for "${stockItem.name}".`;
     }
+    const wastageQty = parseQty(manufacture.wastageQty ?? 0);
+    if (wastageQty === null || wastageQty < 0) {
+      return `Company "${name}": production ${manufacture.no ?? ''} has an invalid wastage quantity.`;
+    }
     if (manufacture.expiryDate !== undefined && !isValidIsoDate(manufacture.expiryDate)) {
       return `Company "${name}": production ${manufacture.no ?? ''} has an invalid batch expiry date.`;
     }
-    const factor = outputQty / parseQty(bom.outputQty);
+    const factor = (outputQty + wastageQty) / parseQty(bom.outputQty);
     const expected = new Map(
       (bom.components ?? []).map((line) => [line.stockItemId, round3((parseQty(line.qty) ?? 0) * factor)]),
     );
@@ -8755,6 +8776,49 @@ function balanceSheet(company, filters = {}) {
     netProfit: pnl.netProfit,
     difference: round2(assetTotal - liabilityTotal),
     balanced: Math.abs(assetTotal - liabilityTotal) < EPSILON,
+  };
+}
+
+/** Company-wise totals across a group of companies; no inter-company elimination. */
+function consolidationSummary(companies, filters = {}) {
+  const asOn = filters.asOn || '';
+  const rows = (companies ?? []).map((company) => {
+    const to = asOn && asOn >= company.fyStart && asOn <= company.fyEnd ? asOn : company.fyEnd;
+    const pnl = profitAndLoss(company, { from: company.fyStart, to });
+    const sheet = balanceSheet(company, { to });
+    const receivable = outstanding(company, { side: 'receivable', asOn: to });
+    const payable = outstanding(company, { side: 'payable', asOn: to });
+    const totals = ledgerTotals(company, { to });
+    const cash = round2(
+      cashBankLedgers(company).reduce((sum, ledger) => sum + (totals.get(ledger.id)?.closing ?? 0), 0),
+    );
+    return {
+      id: company.id,
+      name: company.name,
+      asOn: to,
+      income: round2(pnl.direct.incomeTotal + pnl.indirect.incomeTotal),
+      expenses: round2(pnl.direct.expenseTotal + pnl.indirect.expenseTotal),
+      netProfit: pnl.netProfit,
+      assets: sheet.assets.total,
+      liabilities: sheet.liabilities.total,
+      receivable: receivable.total,
+      payable: payable.total,
+      cash,
+    };
+  });
+  const sum = (key) => round2(rows.reduce((total, row) => total + row[key], 0));
+  return {
+    rows,
+    totals: {
+      income: sum('income'),
+      expenses: sum('expenses'),
+      netProfit: sum('netProfit'),
+      assets: sum('assets'),
+      liabilities: sum('liabilities'),
+      receivable: sum('receivable'),
+      payable: sum('payable'),
+      cash: sum('cash'),
+    },
   };
 }
 
@@ -13440,6 +13504,7 @@ const REPORT_SCREENS = new Set([
   'registers',
   'outstanding',
   'exceptions',
+  'consolidation',
   'billRegister',
   'partyStatement',
   'groupSummary',
@@ -13476,6 +13541,7 @@ const REPORT_TITLES = {
   registers: 'Registers',
   outstanding: 'Outstanding',
   exceptions: 'Exception register',
+  consolidation: 'Company consolidation',
   billRegister: 'Bill-wise register',
   partyStatement: 'Party statement',
   groupSummary: 'Group Summary',
@@ -13964,6 +14030,7 @@ function gatewayScreen() {
           <button type="button" class="link-row" data-screen="partyStatement"><span>Party statement</span><span class="muted small">Account</span></button>
           <button type="button" class="link-row" data-screen="groupSummary"><span>Group Summary</span><kbd>G</kbd></button>
           <button type="button" class="link-row" data-screen="yearComparison"><span>Year comparison</span><span class="muted small">FY</span></button>
+          <button type="button" class="link-row" data-screen="consolidation"><span>Company consolidation</span><span class="muted small">Group</span></button>
           <button type="button" class="link-row" data-screen="audit"><span>Audit trail</span><span class="muted small">Log</span></button>
           <button type="button" class="link-row" data-screen="cashFlow"><span>Cash Flow</span><kbd>F</kbd></button>
           <button type="button" class="link-row" data-screen="ratios"><span>Ratio Analysis</span><kbd>Y</kbd></button>
@@ -15446,6 +15513,32 @@ function previousPeriod(from, to) {
   );
   const priorTo = isoShiftDay(from, -1);
   return { from: isoShiftDay(priorTo, -(days - 1)), to: priorTo };
+}
+
+function consolidationScreen() {
+  const active = company();
+  if (!active) return emptyCompanyScreen('Consolidation');
+  const asOn = filters.consolidation?.asOn || active.fyEnd;
+  const report = consolidationSummary(state.companies, { asOn });
+  return panel(
+    'Company consolidation',
+    `<form id="consolidation-form" class="filter-bar">
+      <label class="field inline-field"><span>As on</span><input name="asOn" type="date" value="${esc(asOn)}"></label>
+      <button class="btn small" type="submit">Apply</button>
+    </form>
+    <div class="ratio-grid">
+      <div class="ratio-card"><span class="ratio-label">Companies</span><strong>${report.rows.length}</strong><span class="muted small">All accessible companies</span></div>
+      <div class="ratio-card"><span class="ratio-label">Combined income</span><strong>${money(report.totals.income)}</strong><span class="muted small">Direct and indirect</span></div>
+      <div class="ratio-card"><span class="ratio-label">Combined net profit</span><strong>${money(report.totals.netProfit)}</strong><span class="muted small">Before eliminations</span></div>
+      <div class="ratio-card"><span class="ratio-label">Combined cash & bank</span><strong>${money(report.totals.cash)}</strong><span class="muted small">Across all companies</span></div>
+    </div>
+    <table class="data-table compact">
+      <thead><tr><th>Company</th><th>As on</th><th class="num">Income</th><th class="num">Expenses</th><th class="num">Net profit</th><th class="num">Assets</th><th class="num">Liabilities</th><th class="num">Receivable</th><th class="num">Payable</th><th class="num">Cash & bank</th></tr></thead>
+      <tbody>${report.rows.map((row) => `<tr><td><strong>${esc(row.name)}</strong></td><td>${esc(dateLabel(row.asOn))}</td><td class="num">${money(row.income)}</td><td class="num">${money(row.expenses)}</td><td class="num ${row.netProfit < 0 ? 'neg' : ''}">${money(row.netProfit)}</td><td class="num">${money(row.assets)}</td><td class="num">${money(row.liabilities)}</td><td class="num">${money(row.receivable)}</td><td class="num">${money(row.payable)}</td><td class="num">${money(row.cash)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="2">Combined</td><td class="num">${money(report.totals.income)}</td><td class="num">${money(report.totals.expenses)}</td><td class="num">${money(report.totals.netProfit)}</td><td class="num">${money(report.totals.assets)}</td><td class="num">${money(report.totals.liabilities)}</td><td class="num">${money(report.totals.receivable)}</td><td class="num">${money(report.totals.payable)}</td><td class="num">${money(report.totals.cash)}</td></tr></tfoot>
+    </table>`,
+    'Simple aggregation of each company\'s own financial year. Inter-company balances, transactions and ownership adjustments are not eliminated; this is not a statutory consolidated statement.',
+  );
 }
 
 function exceptionsScreen() {
@@ -17029,7 +17122,7 @@ function inventoryScreen() {
         <td><strong>MFG-${manufacture.no}</strong></td>
         <td>${esc(manufacture.bomName)}</td>
         <td><strong>${esc(output?.name ?? 'Unknown item')}</strong><div class="muted small">${components}</div></td>
-        <td class="num">${fmtQty(manufacture.outputQty)} ${esc(unit)}${manufacture.outputBatchNo ? `<div class="muted small">Batch ${esc(manufacture.outputBatchNo)}</div>` : ''}</td>
+        <td class="num">${fmtQty(manufacture.outputQty)} ${esc(unit)}${manufacture.outputBatchNo ? `<div class="muted small">Batch ${esc(manufacture.outputBatchNo)}</div>` : ''}${manufacture.wastageQty ? `<div class="muted small">Wastage ${fmtQty(manufacture.wastageQty)}</div>` : ''}</td>
         <td class="muted">${esc(componentGodown)} → ${esc(outputGodown)}</td>
         <td class="muted">${esc(manufacture.narration || '—')}</td>
         <td class="row-actions"><button class="btn small danger" type="button" data-action="delete-manufacture" data-id="${esc(manufacture.id)}">Delete</button></td>
@@ -17183,6 +17276,7 @@ function inventoryScreen() {
             <label class="field"><span>Date</span><input name="date" type="date" value="${esc(todayIso() >= booksStart(active) && todayIso() <= to ? todayIso() : active.fyStart)}" min="${esc(booksStart(active))}" required></label>
             <label class="field"><span>BOM</span><select name="bomId">${boms.map((bom) => `<option value="${esc(bom.id)}">${esc(bom.name)}</option>`).join('')}</select></label>
             <label class="field"><span>Production quantity</span><input name="outputQty" inputmode="decimal" value="${esc(fmtQty(boms[0]?.outputQty ?? 0))}" required></label>
+            <label class="field"><span>Wastage quantity</span><input name="wastageQty" inputmode="decimal" placeholder="0" aria-label="Wastage quantity"></label>
             <label class="field"><span>Components from</span><select name="componentGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
             <label class="field"><span>Finished goods to</span><select name="outputGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
             <label class="field"><span>Output batch (if tracked)</span><input name="outputBatchNo" maxlength="30" placeholder="e.g. LOT-25"></label>
@@ -18802,6 +18896,20 @@ function payrollScreen() {
   const from = filters.payroll.from || active.fyStart;
   const to = filters.payroll.to || active.fyEnd;
   const report = payrollSummary(active, { from, to });
+  const runMonthEnd = payrollMonthEnd(month) || active.fyEnd;
+  const runMonthStart = `${month}-01`;
+  const runMonthDays = Number(runMonthEnd.slice(8, 10));
+  const attendanceRows = employees
+    .filter((employee) => employee.active)
+    .map((employee) => {
+      const joined = employee.dateOfJoining && employee.dateOfJoining > runMonthStart ? employee.dateOfJoining : runMonthStart;
+      const exited = employee.dateOfExit && employee.dateOfExit < runMonthEnd ? employee.dateOfExit : runMonthEnd;
+      const available = joined > exited
+        ? 0
+        : Math.round((Date.parse(`${exited}T00:00:00Z`) - Date.parse(`${joined}T00:00:00Z`)) / 86400000) + 1;
+      return `<tr><td><strong>${esc(employee.name)}</strong>${employee.code ? `<div class="muted small">${esc(employee.code)}</div>` : ''}</td><td class="num">${available}</td><td class="num"><input name="paid-${esc(employee.id)}" data-payroll-paid="${esc(employee.id)}" inputmode="decimal" value="${available}" max="${available}" aria-label="Paid days for ${esc(employee.name)}"></td></tr>`;
+    })
+    .join('');
 
   const ledgerRows = [['Salaries expense', ledgers.salaries], ['Salary Payable', ledgers.payable]]
     .map(([label, ledger]) => `<tr>
@@ -18982,13 +19090,18 @@ function payrollScreen() {
     .join('');
   const runsPanel = panel(
     'Payroll runs',
-    `<form id="payroll-run-form" class="inline-form" novalidate>
-      <label class="field inline-field"><span>Month</span><input name="month" type="month" value="${esc(month)}" required></label>
-      <label class="field inline-field"><span>Post date</span><input name="date" type="date" value="${esc(runDate)}" required></label>
-      <button class="btn small" type="submit">Run payroll and post journal</button>
+    `<form id="payroll-run-form" class="form-grid" novalidate>
+      <label class="field"><span>Month</span><input name="month" type="month" value="${esc(month)}" required></label>
+      <label class="field"><span>Post date</span><input name="date" type="date" value="${esc(runDate)}" required></label>
+      <div class="field"><span class="muted small">Paid days (attendance and leave)</span>
+        ${attendanceRows
+          ? `<table class="data-table compact"><thead><tr><th>Employee</th><th class="num">Available days</th><th class="num">Paid days</th></tr></thead><tbody>${attendanceRows}</tbody></table>`
+          : '<p class="muted small">No active employees.</p>'}
+      </div>
+      <div class="field form-actions"><button class="btn small" type="submit">Run payroll and post journal</button></div>
       <p id="payroll-run-error" class="form-error" role="alert"></p>
     </form>
-    <p class="muted small">One run is allowed per month. The journal debits each earning ledger, credits each deduction ledger and credits Salary Payable with the net pay.</p>
+    <p class="muted small">One run is allowed per month. Paid days default to the calendar days available between joining and exit; reduce them for unpaid absence. The journal debits each earning ledger, credits each deduction ledger and credits Salary Payable with the net pay.</p>
     ${report.runs.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
           <thead><tr><th>Month</th><th>Posted</th><th class="num">Employees</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th><th>Voucher</th><th></th></tr></thead>
@@ -19119,6 +19232,7 @@ function payrollRunScreen() {
     .map(
       (row) => `<tr>
         <td><strong>${esc(row.name)}</strong>${row.code ? ` <span class="muted small">${esc(row.code)}</span>` : ''}</td>
+        <td class="num">${row.paidDays ?? row.workedDays ?? row.monthDays}/${row.monthDays}</td>
         <td class="num">${money(row.gross)}</td>
         <td class="num">${money(row.deductionTotal)}</td>
         <td class="num">${money(row.net)}</td>
@@ -19137,7 +19251,7 @@ function payrollRunScreen() {
       <div class="ratio-card"><span class="ratio-label">Net pay</span><strong>${money(run.totals.net)}</strong><span class="muted small">Credited to Salary Payable</span></div>
     </div>
     <div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
-      <thead><tr><th>Employee</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th><th></th></tr></thead>
+      <thead><tr><th>Employee</th><th class="num">Paid days</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
     <div class="form-actions">
@@ -19191,7 +19305,7 @@ function payslipScreen() {
       <div><span class="muted small">Bank</span><strong>${esc(employee?.bankName || '—')}${employee?.bankAccount ? ` · ${esc(employee.bankAccount.slice(-4).padStart(employee.bankAccount.length, '•'))}` : ''}${employee?.ifsc ? ` · ${esc(employee.ifsc)}` : ''}</strong></div>
       <div><span class="muted small">Date of joining</span><strong>${esc(employee?.dateOfJoining ? dateLabel(employee.dateOfJoining) : '—')}</strong></div>
       <div><span class="muted small">Date of exit</span><strong>${esc(employee?.dateOfExit ? dateLabel(employee.dateOfExit) : '—')}</strong></div>
-      <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}${row.workedDays ? ` · ${row.workedDays}/${row.monthDays} days` : ''}</strong></div>
+      <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}${row.paidDays ?? row.workedDays ? ` · ${row.paidDays ?? row.workedDays}/${row.monthDays} paid days` : ''}</strong></div>
     </div>
     <div class="payslip-grid">
       <table class="data-table compact">
@@ -21477,6 +21591,8 @@ function screenHtml() {
       return outstandingScreen();
     case 'exceptions':
       return exceptionsScreen();
+    case 'consolidation':
+      return consolidationScreen();
     case 'billRegister':
       return billRegisterScreen();
     case 'partyStatement':
@@ -22033,6 +22149,13 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'consolidation-form') {
+    const data = new FormData(form);
+    filters.consolidation = { asOn: data.get('asOn') || '' };
+    render();
+    return;
+  }
+
   if (form.id === 'exceptions-form') {
     const data = new FormData(form);
     filters.exceptions = { asOn: data.get('asOn') || '' };
@@ -22327,6 +22450,7 @@ async function handleSubmit(event) {
       date: data.get('date'),
       bomId: data.get('bomId'),
       outputQty: data.get('outputQty'),
+      wastageQty: data.get('wastageQty') || 0,
       componentGodownId: data.get('componentGodownId'),
       outputGodownId: data.get('outputGodownId'),
       outputBatchNo: data.get('outputBatchNo'),
@@ -22683,7 +22807,11 @@ async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = runPayroll(active, { month: data.get('month'), date: data.get('date') });
+    const paidDays = {};
+    for (const input of form.querySelectorAll('[data-payroll-paid]')) {
+      paidDays[input.dataset.payrollPaid] = input.value;
+    }
+    const result = runPayroll(active, { month: data.get('month'), date: data.get('date'), paidDays });
     if (!result.ok) {
       showFormError(result.error, 'payroll-run-error');
       return;

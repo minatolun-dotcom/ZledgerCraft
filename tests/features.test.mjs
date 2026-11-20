@@ -28,6 +28,7 @@ import {
   cashBankBook,
   dashboard,
   cashFlow,
+  consolidationSummary,
   groupSummary,
   groupVouchers,
   ledgerStatement,
@@ -154,6 +155,19 @@ test('recurring templates copy a posted voucher and remain editable as a draft',
   assert.equal(added.template.total, source.total);
   assert.equal(deleteRecurringVoucher(company, added.template.id).ok, true);
   assert.equal(company.recurringVouchers.length, 0);
+});
+
+test('company consolidation aggregates each company without eliminating balances', () => {
+  const { company } = tradingFixture();
+  const second = createCompany('Second Co', '2026-04-01').company;
+  const report = consolidationSummary([company, second], { asOn: '2026-06-30' });
+  assert.equal(report.rows.length, 2);
+  const first = report.rows.find((row) => row.id === company.id);
+  const pnl = profitAndLoss(company, { from: company.fyStart, to: '2026-06-30' });
+  assert.equal(first.netProfit, pnl.netProfit);
+  assert.equal(first.income, pnl.direct.incomeTotal + pnl.indirect.incomeTotal);
+  assert.equal(report.totals.netProfit, first.netProfit);
+  assert.equal(report.totals.assets, first.assets);
 });
 
 test('the next voucher number can be set above the last used number', () => {

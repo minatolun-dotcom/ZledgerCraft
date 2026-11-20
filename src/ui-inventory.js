@@ -513,7 +513,7 @@ export function inventoryScreen() {
         <td><strong>MFG-${manufacture.no}</strong></td>
         <td>${esc(manufacture.bomName)}</td>
         <td><strong>${esc(output?.name ?? 'Unknown item')}</strong><div class="muted small">${components}</div></td>
-        <td class="num">${fmtQty(manufacture.outputQty)} ${esc(unit)}${manufacture.outputBatchNo ? `<div class="muted small">Batch ${esc(manufacture.outputBatchNo)}</div>` : ''}</td>
+        <td class="num">${fmtQty(manufacture.outputQty)} ${esc(unit)}${manufacture.outputBatchNo ? `<div class="muted small">Batch ${esc(manufacture.outputBatchNo)}</div>` : ''}${manufacture.wastageQty ? `<div class="muted small">Wastage ${fmtQty(manufacture.wastageQty)}</div>` : ''}</td>
         <td class="muted">${esc(componentGodown)} → ${esc(outputGodown)}</td>
         <td class="muted">${esc(manufacture.narration || '—')}</td>
         <td class="row-actions"><button class="btn small danger" type="button" data-action="delete-manufacture" data-id="${esc(manufacture.id)}">Delete</button></td>
@@ -667,6 +667,7 @@ export function inventoryScreen() {
             <label class="field"><span>Date</span><input name="date" type="date" value="${esc(todayIso() >= booksStart(active) && todayIso() <= to ? todayIso() : active.fyStart)}" min="${esc(booksStart(active))}" required></label>
             <label class="field"><span>BOM</span><select name="bomId">${boms.map((bom) => `<option value="${esc(bom.id)}">${esc(bom.name)}</option>`).join('')}</select></label>
             <label class="field"><span>Production quantity</span><input name="outputQty" inputmode="decimal" value="${esc(fmtQty(boms[0]?.outputQty ?? 0))}" required></label>
+            <label class="field"><span>Wastage quantity</span><input name="wastageQty" inputmode="decimal" placeholder="0" aria-label="Wastage quantity"></label>
             <label class="field"><span>Components from</span><select name="componentGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
             <label class="field"><span>Finished goods to</span><select name="outputGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
             <label class="field"><span>Output batch (if tracked)</span><input name="outputBatchNo" maxlength="30" placeholder="e.g. LOT-25"></label>

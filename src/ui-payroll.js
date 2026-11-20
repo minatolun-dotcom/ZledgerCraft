@@ -65,6 +65,20 @@ export function payrollScreen() {
   const from = filters.payroll.from || active.fyStart;
   const to = filters.payroll.to || active.fyEnd;
   const report = payrollSummary(active, { from, to });
+  const runMonthEnd = payrollMonthEnd(month) || active.fyEnd;
+  const runMonthStart = `${month}-01`;
+  const runMonthDays = Number(runMonthEnd.slice(8, 10));
+  const attendanceRows = employees
+    .filter((employee) => employee.active)
+    .map((employee) => {
+      const joined = employee.dateOfJoining && employee.dateOfJoining > runMonthStart ? employee.dateOfJoining : runMonthStart;
+      const exited = employee.dateOfExit && employee.dateOfExit < runMonthEnd ? employee.dateOfExit : runMonthEnd;
+      const available = joined > exited
+        ? 0
+        : Math.round((Date.parse(`${exited}T00:00:00Z`) - Date.parse(`${joined}T00:00:00Z`)) / 86400000) + 1;
+      return `<tr><td><strong>${esc(employee.name)}</strong>${employee.code ? `<div class="muted small">${esc(employee.code)}</div>` : ''}</td><td class="num">${available}</td><td class="num"><input name="paid-${esc(employee.id)}" data-payroll-paid="${esc(employee.id)}" inputmode="decimal" value="${available}" max="${available}" aria-label="Paid days for ${esc(employee.name)}"></td></tr>`;
+    })
+    .join('');
 
   const ledgerRows = [['Salaries expense', ledgers.salaries], ['Salary Payable', ledgers.payable]]
     .map(([label, ledger]) => `<tr>
@@ -245,13 +259,18 @@ export function payrollScreen() {
     .join('');
   const runsPanel = panel(
     'Payroll runs',
-    `<form id="payroll-run-form" class="inline-form" novalidate>
-      <label class="field inline-field"><span>Month</span><input name="month" type="month" value="${esc(month)}" required></label>
-      <label class="field inline-field"><span>Post date</span><input name="date" type="date" value="${esc(runDate)}" required></label>
-      <button class="btn small" type="submit">Run payroll and post journal</button>
+    `<form id="payroll-run-form" class="form-grid" novalidate>
+      <label class="field"><span>Month</span><input name="month" type="month" value="${esc(month)}" required></label>
+      <label class="field"><span>Post date</span><input name="date" type="date" value="${esc(runDate)}" required></label>
+      <div class="field"><span class="muted small">Paid days (attendance and leave)</span>
+        ${attendanceRows
+          ? `<table class="data-table compact"><thead><tr><th>Employee</th><th class="num">Available days</th><th class="num">Paid days</th></tr></thead><tbody>${attendanceRows}</tbody></table>`
+          : '<p class="muted small">No active employees.</p>'}
+      </div>
+      <div class="field form-actions"><button class="btn small" type="submit">Run payroll and post journal</button></div>
       <p id="payroll-run-error" class="form-error" role="alert"></p>
     </form>
-    <p class="muted small">One run is allowed per month. The journal debits each earning ledger, credits each deduction ledger and credits Salary Payable with the net pay.</p>
+    <p class="muted small">One run is allowed per month. Paid days default to the calendar days available between joining and exit; reduce them for unpaid absence. The journal debits each earning ledger, credits each deduction ledger and credits Salary Payable with the net pay.</p>
     ${report.runs.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
           <thead><tr><th>Month</th><th>Posted</th><th class="num">Employees</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th><th>Voucher</th><th></th></tr></thead>
@@ -382,6 +401,7 @@ export function payrollRunScreen() {
     .map(
       (row) => `<tr>
         <td><strong>${esc(row.name)}</strong>${row.code ? ` <span class="muted small">${esc(row.code)}</span>` : ''}</td>
+        <td class="num">${row.paidDays ?? row.workedDays ?? row.monthDays}/${row.monthDays}</td>
         <td class="num">${money(row.gross)}</td>
         <td class="num">${money(row.deductionTotal)}</td>
         <td class="num">${money(row.net)}</td>
@@ -400,7 +420,7 @@ export function payrollRunScreen() {
       <div class="ratio-card"><span class="ratio-label">Net pay</span><strong>${money(run.totals.net)}</strong><span class="muted small">Credited to Salary Payable</span></div>
     </div>
     <div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
-      <thead><tr><th>Employee</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th><th></th></tr></thead>
+      <thead><tr><th>Employee</th><th class="num">Paid days</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
     <div class="form-actions">
@@ -454,7 +474,7 @@ export function payslipScreen() {
       <div><span class="muted small">Bank</span><strong>${esc(employee?.bankName || '—')}${employee?.bankAccount ? ` · ${esc(employee.bankAccount.slice(-4).padStart(employee.bankAccount.length, '•'))}` : ''}${employee?.ifsc ? ` · ${esc(employee.ifsc)}` : ''}</strong></div>
       <div><span class="muted small">Date of joining</span><strong>${esc(employee?.dateOfJoining ? dateLabel(employee.dateOfJoining) : '—')}</strong></div>
       <div><span class="muted small">Date of exit</span><strong>${esc(employee?.dateOfExit ? dateLabel(employee.dateOfExit) : '—')}</strong></div>
-      <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}${row.workedDays ? ` · ${row.workedDays}/${row.monthDays} days` : ''}</strong></div>
+      <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}${row.paidDays ?? row.workedDays ? ` · ${row.paidDays ?? row.workedDays}/${row.monthDays} paid days` : ''}</strong></div>
     </div>
     <div class="payslip-grid">
       <table class="data-table compact">

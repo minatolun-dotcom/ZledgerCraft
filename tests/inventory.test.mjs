@@ -1177,6 +1177,53 @@ test('a BOM and production consume components and preserve stock value', () => {
   assert.equal(summary.totals.closingValue, 2000);
 });
 
+test('production wastage consumes extra components without inflating finished stock', () => {
+  const { company, unit, group } = inventoryFixture();
+  const raw = addStockItem(company, {
+    name: 'Waste Fabric',
+    stockGroupId: group.id,
+    unitId: unit.id,
+    openingQty: 20,
+    openingRate: 50,
+  }).item;
+  const finished = addStockItem(company, {
+    name: 'Waste Shirt',
+    stockGroupId: group.id,
+    unitId: unit.id,
+    openingQty: 0,
+    openingRate: 0,
+  }).item;
+  const bom = addBom(company, {
+    name: 'Waste recipe',
+    outputItemId: finished.id,
+    outputQty: 2,
+    components: [{ stockItemId: raw.id, qty: 4 }],
+  }).bom;
+  const production = addManufacture(company, {
+    date: '2026-04-10',
+    bomId: bom.id,
+    outputQty: 4,
+    wastageQty: 2,
+    componentGodownId: defaultGodownId(company),
+    outputGodownId: defaultGodownId(company),
+  });
+  assert.equal(production.ok, true, production.error);
+  assert.equal(production.manufacture.wastageQty, 2);
+  assert.equal(production.manufacture.components[0].qty, 12);
+  assert.equal(stockOnHand(company, raw.id, '2026-04-10'), 8);
+  assert.equal(stockOnHand(company, finished.id, '2026-04-10'), 4);
+  const summary = stockSummary(company);
+  assert.equal(summary.totals.closingValue, 2000, 'wastage cost stays in finished goods value');
+  assert.equal(addManufacture(company, {
+    date: '2026-04-11',
+    bomId: bom.id,
+    outputQty: 1,
+    wastageQty: -1,
+    componentGodownId: defaultGodownId(company),
+    outputGodownId: defaultGodownId(company),
+  }).ok, false);
+});
+
 test('production checks component stock and requires a batch for tracked output', () => {
   const { company, unit, group } = inventoryFixture();
   const raw = addStockItem(company, {

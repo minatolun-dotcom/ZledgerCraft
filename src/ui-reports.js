@@ -16,6 +16,7 @@ import {
   cashBankLedgers,
   cashForecast,
   cashFlow,
+  consolidationSummary,
   dayBook,
   groupSummary,
   groupVouchers,
@@ -238,6 +239,32 @@ function previousPeriod(from, to) {
   );
   const priorTo = isoShiftDay(from, -1);
   return { from: isoShiftDay(priorTo, -(days - 1)), to: priorTo };
+}
+
+export function consolidationScreen() {
+  const active = company();
+  if (!active) return emptyCompanyScreen('Consolidation');
+  const asOn = filters.consolidation?.asOn || active.fyEnd;
+  const report = consolidationSummary(state.companies, { asOn });
+  return panel(
+    'Company consolidation',
+    `<form id="consolidation-form" class="filter-bar">
+      <label class="field inline-field"><span>As on</span><input name="asOn" type="date" value="${esc(asOn)}"></label>
+      <button class="btn small" type="submit">Apply</button>
+    </form>
+    <div class="ratio-grid">
+      <div class="ratio-card"><span class="ratio-label">Companies</span><strong>${report.rows.length}</strong><span class="muted small">All accessible companies</span></div>
+      <div class="ratio-card"><span class="ratio-label">Combined income</span><strong>${money(report.totals.income)}</strong><span class="muted small">Direct and indirect</span></div>
+      <div class="ratio-card"><span class="ratio-label">Combined net profit</span><strong>${money(report.totals.netProfit)}</strong><span class="muted small">Before eliminations</span></div>
+      <div class="ratio-card"><span class="ratio-label">Combined cash & bank</span><strong>${money(report.totals.cash)}</strong><span class="muted small">Across all companies</span></div>
+    </div>
+    <table class="data-table compact">
+      <thead><tr><th>Company</th><th>As on</th><th class="num">Income</th><th class="num">Expenses</th><th class="num">Net profit</th><th class="num">Assets</th><th class="num">Liabilities</th><th class="num">Receivable</th><th class="num">Payable</th><th class="num">Cash & bank</th></tr></thead>
+      <tbody>${report.rows.map((row) => `<tr><td><strong>${esc(row.name)}</strong></td><td>${esc(dateLabel(row.asOn))}</td><td class="num">${money(row.income)}</td><td class="num">${money(row.expenses)}</td><td class="num ${row.netProfit < 0 ? 'neg' : ''}">${money(row.netProfit)}</td><td class="num">${money(row.assets)}</td><td class="num">${money(row.liabilities)}</td><td class="num">${money(row.receivable)}</td><td class="num">${money(row.payable)}</td><td class="num">${money(row.cash)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="2">Combined</td><td class="num">${money(report.totals.income)}</td><td class="num">${money(report.totals.expenses)}</td><td class="num">${money(report.totals.netProfit)}</td><td class="num">${money(report.totals.assets)}</td><td class="num">${money(report.totals.liabilities)}</td><td class="num">${money(report.totals.receivable)}</td><td class="num">${money(report.totals.payable)}</td><td class="num">${money(report.totals.cash)}</td></tr></tfoot>
+    </table>`,
+    'Simple aggregation of each company\'s own financial year. Inter-company balances, transactions and ownership adjustments are not eliminated; this is not a statutory consolidated statement.',
+  );
 }
 
 export function exceptionsScreen() {

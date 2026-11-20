@@ -357,6 +357,7 @@ export function gatewayScreen() {
           <button type="button" class="link-row" data-screen="partyStatement"><span>Party statement</span><span class="muted small">Account</span></button>
           <button type="button" class="link-row" data-screen="groupSummary"><span>Group Summary</span><kbd>G</kbd></button>
           <button type="button" class="link-row" data-screen="yearComparison"><span>Year comparison</span><span class="muted small">FY</span></button>
+          <button type="button" class="link-row" data-screen="consolidation"><span>Company consolidation</span><span class="muted small">Group</span></button>
           <button type="button" class="link-row" data-screen="audit"><span>Audit trail</span><span class="muted small">Log</span></button>
           <button type="button" class="link-row" data-screen="cashFlow"><span>Cash Flow</span><kbd>F</kbd></button>
           <button type="button" class="link-row" data-screen="ratios"><span>Ratio Analysis</span><kbd>Y</kbd></button>

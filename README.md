@@ -339,6 +339,8 @@ disabled.
   Salary Payable ledgers and seeds Basic Salary, HRA, conveyance, PF, ESI and
   professional tax pay heads; each employee stores a fixed monthly amount per
   pay head, prorated by calendar days in the month the employee joins or exits.
+  Each payroll run accepts paid days per employee for unpaid absence and leave,
+  prorating every earning and deduction against the month.
 - Ledgers with opening Dr/Cr, optional party GSTIN/GST state, optional party
   address/city/PIN for e-invoices and optional PAN for deductee reporting. Alter
   a ledger's name, group or opening; delete a ledger only when no voucher uses
@@ -437,7 +439,9 @@ disabled.
 - BOM recipes with a finished item, output quantity and up to twenty component
   items. Production consumes components in proportion to the output quantity
   from a chosen godown and brings finished goods into a chosen godown, with an
-  optional output batch and expiry. Component availability is checked first.
+  optional output batch and expiry. An optional wastage quantity consumes extra
+  components while finished-good quantity stays as entered. Component
+  availability is checked first.
 - Production preserves total stock value: components leave at weighted-average
   cost and finished goods enter at the same total component cost. It is a
   quantity/cost working paper, not a WIP journal; labour and overheads are not
@@ -536,6 +540,12 @@ disabled.
 - Exception register as on a date: negative stock, customers over their credit
   limit, receivable bills overdue more than 90 days and open orders past their
   expected delivery date.
+- Company consolidation: company-wise income, expenses, net profit, assets,
+  liabilities, receivables, payables and cash, with combined totals. It is simple
+  aggregation; inter-company balances are not eliminated.
+- Production wastage: an optional wastage quantity consumes extra components
+  while finished-good output stays as entered; wastage cost remains in the
+  finished-goods value.
 - Party statement for a customer or supplier: the normal ledger statement with
   bill references and allocation detail, followed by every bill up to the report
   date with original, settled, outstanding and overdue status.
@@ -701,7 +711,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | GST registration, rates and tax on vouchers | Partial — GSTIN and home state, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and invoice-level tax on four voucher types; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way drafts with saved Part B details and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, validity tracking, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
-| Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit proration and bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV; no attendance/leave/arrears, formula or percentage pay heads, PF/ESI/PT computation, employer contributions, ECR/returns, Form 24Q/16 or bank payment workflow |
+| Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit and paid-days proration, bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV; no leave ledger, overtime, arrears, formula or percentage pay heads, PF/ESI/PT computation, employer contributions, ECR/returns, Form 24Q/16 or bank payment workflow |
 | Bank reconciliation and statement import | Covered — CSV statement import, optional opening/closing balance validation, auto/manual matching and book balance; no OFX/QIF or live bank feeds |
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque/DD advice and receipt deposit-slip previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no magnetic-ink cheque stationery presets or bank-issued advice formats |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary and break-up; no merging categories, split allocations or unallocated reconciliation |

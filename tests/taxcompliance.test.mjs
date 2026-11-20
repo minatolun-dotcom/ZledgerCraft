@@ -5,12 +5,14 @@ import {
   addStockItem,
   addVoucher,
   createCompany,
+  deleteVoucher,
   emptyState,
   exportState,
   findLedgerByName,
   importState,
   saveGstSettings,
   saveTdsSettings,
+  setEwayPartB,
   updateLedger,
 } from '../src/store.js';
 import {
@@ -211,7 +213,7 @@ test('e-invoice readiness flags B2C invoices and missing buyer address fields', 
   assert.equal(next.blockedCount, 1);
 });
 
-test('e-way bill register uses the 50,000 threshold and builds Part A only', () => {
+test('e-way bill register uses the 50,000 threshold and saves Part B details', () => {
   const { company, customer, item } = fixture();
   const small = sale(company, { customer, item, qty: 10, rate: 100 });
   const large = sale(company, { customer, item, qty: 1000, rate: 100, date: '2026-04-08' });
@@ -233,6 +235,46 @@ test('e-way bill register uses the 50,000 threshold and builds Part A only', () 
   assert.equal(payload.itemList[0].hsnCode, '6109');
   assert.equal(payload.itemList[0].qtyUnit, 'NOS');
   assert.match(report.rows[0].warnings.join(' '), /Part B/);
+  assert.equal(report.rows[0].partBReady, false);
+
+  const saved = setEwayPartB(company, large.id, {
+    transporterName: ' Fast Freight ',
+    transporterId: '27aabcf1234f1z9',
+    vehicleNo: 'mh 12 ab 1234',
+    distance: '42',
+  });
+  assert.equal(saved.ok, true, saved.error);
+  assert.equal(saved.partB.transporterName, 'Fast Freight');
+  assert.equal(saved.partB.transporterId, '27AABCF1234F1Z9');
+  assert.equal(saved.partB.vehicleNo, 'MH12AB1234');
+  assert.equal(saved.partB.distance, 42);
+
+  const withPartB = ewayBillRegister(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(withPartB.rows[0].partBReady, true);
+  assert.equal(withPartB.rows[0].warnings.some((warning) => /Part B/.test(warning)), false);
+  const fullPayload = withPartB.rows[0].payload.BillLists[0];
+  assert.equal(fullPayload.transporterName, 'Fast Freight');
+  assert.equal(fullPayload.transporterId, '27AABCF1234F1Z9');
+  assert.equal(fullPayload.vehicleNo, 'MH12AB1234');
+  assert.equal(fullPayload.transDistance, '42');
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  assert.deepEqual(restored.state.companies[0].ewayPartB[large.id], company.ewayPartB[large.id]);
+
+  assert.equal(setEwayPartB(company, 'missing', {}).ok, false);
+  assert.equal(setEwayPartB(company, large.id, { distance: 0 }).ok, false);
+  const cleared = setEwayPartB(company, large.id, {});
+  assert.equal(cleared.ok, true, cleared.error);
+  assert.equal(cleared.cleared, true);
+  assert.equal(ewayBillRegister(company, { from: '2026-04-01', to: '2026-04-30' }).rows[0].partBReady, false);
+
+  setEwayPartB(company, large.id, { transporterName: 'Return Trip', distance: 10 });
+  assert.equal(deleteVoucher(company, large.id), true);
+  assert.equal(company.ewayPartB[large.id], undefined);
 
   const lower = ewayBillRegister(company, {
     from: '2026-04-01',

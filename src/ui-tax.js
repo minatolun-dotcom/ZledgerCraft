@@ -437,6 +437,31 @@ export function ewayBillScreen() {
   const to = current.to || active.fyEnd;
   const threshold = Number(current.threshold) > 0 ? Number(current.threshold) : 50000;
   const report = ewayBillRegister(active, { from, to, threshold });
+  const editVoucher = view.ewayPartBId
+    ? active.vouchers.find((voucher) => voucher.id === view.ewayPartBId && voucher.type === 'Sales') ?? null
+    : null;
+  const editPartB = editVoucher ? active.ewayPartB?.[editVoucher.id] ?? {} : {};
+  const partBEditor = editVoucher
+    ? `<form id="eway-partb-form" class="eway-partb-form" novalidate>
+        <input type="hidden" name="voucherId" value="${esc(editVoucher.id)}">
+        <h3>Part B for Sales ${editVoucher.no}</h3>
+        <div class="form-grid">
+          <label class="field"><span>Transporter name</span><input name="transporterName" maxlength="100" placeholder="Transporter or fleet name" value="${esc(editPartB.transporterName ?? '')}"></label>
+          <label class="field"><span>Transporter ID</span><input name="transporterId" maxlength="20" placeholder="GSTIN / TRANSIN (optional)" value="${esc(editPartB.transporterId ?? '')}"></label>
+          <label class="field"><span>Vehicle number</span><input name="vehicleNo" maxlength="20" placeholder="e.g. MH12AB1234" value="${esc(editPartB.vehicleNo ?? '')}"></label>
+          <label class="field"><span>Distance (km)</span><input name="distance" inputmode="numeric" placeholder="e.g. 240" value="${esc(editPartB.distance ?? '')}"></label>
+        </div>
+        <p class="muted small">Part B needs a transporter, a distance and either a vehicle number or transporter ID for readiness. Values are saved with this invoice as working data.</p>
+        <div class="form-actions">
+          <button class="btn primary" type="submit">Save Part B</button>
+          ${editPartB.transporterName || editPartB.transporterId || editPartB.vehicleNo || editPartB.distance
+            ? '<button class="btn ghost" type="button" data-action="clear-eway-partb" data-id="' + esc(editVoucher.id) + '">Remove Part B</button>'
+            : ''}
+          <button class="btn ghost" type="button" data-action="cancel-eway-partb">Cancel</button>
+        </div>
+        <p id="eway-partb-error" class="form-error" role="alert"></p>
+      </form>`
+    : '';
   const rows = report.rows
     .map(
       (row) => `<tr>
@@ -444,11 +469,12 @@ export function ewayBillScreen() {
         <td>${esc(row.buyer.legalName || row.party)}<div class="muted small">${row.buyer.gstin ? esc(row.buyer.gstin) : 'URP'} · ${esc(row.buyer.stateName || row.buyer.stateCode || 'State not set')}</div></td>
         <td class="num">${money(row.taxable)}</td>
         <td class="num">${money(row.total)}</td>
-        <td>${readinessBadge(row.ready, 'Ready')}</td>
+        <td><span class="badge${row.ready ? '' : ' overdue'}">Part A ${row.ready ? 'ready' : 'review'}</span> <span class="badge${row.partBReady ? '' : ' overdue'}">Part B ${row.partBReady ? 'ready' : 'gap'}</span></td>
         <td>${issueList(row.warnings)}</td>
         <td class="row-actions">
           <button class="btn small ghost" type="button" data-action="open-voucher" data-id="${esc(row.id)}">Open</button>
-          <button class="btn small ghost" type="button" data-action="download-ewaybill" data-id="${esc(row.id)}">Part A JSON</button>
+          <button class="btn small ghost" type="button" data-action="edit-eway-partb" data-id="${esc(row.id)}">Part B</button>
+          <button class="btn small ghost" type="button" data-action="download-ewaybill" data-id="${esc(row.id)}">JSON</button>
         </td>
       </tr>`,
     )
@@ -456,7 +482,8 @@ export function ewayBillScreen() {
 
   return panel(
     'E-way bill register',
-    `<form id="ewaybill-report-form" class="filter-bar">
+    `${partBEditor}
+    <form id="ewaybill-report-form" class="filter-bar">
       <label class="field inline-field"><span>From</span><input name="from" type="date" value="${esc(from)}" data-period></label>
       <label class="field inline-field"><span>To</span><input name="to" type="date" value="${esc(to)}" data-period></label>
       <label class="field inline-field"><span>Minimum invoice value</span><input name="threshold" inputmode="decimal" value="${esc(threshold)}"></label>
@@ -466,7 +493,7 @@ export function ewayBillScreen() {
       <div class="ratio-card"><span class="ratio-label">Consignments</span><strong>${report.count}</strong><span class="muted small">At or above ${money(report.threshold)}</span></div>
       <div class="ratio-card"><span class="ratio-label">Invoice value</span><strong>${money(report.value)}</strong><span class="muted small">Outward sales in this period</span></div>
       <div class="ratio-card"><span class="ratio-label">Part A ready</span><strong>${report.rows.filter((row) => row.ready).length}</strong><span class="muted small">Seller and buyer state captured</span></div>
-      <div class="ratio-card"><span class="ratio-label">Part B gaps</span><strong>${report.rows.length}</strong><span class="muted small">Transporter and vehicle not captured</span></div>
+      <div class="ratio-card"><span class="ratio-label">Part B ready</span><strong>${report.rows.filter((row) => row.partBReady).length}</strong><span class="muted small">${report.rows.length - report.rows.filter((row) => row.partBReady).length} gap${report.rows.length - report.rows.filter((row) => row.partBReady).length === 1 ? '' : 's'}</span></div>
     </div>
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
@@ -475,7 +502,7 @@ export function ewayBillScreen() {
         </table></div>`
       : `<p class="muted">No outward invoice at or above ${money(report.threshold)} in this period.</p>`}
     <p class="muted small">${esc(report.note)} The default threshold is ₹50,000; change it only when a different state or goods rule applies.</p>`,
-    'Part A only. The draft is for the e-way bill portal; distance, transporter, vehicle number and Part B are not stored.',
+    'Part A is derived from the invoice and Part B is saved working data. The JSON is a portal draft; nothing is submitted, signed or acknowledged.',
   );
 }
 

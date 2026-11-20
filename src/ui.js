@@ -106,6 +106,7 @@ import {
   selectYear,
   setBankMatch,
   setCurrentUser,
+  setEwayPartB,
   setInstrumentStatus,
   setOrderStatus,
   signedOpening,
@@ -3505,6 +3506,37 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'eway-partb-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const voucherId = String(data.get('voucherId') ?? '');
+    const result = setEwayPartB(active, voucherId, {
+      transporterName: data.get('transporterName'),
+      transporterId: data.get('transporterId'),
+      vehicleNo: data.get('vehicleNo'),
+      distance: data.get('distance'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'eway-partb-error');
+      return;
+    }
+    const voucher = active.vouchers.find((entry) => entry.id === voucherId);
+    logAudit(
+      'eway.partb.save',
+      `Saved e-way Part B details for Sales ${voucher?.no ?? ''}.`,
+      active,
+      voucherId,
+    );
+    persist();
+    view.ewayPartBId = null;
+    setFlash('Part B details saved.');
+    render();
+    return;
+  }
+
   if (form.id === 'ewaybill-report-form') {
     const data = new FormData(form);
     filters.ewaybill = {
@@ -5023,6 +5055,47 @@ async function handleClick(event) {
       setFlash(`Downloaded e-invoice draft for ${row.ref}. Nothing was transmitted.`);
       break;
     }
+    case 'edit-eway-partb': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      view.ewayPartBId = trigger.dataset.id;
+      render();
+      break;
+    }
+
+    case 'cancel-eway-partb': {
+      view.ewayPartBId = null;
+      render();
+      break;
+    }
+
+    case 'clear-eway-partb': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Remove the saved Part B details from this invoice?')) break;
+      const result = setEwayPartB(active, trigger.dataset.id, {});
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit(
+        'eway.partb.clear',
+        'Removed e-way Part B details from a sales invoice.',
+        active,
+        trigger.dataset.id,
+      );
+      persist();
+      view.ewayPartBId = null;
+      setFlash('Part B details removed.');
+      render();
+      break;
+    }
+
     case 'download-ewaybill': {
       const active = company();
       if (!active) break;
@@ -5036,8 +5109,12 @@ async function handleClick(event) {
         setFlash('This invoice has no e-way bill draft.', 'warn');
         break;
       }
-      downloadJsonFile(`e-way-bill-partA-${String(row.ref || row.no).replace(/[^a-z0-9]+/gi, '-')}.json`, row.payload);
-      setFlash(`Downloaded e-way bill Part A draft for ${row.ref}. Add Part B in the portal.`);
+      downloadJsonFile(`e-way-bill-${String(row.ref || row.no).replace(/[^a-z0-9]+/gi, '-')}.json`, row.payload);
+      setFlash(
+        row.partBReady
+          ? `Downloaded e-way bill draft for ${row.ref} with saved Part B details. Submit it in the portal.`
+          : `Downloaded e-way bill Part A draft for ${row.ref}. Add Part B before portal submission.`,
+      );
       break;
     }
     case 'delete-voucher': {

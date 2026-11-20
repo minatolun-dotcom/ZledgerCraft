@@ -791,6 +791,7 @@ export function loadState() {
   for (const company of parsed.companies) normalizeInstruments(company);
   for (const company of parsed.companies) normalizeBankReconciliations(company);
   for (const company of parsed.companies) normalizeStockCounts(company);
+  for (const company of parsed.companies) normalizeEwayPartB(company);
   parsed.audit = normalizeAudit(parsed.audit);
   seedUsers(parsed);
   return parsed;
@@ -1326,6 +1327,70 @@ export function saveGstSettings(company, input = {}) {
     }
   }
   return { ok: true, gst: company.gst, created };
+}
+
+function normalizeEwayPartBEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const transporterName = String(entry.transporterName ?? '').trim().slice(0, 100);
+  const transporterId = String(entry.transporterId ?? '').trim().toUpperCase().slice(0, 20);
+  const vehicleNo = String(entry.vehicleNo ?? '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 20);
+  const distanceNumber = Number(entry.distance);
+  const distance = Number.isFinite(distanceNumber) && distanceNumber > 0 ? Math.round(distanceNumber) : 0;
+  if (!transporterName && !transporterId && !vehicleNo && !distance) return null;
+  const updatedAt =
+    typeof entry.updatedAt === 'string' && Number.isFinite(Date.parse(entry.updatedAt))
+      ? entry.updatedAt
+      : new Date().toISOString();
+  return {
+    ...(transporterName ? { transporterName } : {}),
+    ...(transporterId ? { transporterId } : {}),
+    ...(vehicleNo ? { vehicleNo } : {}),
+    ...(distance ? { distance } : {}),
+    updatedAt,
+  };
+}
+
+/** Saves the Part B working details for one outward sales invoice. */
+export function setEwayPartB(company, voucherId, input = {}) {
+  const voucher = (company.vouchers ?? []).find((entry) => entry.id === voucherId);
+  if (!voucher) return { ok: false, error: 'Invoice not found.' };
+  if (voucher.type !== 'Sales') return { ok: false, error: 'Part B can be saved only for outward sales invoices.' };
+  const rawDistance = String(input.distance ?? '').trim();
+  if (rawDistance) {
+    const distance = Number(rawDistance);
+    if (!Number.isFinite(distance) || distance <= 0 || distance > 10000) {
+      return { ok: false, error: 'Distance must be between 1 and 10,000 kilometres.' };
+    }
+  }
+  company.ewayPartB = company.ewayPartB && typeof company.ewayPartB === 'object' && !Array.isArray(company.ewayPartB)
+    ? company.ewayPartB
+    : {};
+  const entry = normalizeEwayPartBEntry(input);
+  if (!entry) {
+    delete company.ewayPartB[voucherId];
+    return { ok: true, cleared: true };
+  }
+  company.ewayPartB[voucherId] = entry;
+  return { ok: true, partB: entry, cleared: false };
+}
+
+/** Drops Part B details whose invoice no longer exists or is not a sale. */
+export function normalizeEwayPartB(company) {
+  if (!company.ewayPartB || typeof company.ewayPartB !== 'object' || Array.isArray(company.ewayPartB)) {
+    company.ewayPartB = {};
+    return company;
+  }
+  const sales = new Map(
+    (company.vouchers ?? []).filter((voucher) => voucher.type === 'Sales').map((voucher) => [voucher.id, voucher]),
+  );
+  const next = {};
+  for (const [voucherId, entry] of Object.entries(company.ewayPartB)) {
+    if (!sales.has(voucherId)) continue;
+    const normalized = normalizeEwayPartBEntry(entry);
+    if (normalized) next[voucherId] = normalized;
+  }
+  company.ewayPartB = next;
+  return company;
 }
 
 function seedTdsSections() {
@@ -3494,6 +3559,7 @@ export function updateVoucher(company, voucherId, input) {
     company.counters[type] = voucher.no;
   }
   voucher.type = type;
+  if (type !== 'Sales' && company.ewayPartB) delete company.ewayPartB[voucher.id];
   voucher.date = checked.date;
   voucher.narration = checked.narration;
   voucher.lines = checked.lines;
@@ -3546,6 +3612,7 @@ export function deleteVoucher(company, voucherId) {
   if (year?.closed) return false;
   const before = company.vouchers.length;
   company.vouchers = company.vouchers.filter((voucher) => voucher.id !== voucherId);
+  if (company.vouchers.length !== before && company.ewayPartB) delete company.ewayPartB[voucherId];
   pruneBankReconciliations(company);
   if (company.vouchers.length !== before && existing?.orderId) {
     const order = (company.orders ?? []).find((entry) => entry.id === existing.orderId);
@@ -5346,6 +5413,33 @@ function validateImportedCompany(company) {
     }
   }
 
+  if (company.ewayPartB !== undefined) {
+    if (!company.ewayPartB || typeof company.ewayPartB !== 'object' || Array.isArray(company.ewayPartB)) {
+      return `Company "${name}" has invalid e-way Part B data.`;
+    }
+    for (const [voucherId, entry] of Object.entries(company.ewayPartB)) {
+      const voucher = company.vouchers.find((item) => item.id === voucherId);
+      if (!voucherIds.has(voucherId) || voucher?.type !== 'Sales') {
+        return `Company "${name}" has e-way Part B data for a non-sales voucher.`;
+      }
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return `Company "${name}" has invalid e-way Part B details.`;
+      }
+      if (String(entry.transporterName ?? '').length > 100 || String(entry.transporterId ?? '').length > 20) {
+        return `Company "${name}" has e-way transporter details that are too long.`;
+      }
+      if (String(entry.vehicleNo ?? '').length > 20) {
+        return `Company "${name}" has an e-way vehicle number that is too long.`;
+      }
+      if (entry.distance !== undefined) {
+        const distance = parseAmount(entry.distance);
+        if (distance === null || distance <= 0 || distance > 10000) {
+          return `Company "${name}" has an invalid e-way distance.`;
+        }
+      }
+    }
+  }
+
   const orderIds = new Set();
   for (const order of company.orders ?? []) {
     if (!order || !order.id || !['Sales', 'Purchase'].includes(order.type) || !isValidIsoDate(order.date)) {
@@ -5617,6 +5711,7 @@ export function importState(json) {
     normalizeInstruments(mapped);
     normalizeBankReconciliations(mapped);
     normalizeStockCounts(mapped);
+    normalizeEwayPartB(mapped);
     return mapped;
   });
 

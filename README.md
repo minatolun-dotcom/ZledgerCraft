@@ -484,8 +484,9 @@ disabled.
   is produced and the aggregate-turnover test is not applied.
 - E-way bill register for a period: outward invoices at or above a configurable
   minimum (₹50,000 by default), consignee, destination state, taxable and invoice
-  value, Part A readiness notes and a draft Part A JSON download. Transporter,
-  vehicle, distance and Part B are not captured.
+  value, Part A readiness notes, and saved Part B transporter, vehicle and
+  distance details per invoice with a draft JSON download. Nothing is submitted
+  to the portal.
 - Tax audit working papers for a period: books turnover from Sales Accounts
   versus GST outward taxable, output-tax and input-credit reconciliation between
   GST-role ledgers and GSTR-3B, TDS/TCS deducted, paid and outstanding, the
@@ -670,7 +671,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | --- | --- |
 | Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, dated stock counts with book/counted differences, sales/purchase orders, BOM recipes and production; no multi-level BOM, wastage, job work, count adjustments, batch-wise costing, WIP accounting or stock posting to the financial statements |
 | GST registration, rates and tax on vouchers | Partial — GSTIN and home state, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and invoice-level tax on four voucher types; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
-| GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way Part A drafts and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, Part B, GSTR-2B reconciliation, annual return or Form 3CD |
+| GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way drafts with saved Part B details and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, validity tracking, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
 | Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit proration and bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV; no attendance/leave/arrears, formula or percentage pay heads, PF/ESI/PT computation, employer contributions, ECR/returns, Form 24Q/16 or bank payment workflow |
 | Bank reconciliation and statement import | Covered — CSV statement import, optional opening/closing balance validation, auto/manual matching and book balance; no OFX/QIF or live bank feeds |

@@ -344,6 +344,17 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 43: e-way Part B details
+
+- Outward sales invoices can store Part B transporter name, transporter ID,
+  vehicle number and distance from the e-way register. Values are normalised,
+  validated, included in the draft JSON and preserved through backups; stale or
+  non-sales entries are dropped on load.
+- The register shows separate Part A and Part B readiness, and the Part B gaps
+  card counts invoices missing transporter/vehicle/distance details.
+- Verification: save/readiness/payload, invalid voucher and distance, clearing
+  and backup round trip; 284 tests (283 pass, 1 skipped) and a 966.1 kB build pass.
+
 ### 2026-11-20 — Phase 42: DD advice and deposit slips
 
 - The instrument print screen now covers cheque payments, DD payments and

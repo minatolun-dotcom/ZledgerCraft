@@ -3027,7 +3027,7 @@ export function eInvoiceRegister(company, filters = {}) {
   };
 }
 
-function ewayPayload(company, document, voucher, seller, buyer, lines) {
+function ewayPayload(company, document, voucher, seller, buyer, lines, partB = null) {
   const items = lines.map((line, index) => ({
     itemNo: index + 1,
     productName: line.description,
@@ -3066,9 +3066,10 @@ function ewayPayload(company, document, voucher, seller, buyer, lines) {
         toPlace: buyer.city,
         toPincode: Number(buyer.pin) || 0,
         toStateCode: Number(buyer.stateCode) || 0,
-        transDistance: '',
-        transporterName: '',
-        transporterId: '',
+        transDistance: partB?.distance ? String(partB.distance) : '',
+        transporterName: partB?.transporterName ?? '',
+        transporterId: partB?.transporterId ?? '',
+        vehicleNo: partB?.vehicleNo ?? '',
         totalValue: document.total,
         cgstValue: document.cgst,
         sgstValue: document.sgst,
@@ -3081,7 +3082,7 @@ function ewayPayload(company, document, voucher, seller, buyer, lines) {
   };
 }
 
-/** E-way bill Part A working papers for outward invoices at or above ₹50,000. */
+/** E-way bill working papers, with Part A and any saved Part B details. */
 export function ewayBillRegister(company, filters = {}) {
   const from = filters.from || company.fyStart;
   const to = filters.to || company.fyEnd;
@@ -3094,7 +3095,18 @@ export function ewayBillRegister(company, filters = {}) {
       const voucher = (company.vouchers ?? []).find((entry) => entry.id === document.id);
       const buyer = buyerProfile(company, voucher, document);
       const lines = voucher ? eInvoiceLineRows(company, voucher, document) : [];
-      const warnings = ['Part B (transporter, vehicle and distance) is not captured; add it in the portal.'];
+      const partB = company.ewayPartB?.[document.id] ?? null;
+      const partBReady = Boolean(
+        partB?.transporterName && partB?.distance > 0 && (partB?.vehicleNo || partB?.transporterId),
+      );
+      const warnings = [];
+      if (!partBReady) {
+        warnings.push(
+          partB
+            ? 'Part B is incomplete: add transporter name, distance and either a vehicle number or transporter ID.'
+            : 'Part B (transporter, vehicle and distance) is not captured; add it here or in the portal.',
+        );
+      }
       if (!seller.address || !seller.city || !seller.pin) warnings.push('Seller address or PIN is incomplete.');
       if (!buyer.address || !buyer.city || !buyer.pin) warnings.push('Buyer address or PIN is incomplete.');
       if (lines.some((line) => !line.hsn)) warnings.push('HSN / SAC is missing on one or more lines.');
@@ -3106,12 +3118,14 @@ export function ewayBillRegister(company, filters = {}) {
         lines,
         threshold,
         warnings,
+        partB,
+        partBReady,
         ready: Boolean(
           seller.gstin && seller.address && seller.city && seller.pin &&
             buyer.address && buyer.city && buyer.pin && buyer.stateCode,
         ),
         payload: voucher
-          ? ewayPayload(company, document, voucher, seller, buyer, lines)
+          ? ewayPayload(company, document, voucher, seller, buyer, lines, partB)
           : null,
       };
     });
@@ -3123,7 +3137,7 @@ export function ewayBillRegister(company, filters = {}) {
     rows,
     count: rows.length,
     value: round2(rows.reduce((sum, row) => sum + row.total, 0)),
-    note: 'Invoices below the threshold are excluded. Part A only; Part B details are not captured.',
+    note: 'Invoices below the threshold are excluded. Part A is derived from the invoice; saved Part B details are working data, not a portal submission.',
   };
 }
 

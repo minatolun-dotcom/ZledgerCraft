@@ -355,8 +355,14 @@ inside those stages.
 - GST rates support optional effective-from and effective-to dates, with date
   order validation, duplicate-window detection and a window display in the rate
   master; posted vouchers still keep their saved rate snapshot.
-- Verification: transfer dependency, all-bill movement total and GST rate
-  window tests; 334 tests (333 pass, 1 skipped) and a 1,175.4 kB build.
+- TDS/TCS sections gained effective-date windows and a capped edit history, with
+  date-window selection on vouchers and earlier rate/threshold values shown in
+  the section master.
+- Tax audit now calculates the digital-receipt percentage from bank versus cash
+  receipts and flags whether the 95% test is met.
+- Verification: transfer dependency, all-bill movement total, GST rate window,
+  TDS section window/history and digital-receipt tests; 335 tests (334 pass, 1
+  skipped) and a 1,182.7 kB build.
 
 ### 2026-11-20 — Phase 51: compliance filing history
 

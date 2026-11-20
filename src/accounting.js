@@ -4087,6 +4087,19 @@ export function taxAuditSummary(company, filters = {}) {
   const voucherCount = (company.vouchers ?? []).filter(
     (voucher) => voucher.date >= from && voucher.date <= to,
   ).length;
+  let digitalReceipts = 0;
+  let otherReceipts = 0;
+  for (const voucher of company.vouchers ?? []) {
+    if (voucher.type !== 'Receipt' || voucher.date < from || voucher.date > to) continue;
+    const throughBank = (voucher.lines ?? []).some((line) => {
+      const ledger = company.ledgers.find((entry) => entry.id === line.ledgerId);
+      return ledger && inGroupKey(company, ledger, 'bank');
+    });
+    if (throughBank) digitalReceipts = round2(digitalReceipts + voucher.total);
+    else otherReceipts = round2(otherReceipts + voucher.total);
+  }
+  const receiptTotal = round2(digitalReceipts + otherReceipts);
+  const digitalPercent = receiptTotal ? Math.round((digitalReceipts / receiptTotal) * 1000) / 10 : 0;
 
   const statusFor = (amount) => (Math.abs(amount) < 1 ? 'Ready' : 'Review');
   const clauses = TAX_AUDIT_CLAUSES.map(([clause, title, description]) => {
@@ -4163,6 +4176,13 @@ export function taxAuditSummary(company, filters = {}) {
     taxPosition: {
       tds: { deducted: tds.periodAmount, paid: tds.challanTotal, outstanding: tds.outstanding },
       tcs: { collected: tcs.periodAmount, paid: tcs.challanTotal, outstanding: tcs.outstanding },
+    },
+    digitalReceipts: {
+      digital: digitalReceipts,
+      other: otherReceipts,
+      total: receiptTotal,
+      percent: digitalPercent,
+      meets95: receiptTotal > 0 && digitalPercent >= 95,
     },
     clauses,
     clauseSummary: {

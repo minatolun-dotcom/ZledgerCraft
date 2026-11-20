@@ -674,6 +674,7 @@ export function taxAuditScreen() {
         <div class="ratio-card"><span class="ratio-label">GST outward taxable</span><strong>${money(turnover.gstTaxable)}</strong><span class="muted small">GSTR-1 working paper</span></div>
         <div class="ratio-card"><span class="ratio-label">Turnover difference</span><strong class="${Math.abs(turnover.difference) >= 1 ? 'neg' : ''}">${money(turnover.difference)}</strong><span class="muted small">Books less GST</span></div>
         <div class="ratio-card"><span class="ratio-label">Tax audit threshold</span><strong>${money(turnover.threshold)}</strong><span class="muted small">₹10 crore high threshold also flagged</span></div>
+        <div class="ratio-card"><span class="ratio-label">Digital receipts</span><strong>${report.digitalReceipts.percent}%</strong><span class="muted small">${money(report.digitalReceipts.digital)} of ${money(report.digitalReceipts.total)} · 95% test ${report.digitalReceipts.meets95 ? 'met' : 'not met'}</span></div>
       </div>
       <p class="muted small">${esc(report.note)}</p>`,
       'Reconciliations use posted vouchers only. Tax-audit applicability and every Form 3CD disclosure need professional review.',
@@ -779,12 +780,28 @@ export function tdsScreen() {
   const sectionRows = sections
     .map((section) => {
       const used = active.vouchers.filter((voucher) => voucher.tds?.sectionId === section.id).length;
+      const effective = section.effectiveFrom && section.effectiveTo
+        ? `${esc(dateLabel(section.effectiveFrom))} – ${esc(dateLabel(section.effectiveTo))}`
+        : section.effectiveFrom
+          ? `From ${esc(dateLabel(section.effectiveFrom))}`
+          : section.effectiveTo
+            ? `Until ${esc(dateLabel(section.effectiveTo))}`
+            : '<span class="muted">Always</span>';
+      const history = Array.isArray(section.history) ? section.history : [];
       return `<tr>
         <td><span class="badge">${esc(section.kind)}</span></td>
         <td><strong>${esc(section.code)}</strong></td>
-        <td class="muted">${esc(section.label)}</td>
+        <td class="muted">${esc(section.label)}${history.length
+          ? `<details><summary class="muted small">${history.length} earlier value${history.length === 1 ? '' : 's'}</summary><div class="muted small">${history
+              .slice()
+              .reverse()
+              .slice(0, 6)
+              .map((entry) => `${esc(new Date(entry.at).toLocaleDateString('en-IN'))} · ${entry.rate}% · threshold ${money(entry.threshold)}`)
+              .join('<br>')}</div></details>`
+          : ''}</td>
         <td class="num">${section.rate}%</td>
         <td class="num">${section.threshold ? money(section.threshold) : '—'}</td>
+        <td>${effective}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-tds-section" data-id="${esc(section.id)}">Edit</button>
@@ -806,13 +823,15 @@ export function tdsScreen() {
       <input name="label" maxlength="60" placeholder="Description (optional)" aria-label="Section description" value="${esc(editingSection?.label ?? '')}">
       <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="Section rate" value="${esc(editingSection?.rate ?? '')}" required>
       <input name="threshold" inputmode="decimal" placeholder="Threshold" aria-label="Section threshold" value="${esc(editingSection?.threshold ?? '')}">
+      <input name="effectiveFrom" type="date" aria-label="Effective from" value="${esc(editingSection?.effectiveFrom ?? '')}">
+      <input name="effectiveTo" type="date" aria-label="Effective to" value="${esc(editingSection?.effectiveTo ?? '')}">
       <button class="btn small" type="submit">${editingSection ? 'Save section' : 'Add section'}</button>
       ${editingSection ? '<button class="btn small ghost" type="button" data-action="cancel-tds-section-edit">Cancel</button>' : ''}
       <p id="tds-section-error" class="form-error" role="alert"></p>
     </form>
-    <p class="muted small">Editing a section changes future deductions only; posted vouchers keep their saved section rate.</p>
+    <p class="muted small">A section is selectable inside its effective-date window; blank dates leave that side open. Editing a section changes future deductions only, posted vouchers keep their saved section rate, and earlier values stay in the section history.</p>
     <div class="table-scroll" tabindex="0"><table class="data-table compact tds-report-table">
-      <thead><tr><th>Kind</th><th>Code</th><th>Description</th><th class="num">Rate</th><th class="num">Threshold</th><th class="num">Vouchers</th><th></th></tr></thead>
+      <thead><tr><th>Kind</th><th>Code</th><th>Description</th><th class="num">Rate</th><th class="num">Threshold</th><th>Effective</th><th class="num">Vouchers</th><th></th></tr></thead>
       <tbody>${sectionRows}</tbody>
     </table></div>`,
     'Rates and thresholds are local working parameters. A section used by a voucher cannot be deleted.',

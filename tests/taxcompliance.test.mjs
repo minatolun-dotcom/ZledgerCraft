@@ -400,6 +400,23 @@ test('tax audit reconciles turnover, GST and TDS and survives a backup', () => {
     tds: { sectionId: company.tds.sections.find((entry) => entry.code === '194J').id, pan: 'ABCDE1234F' },
   });
   assert.equal(purchase.ok, true, purchase.error);
+  const bank = findLedgerByName(company, 'Bank');
+  addVoucher(company, {
+    type: 'Receipt',
+    date: '2026-04-20',
+    lines: [
+      { ledgerId: bank.id, side: 'Dr', amount: 1000 },
+      { ledgerId: customer.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+  addVoucher(company, {
+    type: 'Receipt',
+    date: '2026-04-21',
+    lines: [
+      { ledgerId: findLedgerByName(company, 'Cash').id, side: 'Dr', amount: 50 },
+      { ledgerId: customer.id, side: 'Cr', amount: 50 },
+    ],
+  });
 
   const report = taxAuditSummary(company, { from: '2026-04-01', to: '2026-04-30' });
   assert.equal(report.turnover.books, 1000);
@@ -412,6 +429,11 @@ test('tax audit reconciles turnover, GST and TDS and survives a backup', () => {
   assert.equal(report.itc.returns, 0);
   assert.equal(report.taxPosition.tds.deducted, 1000);
   assert.equal(report.taxPosition.tds.outstanding, 1000);
+  assert.equal(report.digitalReceipts.digital, 1000);
+  assert.equal(report.digitalReceipts.other, 50);
+  assert.equal(report.digitalReceipts.total, 1050);
+  assert.equal(report.digitalReceipts.percent, 95.2);
+  assert.equal(report.digitalReceipts.meets95, true);
   assert.equal(report.clauses.length, 10);
   assert.equal(report.clauses.find((clause) => clause.clause === '20(b)').status, 'Ready');
   assert.equal(report.clauses.find((clause) => clause.clause === '34').status, 'Review');

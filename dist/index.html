@@ -3943,6 +3943,28 @@ function normalizeTds(company) {
       if (threshold === null || threshold < 0) return null;
       const code = String(section.code ?? '').trim().slice(0, 12);
       if (!code) return null;
+      const effectiveFrom = isValidIsoDate(String(section.effectiveFrom ?? '')) ? String(section.effectiveFrom) : '';
+      const effectiveTo = isValidIsoDate(String(section.effectiveTo ?? '')) ? String(section.effectiveTo) : '';
+      if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) return null;
+      const history = Array.isArray(section.history)
+        ? section.history
+            .filter(
+              (entry) =>
+                entry &&
+                parseAmount(entry.rate) !== null &&
+                parseAmount(entry.threshold ?? 0) !== null &&
+                !Number.isNaN(Date.parse(String(entry.at ?? ''))),
+            )
+            .map((entry) => ({
+              at: String(entry.at),
+              label: String(entry.label ?? '').trim().slice(0, 60) || code,
+              rate: parseAmount(entry.rate),
+              threshold: parseAmount(entry.threshold ?? 0),
+              ...(isValidIsoDate(String(entry.effectiveFrom ?? '')) ? { effectiveFrom: String(entry.effectiveFrom) } : {}),
+              ...(isValidIsoDate(String(entry.effectiveTo ?? '')) ? { effectiveTo: String(entry.effectiveTo) } : {}),
+            }))
+            .slice(-25)
+        : [];
       return {
         id: String(section.id || uid('tds')).slice(0, 80),
         kind,
@@ -3950,11 +3972,14 @@ function normalizeTds(company) {
         label: String(section.label ?? '').trim().slice(0, 60) || code,
         rate,
         threshold,
+        ...(effectiveFrom ? { effectiveFrom } : {}),
+        ...(effectiveTo ? { effectiveTo } : {}),
+        ...(history.length ? { history } : {}),
       };
     })
     .filter((section) => {
       if (!section) return false;
-      const key = `${section.kind}:${section.code.toUpperCase()}`;
+      const key = `${section.kind}:${section.code.toUpperCase()}:${section.effectiveFrom ?? ''}:${section.effectiveTo ?? ''}`;
       if (seenSections.has(key)) return false;
       seenSections.add(key);
       return true;
@@ -4066,9 +4091,24 @@ function addTdsSection(company, input = {}) {
   if (threshold === null || threshold < 0) {
     return { ok: false, error: 'Threshold must be zero or more.' };
   }
+  const effectiveFrom = String(input.effectiveFrom ?? '').trim();
+  const effectiveTo = String(input.effectiveTo ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective-from date.' };
+  if (effectiveTo && !isValidIsoDate(effectiveTo)) return { ok: false, error: 'Enter a valid effective-to date.' };
+  if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) {
+    return { ok: false, error: 'The effective-to date cannot be before the effective-from date.' };
+  }
   company.tds = company.tds ?? normalizeTds(company).tds;
-  if (company.tds.sections.some((section) => section.kind === kind && section.code.toUpperCase() === code.toUpperCase())) {
-    return { ok: false, error: `${kind} section ${code} already exists.` };
+  if (
+    company.tds.sections.some(
+      (section) =>
+        section.kind === kind &&
+        section.code.toUpperCase() === code.toUpperCase() &&
+        (section.effectiveFrom ?? '') === effectiveFrom &&
+        (section.effectiveTo ?? '') === effectiveTo,
+    )
+  ) {
+    return { ok: false, error: `${kind} section ${code} already exists with those effective dates.` };
   }
   const section = {
     id: uid('tds'),
@@ -4077,6 +4117,8 @@ function addTdsSection(company, input = {}) {
     label: String(input.label ?? '').trim().slice(0, 60) || code,
     rate,
     threshold,
+    ...(effectiveFrom ? { effectiveFrom } : {}),
+    ...(effectiveTo ? { effectiveTo } : {}),
   };
   company.tds.sections.push(section);
   return { ok: true, section };
@@ -4093,9 +4135,52 @@ function updateTdsSection(company, sectionId, input = {}) {
   if (threshold === null || threshold < 0) {
     return { ok: false, error: 'Threshold must be zero or more.' };
   }
-  section.label = String(input.label ?? '').trim().slice(0, 60) || section.code;
+  const effectiveFrom = String(input.effectiveFrom ?? section.effectiveFrom ?? '').trim();
+  const effectiveTo = String(input.effectiveTo ?? section.effectiveTo ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective-from date.' };
+  if (effectiveTo && !isValidIsoDate(effectiveTo)) return { ok: false, error: 'Enter a valid effective-to date.' };
+  if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) {
+    return { ok: false, error: 'The effective-to date cannot be before the effective-from date.' };
+  }
+  if (
+    (company.tds?.sections ?? []).some(
+      (other) =>
+        other.id !== sectionId &&
+        other.kind === section.kind &&
+        other.code.toUpperCase() === section.code.toUpperCase() &&
+        (other.effectiveFrom ?? '') === effectiveFrom &&
+        (other.effectiveTo ?? '') === effectiveTo,
+    )
+  ) {
+    return { ok: false, error: `${section.kind} section ${section.code} already exists with those effective dates.` };
+  }
+  const nextLabel = String(input.label ?? '').trim().slice(0, 60) || section.code;
+  const changed =
+    nextLabel !== section.label ||
+    rate !== section.rate ||
+    threshold !== section.threshold ||
+    effectiveFrom !== (section.effectiveFrom ?? '') ||
+    effectiveTo !== (section.effectiveTo ?? '');
+  if (changed) {
+    section.history = [
+      ...(Array.isArray(section.history) ? section.history : []),
+      {
+        at: new Date().toISOString(),
+        label: section.label,
+        rate: section.rate,
+        threshold: section.threshold,
+        ...(section.effectiveFrom ? { effectiveFrom: section.effectiveFrom } : {}),
+        ...(section.effectiveTo ? { effectiveTo: section.effectiveTo } : {}),
+      },
+    ].slice(-25);
+  }
+  section.label = nextLabel;
   section.rate = rate;
   section.threshold = threshold;
+  if (effectiveFrom) section.effectiveFrom = effectiveFrom;
+  else delete section.effectiveFrom;
+  if (effectiveTo) section.effectiveTo = effectiveTo;
+  else delete section.effectiveTo;
   return { ok: true, section };
 }
 
@@ -8506,7 +8591,14 @@ function validateImportedCompany(company) {
       if (rate === null || rate < 0 || rate > 100 || threshold === null || threshold < 0) {
         return `Company "${name}": section ${section.code} has an invalid rate or threshold.`;
       }
-      const codeKey = `${section.kind}:${String(section.code).toUpperCase()}`;
+      if (
+        (section.effectiveFrom && !isValidIsoDate(String(section.effectiveFrom))) ||
+        (section.effectiveTo && !isValidIsoDate(String(section.effectiveTo))) ||
+        (section.effectiveFrom && section.effectiveTo && section.effectiveTo < section.effectiveFrom)
+      ) {
+        return `Company "${name}": section ${section.code} has invalid effective dates.`;
+      }
+      const codeKey = `${section.kind}:${String(section.code).toUpperCase()}:${section.effectiveFrom ?? ''}:${section.effectiveTo ?? ''}`;
       if (seenSectionIds.has(section.id) || seenSectionCodes.has(codeKey)) {
         return `Company "${name}" has duplicate TDS/TCS sections.`;
       }
@@ -13577,6 +13669,19 @@ function taxAuditSummary(company, filters = {}) {
   const voucherCount = (company.vouchers ?? []).filter(
     (voucher) => voucher.date >= from && voucher.date <= to,
   ).length;
+  let digitalReceipts = 0;
+  let otherReceipts = 0;
+  for (const voucher of company.vouchers ?? []) {
+    if (voucher.type !== 'Receipt' || voucher.date < from || voucher.date > to) continue;
+    const throughBank = (voucher.lines ?? []).some((line) => {
+      const ledger = company.ledgers.find((entry) => entry.id === line.ledgerId);
+      return ledger && inGroupKey(company, ledger, 'bank');
+    });
+    if (throughBank) digitalReceipts = round2(digitalReceipts + voucher.total);
+    else otherReceipts = round2(otherReceipts + voucher.total);
+  }
+  const receiptTotal = round2(digitalReceipts + otherReceipts);
+  const digitalPercent = receiptTotal ? Math.round((digitalReceipts / receiptTotal) * 1000) / 10 : 0;
 
   const statusFor = (amount) => (Math.abs(amount) < 1 ? 'Ready' : 'Review');
   const clauses = TAX_AUDIT_CLAUSES.map(([clause, title, description]) => {
@@ -13653,6 +13758,13 @@ function taxAuditSummary(company, filters = {}) {
     taxPosition: {
       tds: { deducted: tds.periodAmount, paid: tds.challanTotal, outstanding: tds.outstanding },
       tcs: { collected: tcs.periodAmount, paid: tcs.challanTotal, outstanding: tcs.outstanding },
+    },
+    digitalReceipts: {
+      digital: digitalReceipts,
+      other: otherReceipts,
+      total: receiptTotal,
+      percent: digitalPercent,
+      meets95: receiptTotal > 0 && digitalPercent >= 95,
     },
     clauses,
     clauseSummary: {
@@ -20678,6 +20790,7 @@ function taxAuditScreen() {
         <div class="ratio-card"><span class="ratio-label">GST outward taxable</span><strong>${money(turnover.gstTaxable)}</strong><span class="muted small">GSTR-1 working paper</span></div>
         <div class="ratio-card"><span class="ratio-label">Turnover difference</span><strong class="${Math.abs(turnover.difference) >= 1 ? 'neg' : ''}">${money(turnover.difference)}</strong><span class="muted small">Books less GST</span></div>
         <div class="ratio-card"><span class="ratio-label">Tax audit threshold</span><strong>${money(turnover.threshold)}</strong><span class="muted small">₹10 crore high threshold also flagged</span></div>
+        <div class="ratio-card"><span class="ratio-label">Digital receipts</span><strong>${report.digitalReceipts.percent}%</strong><span class="muted small">${money(report.digitalReceipts.digital)} of ${money(report.digitalReceipts.total)} · 95% test ${report.digitalReceipts.meets95 ? 'met' : 'not met'}</span></div>
       </div>
       <p class="muted small">${esc(report.note)}</p>`,
       'Reconciliations use posted vouchers only. Tax-audit applicability and every Form 3CD disclosure need professional review.',
@@ -20783,12 +20896,28 @@ function tdsScreen() {
   const sectionRows = sections
     .map((section) => {
       const used = active.vouchers.filter((voucher) => voucher.tds?.sectionId === section.id).length;
+      const effective = section.effectiveFrom && section.effectiveTo
+        ? `${esc(dateLabel(section.effectiveFrom))} – ${esc(dateLabel(section.effectiveTo))}`
+        : section.effectiveFrom
+          ? `From ${esc(dateLabel(section.effectiveFrom))}`
+          : section.effectiveTo
+            ? `Until ${esc(dateLabel(section.effectiveTo))}`
+            : '<span class="muted">Always</span>';
+      const history = Array.isArray(section.history) ? section.history : [];
       return `<tr>
         <td><span class="badge">${esc(section.kind)}</span></td>
         <td><strong>${esc(section.code)}</strong></td>
-        <td class="muted">${esc(section.label)}</td>
+        <td class="muted">${esc(section.label)}${history.length
+          ? `<details><summary class="muted small">${history.length} earlier value${history.length === 1 ? '' : 's'}</summary><div class="muted small">${history
+              .slice()
+              .reverse()
+              .slice(0, 6)
+              .map((entry) => `${esc(new Date(entry.at).toLocaleDateString('en-IN'))} · ${entry.rate}% · threshold ${money(entry.threshold)}`)
+              .join('<br>')}</div></details>`
+          : ''}</td>
         <td class="num">${section.rate}%</td>
         <td class="num">${section.threshold ? money(section.threshold) : '—'}</td>
+        <td>${effective}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-tds-section" data-id="${esc(section.id)}">Edit</button>
@@ -20810,13 +20939,15 @@ function tdsScreen() {
       <input name="label" maxlength="60" placeholder="Description (optional)" aria-label="Section description" value="${esc(editingSection?.label ?? '')}">
       <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="Section rate" value="${esc(editingSection?.rate ?? '')}" required>
       <input name="threshold" inputmode="decimal" placeholder="Threshold" aria-label="Section threshold" value="${esc(editingSection?.threshold ?? '')}">
+      <input name="effectiveFrom" type="date" aria-label="Effective from" value="${esc(editingSection?.effectiveFrom ?? '')}">
+      <input name="effectiveTo" type="date" aria-label="Effective to" value="${esc(editingSection?.effectiveTo ?? '')}">
       <button class="btn small" type="submit">${editingSection ? 'Save section' : 'Add section'}</button>
       ${editingSection ? '<button class="btn small ghost" type="button" data-action="cancel-tds-section-edit">Cancel</button>' : ''}
       <p id="tds-section-error" class="form-error" role="alert"></p>
     </form>
-    <p class="muted small">Editing a section changes future deductions only; posted vouchers keep their saved section rate.</p>
+    <p class="muted small">A section is selectable inside its effective-date window; blank dates leave that side open. Editing a section changes future deductions only, posted vouchers keep their saved section rate, and earlier values stay in the section history.</p>
     <div class="table-scroll" tabindex="0"><table class="data-table compact tds-report-table">
-      <thead><tr><th>Kind</th><th>Code</th><th>Description</th><th class="num">Rate</th><th class="num">Threshold</th><th class="num">Vouchers</th><th></th></tr></thead>
+      <thead><tr><th>Kind</th><th>Code</th><th>Description</th><th class="num">Rate</th><th class="num">Threshold</th><th>Effective</th><th class="num">Vouchers</th><th></th></tr></thead>
       <tbody>${sectionRows}</tbody>
     </table></div>`,
     'Rates and thresholds are local working parameters. A section used by a voucher cannot be deleted.',
@@ -23353,7 +23484,12 @@ function tdsVoucherBlock(active) {
   if (!tds.enabled || !['Purchase', 'Sales'].includes(draft.type)) return '';
   if (draft.currencyCode && draft.currencyCode !== 'INR') return '';
   const kind = draft.type === 'Purchase' ? 'TDS' : 'TCS';
-  const sections = (tds.sections ?? []).filter((section) => section.kind === kind);
+  const sections = (tds.sections ?? []).filter(
+    (section) =>
+      section.kind === kind &&
+      (!section.effectiveFrom || !draft.date || section.effectiveFrom <= draft.date) &&
+      (!section.effectiveTo || !draft.date || section.effectiveTo >= draft.date),
+  );
   const sectionOptions = [
     `<option value="">No ${kind}</option>`,
     ...sections.map(
@@ -25123,6 +25259,8 @@ async function handleSubmit(event) {
       label: data.get('label'),
       rate: data.get('rate'),
       threshold: data.get('threshold') || 0,
+      effectiveFrom: data.get('effectiveFrom'),
+      effectiveTo: data.get('effectiveTo'),
     };
     const result = editingSectionId
       ? updateTdsSection(active, editingSectionId, payload)

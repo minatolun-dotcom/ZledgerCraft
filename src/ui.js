@@ -1511,7 +1511,12 @@ export function tdsVoucherBlock(active) {
   if (!tds.enabled || !['Purchase', 'Sales'].includes(draft.type)) return '';
   if (draft.currencyCode && draft.currencyCode !== 'INR') return '';
   const kind = draft.type === 'Purchase' ? 'TDS' : 'TCS';
-  const sections = (tds.sections ?? []).filter((section) => section.kind === kind);
+  const sections = (tds.sections ?? []).filter(
+    (section) =>
+      section.kind === kind &&
+      (!section.effectiveFrom || !draft.date || section.effectiveFrom <= draft.date) &&
+      (!section.effectiveTo || !draft.date || section.effectiveTo >= draft.date),
+  );
   const sectionOptions = [
     `<option value="">No ${kind}</option>`,
     ...sections.map(
@@ -3281,6 +3286,8 @@ export async function handleSubmit(event) {
       label: data.get('label'),
       rate: data.get('rate'),
       threshold: data.get('threshold') || 0,
+      effectiveFrom: data.get('effectiveFrom'),
+      effectiveTo: data.get('effectiveTo'),
     };
     const result = editingSectionId
       ? updateTdsSection(active, editingSectionId, payload)

@@ -1517,6 +1517,28 @@ export function normalizeTds(company) {
       if (threshold === null || threshold < 0) return null;
       const code = String(section.code ?? '').trim().slice(0, 12);
       if (!code) return null;
+      const effectiveFrom = isValidIsoDate(String(section.effectiveFrom ?? '')) ? String(section.effectiveFrom) : '';
+      const effectiveTo = isValidIsoDate(String(section.effectiveTo ?? '')) ? String(section.effectiveTo) : '';
+      if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) return null;
+      const history = Array.isArray(section.history)
+        ? section.history
+            .filter(
+              (entry) =>
+                entry &&
+                parseAmount(entry.rate) !== null &&
+                parseAmount(entry.threshold ?? 0) !== null &&
+                !Number.isNaN(Date.parse(String(entry.at ?? ''))),
+            )
+            .map((entry) => ({
+              at: String(entry.at),
+              label: String(entry.label ?? '').trim().slice(0, 60) || code,
+              rate: parseAmount(entry.rate),
+              threshold: parseAmount(entry.threshold ?? 0),
+              ...(isValidIsoDate(String(entry.effectiveFrom ?? '')) ? { effectiveFrom: String(entry.effectiveFrom) } : {}),
+              ...(isValidIsoDate(String(entry.effectiveTo ?? '')) ? { effectiveTo: String(entry.effectiveTo) } : {}),
+            }))
+            .slice(-25)
+        : [];
       return {
         id: String(section.id || uid('tds')).slice(0, 80),
         kind,
@@ -1524,11 +1546,14 @@ export function normalizeTds(company) {
         label: String(section.label ?? '').trim().slice(0, 60) || code,
         rate,
         threshold,
+        ...(effectiveFrom ? { effectiveFrom } : {}),
+        ...(effectiveTo ? { effectiveTo } : {}),
+        ...(history.length ? { history } : {}),
       };
     })
     .filter((section) => {
       if (!section) return false;
-      const key = `${section.kind}:${section.code.toUpperCase()}`;
+      const key = `${section.kind}:${section.code.toUpperCase()}:${section.effectiveFrom ?? ''}:${section.effectiveTo ?? ''}`;
       if (seenSections.has(key)) return false;
       seenSections.add(key);
       return true;
@@ -1640,9 +1665,24 @@ export function addTdsSection(company, input = {}) {
   if (threshold === null || threshold < 0) {
     return { ok: false, error: 'Threshold must be zero or more.' };
   }
+  const effectiveFrom = String(input.effectiveFrom ?? '').trim();
+  const effectiveTo = String(input.effectiveTo ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective-from date.' };
+  if (effectiveTo && !isValidIsoDate(effectiveTo)) return { ok: false, error: 'Enter a valid effective-to date.' };
+  if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) {
+    return { ok: false, error: 'The effective-to date cannot be before the effective-from date.' };
+  }
   company.tds = company.tds ?? normalizeTds(company).tds;
-  if (company.tds.sections.some((section) => section.kind === kind && section.code.toUpperCase() === code.toUpperCase())) {
-    return { ok: false, error: `${kind} section ${code} already exists.` };
+  if (
+    company.tds.sections.some(
+      (section) =>
+        section.kind === kind &&
+        section.code.toUpperCase() === code.toUpperCase() &&
+        (section.effectiveFrom ?? '') === effectiveFrom &&
+        (section.effectiveTo ?? '') === effectiveTo,
+    )
+  ) {
+    return { ok: false, error: `${kind} section ${code} already exists with those effective dates.` };
   }
   const section = {
     id: uid('tds'),
@@ -1651,6 +1691,8 @@ export function addTdsSection(company, input = {}) {
     label: String(input.label ?? '').trim().slice(0, 60) || code,
     rate,
     threshold,
+    ...(effectiveFrom ? { effectiveFrom } : {}),
+    ...(effectiveTo ? { effectiveTo } : {}),
   };
   company.tds.sections.push(section);
   return { ok: true, section };
@@ -1667,9 +1709,52 @@ export function updateTdsSection(company, sectionId, input = {}) {
   if (threshold === null || threshold < 0) {
     return { ok: false, error: 'Threshold must be zero or more.' };
   }
-  section.label = String(input.label ?? '').trim().slice(0, 60) || section.code;
+  const effectiveFrom = String(input.effectiveFrom ?? section.effectiveFrom ?? '').trim();
+  const effectiveTo = String(input.effectiveTo ?? section.effectiveTo ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective-from date.' };
+  if (effectiveTo && !isValidIsoDate(effectiveTo)) return { ok: false, error: 'Enter a valid effective-to date.' };
+  if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) {
+    return { ok: false, error: 'The effective-to date cannot be before the effective-from date.' };
+  }
+  if (
+    (company.tds?.sections ?? []).some(
+      (other) =>
+        other.id !== sectionId &&
+        other.kind === section.kind &&
+        other.code.toUpperCase() === section.code.toUpperCase() &&
+        (other.effectiveFrom ?? '') === effectiveFrom &&
+        (other.effectiveTo ?? '') === effectiveTo,
+    )
+  ) {
+    return { ok: false, error: `${section.kind} section ${section.code} already exists with those effective dates.` };
+  }
+  const nextLabel = String(input.label ?? '').trim().slice(0, 60) || section.code;
+  const changed =
+    nextLabel !== section.label ||
+    rate !== section.rate ||
+    threshold !== section.threshold ||
+    effectiveFrom !== (section.effectiveFrom ?? '') ||
+    effectiveTo !== (section.effectiveTo ?? '');
+  if (changed) {
+    section.history = [
+      ...(Array.isArray(section.history) ? section.history : []),
+      {
+        at: new Date().toISOString(),
+        label: section.label,
+        rate: section.rate,
+        threshold: section.threshold,
+        ...(section.effectiveFrom ? { effectiveFrom: section.effectiveFrom } : {}),
+        ...(section.effectiveTo ? { effectiveTo: section.effectiveTo } : {}),
+      },
+    ].slice(-25);
+  }
+  section.label = nextLabel;
   section.rate = rate;
   section.threshold = threshold;
+  if (effectiveFrom) section.effectiveFrom = effectiveFrom;
+  else delete section.effectiveFrom;
+  if (effectiveTo) section.effectiveTo = effectiveTo;
+  else delete section.effectiveTo;
   return { ok: true, section };
 }
 
@@ -6080,7 +6165,14 @@ function validateImportedCompany(company) {
       if (rate === null || rate < 0 || rate > 100 || threshold === null || threshold < 0) {
         return `Company "${name}": section ${section.code} has an invalid rate or threshold.`;
       }
-      const codeKey = `${section.kind}:${String(section.code).toUpperCase()}`;
+      if (
+        (section.effectiveFrom && !isValidIsoDate(String(section.effectiveFrom))) ||
+        (section.effectiveTo && !isValidIsoDate(String(section.effectiveTo))) ||
+        (section.effectiveFrom && section.effectiveTo && section.effectiveTo < section.effectiveFrom)
+      ) {
+        return `Company "${name}": section ${section.code} has invalid effective dates.`;
+      }
+      const codeKey = `${section.kind}:${String(section.code).toUpperCase()}:${section.effectiveFrom ?? ''}:${section.effectiveTo ?? ''}`;
       if (seenSectionIds.has(section.id) || seenSectionCodes.has(codeKey)) {
         return `Company "${name}" has duplicate TDS/TCS sections.`;
       }

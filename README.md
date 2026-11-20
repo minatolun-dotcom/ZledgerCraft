@@ -335,9 +335,10 @@ disabled.
   CGST, SGST, IGST and Cess ledgers under Duties & Taxes.
 - TDS/TCS registration with a TAN and a section master (kind, code, description,
   rate and threshold; seeded with common 194C/194J/194I/194H and two TCS
-  sections). A section's description, rate and threshold can be edited without
-  changing its kind or code, and posted deductions keep their saved rate.
-  Enabling it creates or reuses TDS Payable and TCS Payable ledgers.
+  sections). A section can carry effective-from/effective-to dates; editing its
+  description, rate, threshold or window keeps the earlier values in a short
+  history. Posted deductions keep their saved rate. Enabling it creates or
+  reuses TDS Payable and TCS Payable ledgers.
 - Payroll with a pay-head master (earning or deduction, posting ledger and an
   optional PF/ESI/PT tag) and an employee master (code, designation, PAN,
   joining/exit dates and optional bank name, account number and IFSC). Enabling payroll creates or reuses the Salaries and
@@ -557,9 +558,10 @@ disabled.
 - Tax audit working papers for a period: books turnover from Sales Accounts
   versus GST outward taxable, output-tax and input-credit reconciliation between
   GST-role ledgers and GSTR-3B, TDS/TCS deducted, paid and outstanding, the
-  ₹1 crore/₹10 crore threshold flags and a ten-clause Form 3CD-style checklist
-  with Ready/Review/Manual status. Informational only; not a Form 3CD or audit
-  opinion.
+  ₹1 crore/₹10 crore threshold flags, a digital-receipt percentage (bank receipts
+  against total receipts with the 95% test flagged), and a ten-clause Form
+  3CD-style checklist with Ready/Review/Manual status. Informational only; not a
+  Form 3CD or audit opinion.
 - Forex Revaluation as on a date: foreign balance, book INR value, latest rate,
   revalued INR value and unrealised gain/loss for foreign asset and liability
   ledgers. The report can post one revaluation Journal per date to Forex Gain

@@ -411,6 +411,54 @@ test('sections can be edited without rewriting posted deductions', () => {
   assert.equal(relabelled.section.label, '194J');
 });
 
+test('TDS sections keep date windows and an edit history', () => {
+  const { company } = fixture();
+  const added = addTdsSection(company, {
+    kind: 'TDS',
+    code: '194Q',
+    label: 'Purchase of goods',
+    rate: 0.1,
+    threshold: 5000000,
+    effectiveFrom: '2026-04-01',
+    effectiveTo: '2026-06-30',
+  });
+  assert.equal(added.ok, true, added.error);
+  assert.equal(added.section.effectiveFrom, '2026-04-01');
+  assert.equal(added.section.effectiveTo, '2026-06-30');
+  assert.equal(
+    addTdsSection(company, {
+      kind: 'TDS',
+      code: '194Q',
+      rate: 0.1,
+      effectiveFrom: '2026-04-01',
+      effectiveTo: '2026-06-30',
+    }).ok,
+    false,
+  );
+  assert.equal(
+    addTdsSection(company, {
+      kind: 'TDS',
+      code: '194Q',
+      rate: 0.1,
+      effectiveFrom: '2026-08-01',
+      effectiveTo: '2026-07-01',
+    }).ok,
+    false,
+  );
+
+  const extended = updateTdsSection(company, added.section.id, {
+    rate: 0.2,
+    effectiveTo: '2026-09-30',
+  });
+  assert.equal(extended.ok, true, extended.error);
+  assert.equal(extended.section.rate, 0.2);
+  assert.equal(extended.section.effectiveTo, '2026-09-30');
+  assert.equal(extended.section.history.length, 1);
+  assert.equal(extended.section.history[0].rate, 0.1);
+  assert.equal(extended.section.history[0].effectiveTo, '2026-06-30');
+  assert.equal(updateTdsSection(company, added.section.id, { effectiveTo: '2026-03-01' }).ok, false);
+});
+
 test('TDS/TCS settings, sections, vouchers and challans survive a backup', () => {
   const { company, supplier, purchases } = fixture();
   tdsPurchase(company, { supplier, purchases, base: 10000 });

@@ -373,7 +373,7 @@ export let filters = {
   period: { from: '', to: '' },
   register: { type: 'Sales', from: '', to: '' },
   outstanding: { side: 'receivable', asOn: '' },
-  billRegister: { side: 'receivable', from: '', to: '', asOn: '', status: 'All' },
+  billRegister: { side: 'receivable', from: '', to: '', asOn: '', status: 'All', compareAsOn: '' },
   partyStatement: { side: 'receivable', ledgerId: '', from: '', to: '' },
   cashBook: { ledgerId: '', from: '', to: '' },
   stock: { from: '', to: '' },
@@ -3881,6 +3881,7 @@ export async function handleSubmit(event) {
       to: data.get('to') || '',
       asOn: data.get('asOn') || '',
       status: data.get('status') || 'All',
+      compareAsOn: data.get('compareAsOn') || '',
     };
     render();
     return;

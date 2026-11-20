@@ -1648,18 +1648,49 @@ export function billWiseRegister(company, filters = {}) {
   const to = filters.to || company.fyEnd;
   const status = ['Open', 'Settled', 'Overdue'].includes(filters.status) ? filters.status : 'All';
   const asOn = isValidIsoDate(String(filters.asOn ?? '')) ? String(filters.asOn) : to;
+  const requestedCompare = String(filters.compareAsOn ?? '');
+  const compareAsOn = isValidIsoDate(requestedCompare) && requestedCompare <= asOn
+    ? requestedCompare
+    : null;
   const groupKey = side === 'receivable' ? 'sundryDebtors' : 'sundryCreditors';
   const rows = [];
 
   for (const ledger of company.ledgers) {
     if (!inGroupKey(company, ledger, groupKey)) continue;
     const data = partyBillLedger(company, ledger, side, asOn);
+    const priorBills = compareAsOn
+      ? new Map(
+          partyBillLedger(company, ledger, side, compareAsOn).allBills
+            .filter((bill) => bill.isBill)
+            .map((bill) => [bill.voucherId, bill]),
+        )
+      : null;
     for (const bill of data.allBills) {
       if (!bill.isBill || bill.date < from || bill.date > to) continue;
       if (status === 'Open' && bill.status === 'Settled') continue;
       if (status === 'Settled' && bill.status !== 'Settled') continue;
       if (status === 'Overdue' && !bill.overdue) continue;
-      rows.push({ partyId: ledger.id, party: ledger.name, ...bill });
+      const prior = priorBills?.get(bill.voucherId) ?? null;
+      const priorSettled = compareAsOn && prior ? prior.settled : 0;
+      const priorStatus = compareAsOn
+        ? bill.date > compareAsOn
+          ? 'Not raised'
+          : prior?.status ?? 'Not raised'
+        : null;
+      rows.push({
+        partyId: ledger.id,
+        party: ledger.name,
+        ...bill,
+        ...(compareAsOn
+          ? {
+              priorSettled: round2(priorSettled),
+              settledDuring: round2(bill.settled - priorSettled),
+              priorStatus,
+              openedDuring: bill.date > compareAsOn,
+              statusChanged: priorStatus !== bill.status,
+            }
+          : {}),
+      });
     }
   }
 
@@ -1676,15 +1707,24 @@ export function billWiseRegister(company, filters = {}) {
     from,
     to,
     asOn,
+    compareAsOn,
     rows,
     count: rows.length,
     partyCount: new Set(rows.map((row) => row.partyId)).size,
     openCount: rows.filter((row) => row.status !== 'Settled').length,
     settledCount: rows.filter((row) => row.status === 'Settled').length,
     overdueCount: rows.filter((row) => row.overdue).length,
+    openedCount: compareAsOn ? rows.filter((row) => row.openedDuring).length : 0,
+    closedCount: compareAsOn
+      ? rows.filter((row) => row.priorStatus !== 'Settled' && row.status === 'Settled').length
+      : 0,
+    statusChangeCount: compareAsOn ? rows.filter((row) => row.statusChanged).length : 0,
     totalOriginal: sum('original'),
     totalSettled: sum('settled'),
     totalOutstanding: sum('amount'),
+    totalSettledDuring: round2(
+      rows.reduce((total, row) => total + (row.settledDuring ?? 0), 0),
+    ),
   };
 }
 

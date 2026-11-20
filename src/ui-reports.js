@@ -711,7 +711,15 @@ export function billRegisterScreen() {
   const to = current.to || active.fyEnd;
   const status = current.status || 'All';
   const asOn = current.asOn || to;
-  const report = billWiseRegister(active, { side, from, to, status, asOn });
+  const report = billWiseRegister(active, {
+    side,
+    from,
+    to,
+    status,
+    asOn,
+    compareAsOn: current.compareAsOn,
+  });
+  const compared = Boolean(report.compareAsOn);
   const partyLabel = side === 'receivable' ? 'Customer' : 'Supplier';
   const title = side === 'receivable' ? 'Customer bill-wise register' : 'Supplier bill-wise register';
   const statusOptions = [
@@ -744,8 +752,9 @@ export function billRegisterScreen() {
         <td>${row.dueDate ? esc(dateLabel(row.dueDate)) : '<span class="muted">—</span>'}</td>
         <td class="num">${money(row.original)}</td>
         <td class="num">${money(row.settled)}</td>
+        ${compared ? `<td class="num ${row.settledDuring < 0 ? 'neg' : ''}">${row.settledDuring ? money(row.settledDuring) : '—'}</td>` : ''}
         <td class="num">${money(row.amount)}</td>
-        <td>${billStatusBadge(row.status)}</td>
+        <td>${compared && row.statusChanged ? `<span class="muted small">${esc(row.priorStatus)} →</span> ` : ''}${billStatusBadge(row.status)}</td>
         <td class="num">${row.overdue ? row.overdueDays : ''}</td>
       </tr>`,
     )
@@ -763,17 +772,21 @@ export function billRegisterScreen() {
       <label class="field inline-field"><span>From</span><input name="from" type="date" value="${esc(from)}" data-period></label>
       <label class="field inline-field"><span>To</span><input name="to" type="date" value="${esc(to)}" data-period></label>
       <label class="field inline-field"><span>Status as on</span><input name="asOn" type="date" value="${esc(asOn)}"></label>
+      <label class="field inline-field"><span>Compare from</span><input name="compareAsOn" type="date" max="${esc(asOn)}" value="${esc(report.compareAsOn ?? '')}"></label>
       <label class="field inline-field"><span>Status</span><select name="status">${statusOptions}</select></label>
       <button class="btn small" type="submit">Apply</button>
     </form>
+    ${compared
+      ? `<p class="muted small">Compared with ${esc(dateLabel(report.compareAsOn))}: ${report.openedCount} bill${report.openedCount === 1 ? '' : 's'} raised, ${report.closedCount} settled, ${report.statusChangeCount} status change${report.statusChangeCount === 1 ? '' : 's'}, ${money(report.totalSettledDuring)} settled in total.</p>`
+      : ''}
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact bill-register-table">
-          <thead><tr><th>${partyLabel}</th><th>Bill</th><th>Bill date</th><th>Due date</th><th class="num">Bill amount</th><th class="num">Settled</th><th class="num">Outstanding</th><th>Status</th><th class="num">Overdue days</th></tr></thead>
+          <thead><tr><th>${partyLabel}</th><th>Bill</th><th>Bill date</th><th>Due date</th><th class="num">Bill amount</th><th class="num">Settled</th>${compared ? '<th class="num">Settled since</th>' : ''}<th class="num">Outstanding</th><th>Status</th><th class="num">Overdue days</th></tr></thead>
           <tbody>${rows}</tbody>
-          <tfoot><tr><td colspan="4">${report.count} bill${report.count === 1 ? '' : 's'} · ${report.partyCount} part${report.partyCount === 1 ? 'y' : 'ies'}${report.overdueCount ? ` · ${report.overdueCount} overdue` : ''}</td><td class="num">${money(report.totalOriginal)}</td><td class="num">${money(report.totalSettled)}</td><td class="num">${money(report.totalOutstanding)}</td><td colspan="2"></td></tr></tfoot>
+          <tfoot><tr><td colspan="4">${report.count} bill${report.count === 1 ? '' : 's'} · ${report.partyCount} part${report.partyCount === 1 ? 'y' : 'ies'}${report.overdueCount ? ` · ${report.overdueCount} overdue` : ''}</td><td class="num">${money(report.totalOriginal)}</td><td class="num">${money(report.totalSettled)}</td>${compared ? `<td class="num">${money(report.totalSettledDuring)}</td>` : ''}<td class="num">${money(report.totalOutstanding)}</td><td colspan="2"></td></tr></tfoot>
         </table></div>`
       : `<p class="muted">No ${side === 'receivable' ? 'customer' : 'supplier'} bills in this period${status === 'All' ? '' : ` with status ${esc(status)}`}.</p>`}`,
-    `Bills dated ${esc(dateLabel(from))} to ${esc(dateLabel(to))} · status as on ${esc(dateLabel(asOn))}. Fully settled bills remain listed. Click a party for its statement, or a bill to open the voucher.`,
+    `Bills dated ${esc(dateLabel(from))} to ${esc(dateLabel(to))} · status as on ${esc(dateLabel(asOn))}${compared ? ` · movement compared with ${esc(dateLabel(report.compareAsOn))}` : ''}. Fully settled bills remain listed. Click a party for its statement, or a bill to open the voucher.`,
   );
 }
 

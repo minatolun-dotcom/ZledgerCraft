@@ -568,7 +568,8 @@ disabled.
   stored bill allocations, with FIFO fallback, due-date-based buckets, customer
   advances and a drill-down list of open bills with references and overdue days.
 - Bill-wise register by customer or supplier and bill-date period, with a
-  separate status-as-on date: original, settled and outstanding amounts, status,
+  separate status-as-on date and an optional comparison date: original, settled
+  and outstanding amounts, settlements since the comparison, status changes,
   overdue days, totals and drill-down to the voucher or the party statement.
   Fully settled bills remain listed.
 - Party credit limits, a printable payment reminder per customer, and simple

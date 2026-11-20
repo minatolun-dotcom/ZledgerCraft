@@ -11063,18 +11063,49 @@ function billWiseRegister(company, filters = {}) {
   const to = filters.to || company.fyEnd;
   const status = ['Open', 'Settled', 'Overdue'].includes(filters.status) ? filters.status : 'All';
   const asOn = isValidIsoDate(String(filters.asOn ?? '')) ? String(filters.asOn) : to;
+  const requestedCompare = String(filters.compareAsOn ?? '');
+  const compareAsOn = isValidIsoDate(requestedCompare) && requestedCompare <= asOn
+    ? requestedCompare
+    : null;
   const groupKey = side === 'receivable' ? 'sundryDebtors' : 'sundryCreditors';
   const rows = [];
 
   for (const ledger of company.ledgers) {
     if (!inGroupKey(company, ledger, groupKey)) continue;
     const data = partyBillLedger(company, ledger, side, asOn);
+    const priorBills = compareAsOn
+      ? new Map(
+          partyBillLedger(company, ledger, side, compareAsOn).allBills
+            .filter((bill) => bill.isBill)
+            .map((bill) => [bill.voucherId, bill]),
+        )
+      : null;
     for (const bill of data.allBills) {
       if (!bill.isBill || bill.date < from || bill.date > to) continue;
       if (status === 'Open' && bill.status === 'Settled') continue;
       if (status === 'Settled' && bill.status !== 'Settled') continue;
       if (status === 'Overdue' && !bill.overdue) continue;
-      rows.push({ partyId: ledger.id, party: ledger.name, ...bill });
+      const prior = priorBills?.get(bill.voucherId) ?? null;
+      const priorSettled = compareAsOn && prior ? prior.settled : 0;
+      const priorStatus = compareAsOn
+        ? bill.date > compareAsOn
+          ? 'Not raised'
+          : prior?.status ?? 'Not raised'
+        : null;
+      rows.push({
+        partyId: ledger.id,
+        party: ledger.name,
+        ...bill,
+        ...(compareAsOn
+          ? {
+              priorSettled: round2(priorSettled),
+              settledDuring: round2(bill.settled - priorSettled),
+              priorStatus,
+              openedDuring: bill.date > compareAsOn,
+              statusChanged: priorStatus !== bill.status,
+            }
+          : {}),
+      });
     }
   }
 
@@ -11091,15 +11122,24 @@ function billWiseRegister(company, filters = {}) {
     from,
     to,
     asOn,
+    compareAsOn,
     rows,
     count: rows.length,
     partyCount: new Set(rows.map((row) => row.partyId)).size,
     openCount: rows.filter((row) => row.status !== 'Settled').length,
     settledCount: rows.filter((row) => row.status === 'Settled').length,
     overdueCount: rows.filter((row) => row.overdue).length,
+    openedCount: compareAsOn ? rows.filter((row) => row.openedDuring).length : 0,
+    closedCount: compareAsOn
+      ? rows.filter((row) => row.priorStatus !== 'Settled' && row.status === 'Settled').length
+      : 0,
+    statusChangeCount: compareAsOn ? rows.filter((row) => row.statusChanged).length : 0,
     totalOriginal: sum('original'),
     totalSettled: sum('settled'),
     totalOutstanding: sum('amount'),
+    totalSettledDuring: round2(
+      rows.reduce((total, row) => total + (row.settledDuring ?? 0), 0),
+    ),
   };
 }
 
@@ -17371,7 +17411,15 @@ function billRegisterScreen() {
   const to = current.to || active.fyEnd;
   const status = current.status || 'All';
   const asOn = current.asOn || to;
-  const report = billWiseRegister(active, { side, from, to, status, asOn });
+  const report = billWiseRegister(active, {
+    side,
+    from,
+    to,
+    status,
+    asOn,
+    compareAsOn: current.compareAsOn,
+  });
+  const compared = Boolean(report.compareAsOn);
   const partyLabel = side === 'receivable' ? 'Customer' : 'Supplier';
   const title = side === 'receivable' ? 'Customer bill-wise register' : 'Supplier bill-wise register';
   const statusOptions = [
@@ -17404,8 +17452,9 @@ function billRegisterScreen() {
         <td>${row.dueDate ? esc(dateLabel(row.dueDate)) : '<span class="muted">—</span>'}</td>
         <td class="num">${money(row.original)}</td>
         <td class="num">${money(row.settled)}</td>
+        ${compared ? `<td class="num ${row.settledDuring < 0 ? 'neg' : ''}">${row.settledDuring ? money(row.settledDuring) : '—'}</td>` : ''}
         <td class="num">${money(row.amount)}</td>
-        <td>${billStatusBadge(row.status)}</td>
+        <td>${compared && row.statusChanged ? `<span class="muted small">${esc(row.priorStatus)} →</span> ` : ''}${billStatusBadge(row.status)}</td>
         <td class="num">${row.overdue ? row.overdueDays : ''}</td>
       </tr>`,
     )
@@ -17423,17 +17472,21 @@ function billRegisterScreen() {
       <label class="field inline-field"><span>From</span><input name="from" type="date" value="${esc(from)}" data-period></label>
       <label class="field inline-field"><span>To</span><input name="to" type="date" value="${esc(to)}" data-period></label>
       <label class="field inline-field"><span>Status as on</span><input name="asOn" type="date" value="${esc(asOn)}"></label>
+      <label class="field inline-field"><span>Compare from</span><input name="compareAsOn" type="date" max="${esc(asOn)}" value="${esc(report.compareAsOn ?? '')}"></label>
       <label class="field inline-field"><span>Status</span><select name="status">${statusOptions}</select></label>
       <button class="btn small" type="submit">Apply</button>
     </form>
+    ${compared
+      ? `<p class="muted small">Compared with ${esc(dateLabel(report.compareAsOn))}: ${report.openedCount} bill${report.openedCount === 1 ? '' : 's'} raised, ${report.closedCount} settled, ${report.statusChangeCount} status change${report.statusChangeCount === 1 ? '' : 's'}, ${money(report.totalSettledDuring)} settled in total.</p>`
+      : ''}
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact bill-register-table">
-          <thead><tr><th>${partyLabel}</th><th>Bill</th><th>Bill date</th><th>Due date</th><th class="num">Bill amount</th><th class="num">Settled</th><th class="num">Outstanding</th><th>Status</th><th class="num">Overdue days</th></tr></thead>
+          <thead><tr><th>${partyLabel}</th><th>Bill</th><th>Bill date</th><th>Due date</th><th class="num">Bill amount</th><th class="num">Settled</th>${compared ? '<th class="num">Settled since</th>' : ''}<th class="num">Outstanding</th><th>Status</th><th class="num">Overdue days</th></tr></thead>
           <tbody>${rows}</tbody>
-          <tfoot><tr><td colspan="4">${report.count} bill${report.count === 1 ? '' : 's'} · ${report.partyCount} part${report.partyCount === 1 ? 'y' : 'ies'}${report.overdueCount ? ` · ${report.overdueCount} overdue` : ''}</td><td class="num">${money(report.totalOriginal)}</td><td class="num">${money(report.totalSettled)}</td><td class="num">${money(report.totalOutstanding)}</td><td colspan="2"></td></tr></tfoot>
+          <tfoot><tr><td colspan="4">${report.count} bill${report.count === 1 ? '' : 's'} · ${report.partyCount} part${report.partyCount === 1 ? 'y' : 'ies'}${report.overdueCount ? ` · ${report.overdueCount} overdue` : ''}</td><td class="num">${money(report.totalOriginal)}</td><td class="num">${money(report.totalSettled)}</td>${compared ? `<td class="num">${money(report.totalSettledDuring)}</td>` : ''}<td class="num">${money(report.totalOutstanding)}</td><td colspan="2"></td></tr></tfoot>
         </table></div>`
       : `<p class="muted">No ${side === 'receivable' ? 'customer' : 'supplier'} bills in this period${status === 'All' ? '' : ` with status ${esc(status)}`}.</p>`}`,
-    `Bills dated ${esc(dateLabel(from))} to ${esc(dateLabel(to))} · status as on ${esc(dateLabel(asOn))}. Fully settled bills remain listed. Click a party for its statement, or a bill to open the voucher.`,
+    `Bills dated ${esc(dateLabel(from))} to ${esc(dateLabel(to))} · status as on ${esc(dateLabel(asOn))}${compared ? ` · movement compared with ${esc(dateLabel(report.compareAsOn))}` : ''}. Fully settled bills remain listed. Click a party for its statement, or a bill to open the voucher.`,
   );
 }
 
@@ -21915,7 +21968,7 @@ let filters = {
   period: { from: '', to: '' },
   register: { type: 'Sales', from: '', to: '' },
   outstanding: { side: 'receivable', asOn: '' },
-  billRegister: { side: 'receivable', from: '', to: '', asOn: '', status: 'All' },
+  billRegister: { side: 'receivable', from: '', to: '', asOn: '', status: 'All', compareAsOn: '' },
   partyStatement: { side: 'receivable', ledgerId: '', from: '', to: '' },
   cashBook: { ledgerId: '', from: '', to: '' },
   stock: { from: '', to: '' },
@@ -25423,6 +25476,7 @@ async function handleSubmit(event) {
       to: data.get('to') || '',
       asOn: data.get('asOn') || '',
       status: data.get('status') || 'All',
+      compareAsOn: data.get('compareAsOn') || '',
     };
     render();
     return;

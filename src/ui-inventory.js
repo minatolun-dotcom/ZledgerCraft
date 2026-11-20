@@ -19,6 +19,7 @@ import {
   stockAgeing,
   stockMovements,
   stockSummary,
+  stockValueAnalysis,
 } from './accounting.js';
 import {
   view,
@@ -258,6 +259,7 @@ export function inventoryScreen() {
   const expiryReport = expiringBatches(active, { asOn: to, days: 90 });
   const ageingReport = stockAgeing(active, { asOn: to });
   const reorder = reorderReport(active, { from, to });
+  const valueAnalysis = stockValueAnalysis(active, { from, to });
   const priceRows = priceList(active);
   const purchasePrices = new Map(
     priceList(active, { priceType: 'purchase' }).rows.map((row) => [row.itemId, row.price]),
@@ -620,6 +622,29 @@ export function inventoryScreen() {
         : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,
       'Click an item to see its voucher-wise movement.',
     )}
+    ${valueAnalysis.totalValue > 0
+      ? panel(
+          'Stock value analysis',
+          `<div class="table-wrap"><table class="data-table compact">
+            <thead><tr><th>Stock group</th><th class="num">Items</th><th class="num">Below reorder</th><th class="num">Closing value</th><th class="num">Share</th></tr></thead>
+            <tbody>${valueAnalysis.byGroup.map((row) => `<tr>
+              <td><strong>${esc(row.groupName)}</strong></td>
+              <td class="num">${row.items}</td>
+              <td class="num">${row.lowStock || '—'}</td>
+              <td class="num">${money(row.closingValue)}</td>
+              <td class="num">${row.share.toFixed(2)}%</td>
+            </tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="3">Total closing stock</td><td class="num">${money(valueAnalysis.totalValue)}</td><td></td></tr></tfoot>
+          </table></div>
+          ${valueAnalysis.byGodown.length > 1
+            ? `<table class="data-table compact">
+                <thead><tr><th>Godown</th><th class="num">Items</th><th class="num">Closing value</th></tr></thead>
+                <tbody>${valueAnalysis.byGodown.map((row) => `<tr><td><strong>${esc(row.godownName)}</strong></td><td class="num">${row.items}</td><td class="num">${money(row.closingValue)}</td></tr>`).join('')}</tbody>
+              </table>`
+            : ''}`,
+          'Value uses weighted-average item cost. Quantities with different units are not added across groups; godown quantity totals are shown only as an operational reference.',
+        )
+      : ''}
     ${reorder.rows.length
       ? panel(
           'Reorder watch',
@@ -706,6 +731,7 @@ export function inventoryScreen() {
           `<table class="data-table compact">
             <thead><tr><th>Item</th><th>Batch</th><th>Expiry</th><th>Unit</th><th class="num">Opening</th><th class="num">Inward</th><th class="num">Outward</th><th class="num">Closing</th><th class="num">Value</th></tr></thead>
             <tbody>${batchRows}</tbody>
+            <tfoot><tr><td colspan="8">Batch closing value</td><td class="num">${money(batchReport.totals.closingValue)}</td></tr></tfoot>
           </table>`,
           'Batch balances are quantity-based; values use the item weighted-average cost. Expiry is the latest date entered on a batch line.',
         )

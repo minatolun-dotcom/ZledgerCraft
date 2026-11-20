@@ -1981,6 +1981,46 @@ export function reorderReport(company, filters = {}) {
   };
 }
 
+export function stockValueAnalysis(company, filters = {}) {
+  const from = filters.from || company.fyStart;
+  const to = filters.to || company.fyEnd;
+  const summary = stockSummary(company, { from, to });
+  const godown = godownStockSummary(company, { from, to });
+  const groups = new Map();
+  for (const row of summary.rows) {
+    const key = row.groupName;
+    const current = groups.get(key) ?? { groupName: key, items: 0, closingValue: 0, lowStock: 0 };
+    current.items += 1;
+    current.closingValue = round2(current.closingValue + row.closingValue);
+    if (row.lowStock) current.lowStock += 1;
+    groups.set(key, current);
+  }
+  const totalValue = summary.totals.closingValue;
+  const byGroup = [...groups.values()]
+    .map((row) => ({
+      ...row,
+      share: totalValue > 0 ? round2((row.closingValue / totalValue) * 100) : 0,
+    }))
+    .sort((a, b) => b.closingValue - a.closingValue || a.groupName.localeCompare(b.groupName));
+  const byGodown = [...godown.rows.reduce((map, row) => {
+    const current = map.get(row.godownId) ?? {
+      godownId: row.godownId,
+      godownName: row.godownName,
+      items: new Set(),
+      closingQty: 0,
+      closingValue: 0,
+    };
+    current.items.add(row.itemId);
+    current.closingQty = round3(current.closingQty + row.closingQty);
+    current.closingValue = round2(current.closingValue + row.closingValue);
+    map.set(row.godownId, current);
+    return map;
+  }, new Map()).values()]
+    .map((row) => ({ ...row, items: row.items.size }))
+    .sort((a, b) => b.closingValue - a.closingValue || a.godownName.localeCompare(b.godownName));
+  return { from, to, byGroup, byGodown, totalValue };
+}
+
 /** Item-level price list. `priceType` is `selling` or `purchase`. */
 export function priceList(company, filters = {}) {
   const priceType = filters.priceType === 'purchase' ? 'purchase' : 'selling';
@@ -2195,7 +2235,15 @@ export function batchStockSummary(company, filters = {}) {
   }
 
   rows.sort((a, b) => a.name.localeCompare(b.name) || a.batchNo.localeCompare(b.batchNo));
-  return { from, to, rows, totals: { closingQty: round3(rows.reduce((sum, row) => sum + row.closingQty, 0)) } };
+  return {
+    from,
+    to,
+    rows,
+    totals: {
+      closingQty: round3(rows.reduce((sum, row) => sum + row.closingQty, 0)),
+      closingValue: round2(rows.reduce((sum, row) => sum + row.closingValue, 0)),
+    },
+  };
 }
 
 function consumeAgeLayers(layers, qty) {

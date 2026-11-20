@@ -430,8 +430,9 @@ disabled.
   (0–30, 31–60, 61–90, 91–180 and over 180 days), with the oldest remaining
   layer per item. Opening stock is the oldest layer and transfers are ignored.
 - A dedicated Reorder watch lists items at or below their reorder level with
-  shortfall and estimated purchase cost, and a Price list shows each item's
-  selling and purchase price per stock unit.
+  shortfall and estimated purchase cost, a Price list shows each item's selling
+  and purchase price per stock unit, and Stock value analysis breaks closing
+  value down by stock group and godown.
 - Sales and purchase orders with party, delivery date, up to 50 item lines
   (each with godown, batch, expiry, quantity and rate), status
   (Open/Closed/Cancelled), filters and a Create voucher action that prefills the

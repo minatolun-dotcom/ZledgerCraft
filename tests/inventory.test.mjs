@@ -48,6 +48,7 @@ import {
   stockAgeing,
   stockMovements,
   stockSummary,
+  stockValueAnalysis,
   trialBalance,
 } from '../src/accounting.js';
 
@@ -233,6 +234,18 @@ test('reorder report calculates shortfall from item buy price', () => {
   assert.equal(report.rows[0].estimatedCost, 160);
   assert.equal(report.totals.estimatedCost, 160);
   assert.equal(updateStockItem(company, item.id, { purchasePrice: -1 }).ok, false);
+});
+
+test('stock value analysis groups closing value by group and godown', () => {
+  const { company } = inventoryFixture();
+  const analysis = stockValueAnalysis(company);
+  assert.equal(analysis.totalValue, 1000);
+  assert.equal(analysis.byGroup.length, 1);
+  assert.equal(analysis.byGroup[0].items, 1);
+  assert.equal(analysis.byGroup[0].closingValue, 1000);
+  assert.equal(analysis.byGroup[0].share, 100);
+  assert.equal(analysis.byGodown.length, 1);
+  assert.equal(analysis.byGodown[0].closingValue, 1000);
 });
 
 test('price list separates selling and purchase prices', () => {
@@ -772,6 +785,10 @@ test('batch-tracked items require batches and report batch balances', () => {
   assert.equal(lot.expiryDate, '2027-03-31');
   assert.equal(opening.closingQty, 5);
   assert.equal(batches.totals.closingQty, 6);
+  assert.equal(
+    batches.totals.closingValue,
+    Math.round(batches.rows.reduce((sum, row) => sum + row.closingValue, 0) * 100) / 100,
+  );
 });test('opening batches split opening stock and survive an opening quantity edit', () => {
   const company = createCompany('Opening Batch Co', '2026-04-01').company;
   const unit = company.units.find((entry) => entry.symbol === 'Nos');

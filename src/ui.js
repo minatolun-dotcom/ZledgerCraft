@@ -47,6 +47,7 @@ import {
   defaultGodownId,
   deleteBom,
   deleteBudget,
+  duplicateBudget,
   deleteCompany,
   deleteCurrency,
   deleteCostCategory,
@@ -108,6 +109,7 @@ import {
   updateGroup,
   updateLedger,
   updateStockItem,
+  updateBudget,
   updatePendingVoucher,
   updateVoucher,
   withdrawPendingVoucher,
@@ -2881,21 +2883,31 @@ export async function handleSubmit(event) {
     }
     const data = new FormData(form);
     const [targetType, ...targetParts] = String(data.get('target') ?? '').split(':');
-    const result = addBudget(active, {
+    const payload = {
       name: data.get('name'),
       targetType,
       targetId: targetParts.join(':'),
       yearId: data.get('yearId'),
       amount: data.get('amount'),
-    });
+    };
+    const editingBudgetId = view.editingBudgetId;
+    const result = editingBudgetId
+      ? updateBudget(active, editingBudgetId, payload)
+      : addBudget(active, payload);
     if (!result.ok) {
       showFormError(result.error, 'budget-error');
       return;
     }
-    logAudit('budget.create', `Added budget "${result.budget.name}".`, active, result.budget.name);
+    logAudit(
+      editingBudgetId ? 'budget.update' : 'budget.create',
+      `${editingBudgetId ? 'Updated' : 'Added'} budget "${result.budget.name}".`,
+      active,
+      result.budget.name,
+    );
     persist();
-    setFlash(`Budget "${result.budget.name}" added.`);
-    render();
+    setFlash(`Budget "${result.budget.name}" ${editingBudgetId ? 'updated' : 'added'}.`);
+    if (editingBudgetId) navigate('masters');
+    else render();
     return;
   }
 
@@ -5050,6 +5062,36 @@ async function handleClick(event) {
       }
       setFlash(
         result.ok ? `Stock transfer ST-${result.transfer.no} deleted.` : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
+      break;
+    }
+    case 'edit-budget':
+      navigate('masters', { editingBudgetId: trigger.dataset.id });
+      break;
+    case 'cancel-budget-edit':
+      navigate('masters');
+      break;
+    case 'duplicate-budget': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const result = duplicateBudget(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'budget.duplicate',
+          `Duplicated budget as "${result.budget.name}".`,
+          active,
+          result.budget.name,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok ? `Budget duplicated as "${result.budget.name}".` : result.error,
         result.ok ? 'ok' : 'warn',
       );
       render();

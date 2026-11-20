@@ -344,6 +344,17 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 27: budget editing and duplication
+
+- Budget masters can now be edited in place (name, target, year and amount) and
+  duplicated into the next financial year at the same amount, with the target
+  year appended to the name when the name is free.
+- Edit saves still enforce one budget per target per year and unique names; a
+  duplicate refuses to overwrite an existing target/year and asks for the next
+  financial year to exist first.
+- Verification: edit, clash, invalid amount, no-next-year, duplicate, repeat and
+  explicit-year cases; 268 tests (267 pass, 1 skipped) and a 908.4 kB build pass.
+
 ### 2026-11-20 — Phase 26: unfinished-voucher recovery
 
 - A new voucher draft is written to browser storage shortly after typing stops

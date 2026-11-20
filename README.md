@@ -316,8 +316,9 @@ disabled.
   the nature of their primary group).
 - Cost categories and cost centres with add/delete masters. Categories without
   centres and centres used by vouchers are protected from deletion.
-- Annual budgets per ledger or group for a financial year, with add/delete
-  masters. One budget per target per year is enforced.
+- Annual budgets per ledger or group for a financial year, with add, edit,
+  delete and "duplicate next year" masters. One budget per target per year is
+  enforced.
 - Foreign currencies with a code, name, symbol and dated INR exchange rates.
   INR remains the base currency; voucher amounts can be entered in a foreign
   currency and are posted to the books in INR. Currencies used by vouchers

@@ -2114,6 +2114,105 @@ export function addBudget(company, input = {}) {
   return { ok: true, budget };
 }
 
+export function updateBudget(company, budgetId, input = {}) {
+  const budget = (company.budgets ?? []).find((item) => item.id === budgetId);
+  if (!budget) return { ok: false, error: 'Budget not found.' };
+  const targetType = input.targetType === 'group'
+    ? 'group'
+    : input.targetType === 'ledger'
+      ? 'ledger'
+      : budget.targetType;
+  const targetId = input.targetId ?? budget.targetId;
+  const target =
+    targetType === 'group'
+      ? company.groups.find((group) => group.id === targetId)
+      : company.ledgers.find((ledger) => ledger.id === targetId);
+  if (!target) return { ok: false, error: 'Budget target not found.' };
+  const yearId = input.yearId ?? budget.yearId;
+  const year = (company.years ?? []).find((item) => item.id === yearId);
+  if (!year) return { ok: false, error: 'Choose a financial year for the budget.' };
+  const amount = parseAmount(input.amount === undefined ? budget.amount : input.amount);
+  if (amount === null || amount < 0) return { ok: false, error: 'Budget amount must be zero or more.' };
+  const name = String(input.name ?? '').trim() || budget.name;
+  if (name.length > 80) return { ok: false, error: 'Budget name must be 80 characters or fewer.' };
+  if (
+    (company.budgets ?? []).some(
+      (entry) => entry.id !== budgetId && entry.name.toLowerCase() === name.toLowerCase(),
+    )
+  ) {
+    return { ok: false, error: `A budget named "${name}" already exists.` };
+  }
+  if (
+    (company.budgets ?? []).some(
+      (entry) =>
+        entry.id !== budgetId &&
+        entry.targetType === targetType &&
+        entry.targetId === target.id &&
+        entry.yearId === year.id,
+    )
+  ) {
+    return { ok: false, error: `A budget already exists for "${target.name}" in this financial year.` };
+  }
+  budget.name = name;
+  budget.targetType = targetType;
+  budget.targetId = target.id;
+  budget.yearId = year.id;
+  budget.amount = amount;
+  budget.updatedAt = new Date().toISOString();
+  return { ok: true, budget };
+}
+
+function uniqueBudgetName(company, base) {
+  const budgets = company.budgets ?? [];
+  let name = base.slice(0, 80);
+  let attempt = 2;
+  while (budgets.some((budget) => budget.name.toLowerCase() === name.toLowerCase())) {
+    const suffix = ` (${attempt})`;
+    name = `${base.slice(0, 80 - suffix.length)}${suffix}`;
+    attempt += 1;
+  }
+  return name;
+}
+
+export function duplicateBudget(company, budgetId, input = {}) {
+  const source = (company.budgets ?? []).find((item) => item.id === budgetId);
+  if (!source) return { ok: false, error: 'Budget not found.' };
+  const years = [...(company.years ?? [])].sort((a, b) => a.start.localeCompare(b.start));
+  const sourceYear = years.find((year) => year.id === source.yearId);
+  let targetYear = null;
+  if (input.yearId) {
+    targetYear = years.find((year) => year.id === input.yearId) ?? null;
+  } else {
+    targetYear = years.find((year) => year.start > (sourceYear?.start ?? '')) ?? null;
+  }
+  if (!targetYear) {
+    return { ok: false, error: 'Add the next financial year before duplicating this budget.' };
+  }
+  if (
+    (company.budgets ?? []).some(
+      (budget) =>
+        budget.targetType === source.targetType &&
+        budget.targetId === source.targetId &&
+        budget.yearId === targetYear.id,
+    )
+  ) {
+    return { ok: false, error: 'A budget already exists for this target in the next financial year.' };
+  }
+  const baseName = `${source.name} ${targetYear.start.slice(0, 4)}`;
+  const budget = {
+    id: uid('budget'),
+    name: uniqueBudgetName(company, baseName),
+    targetType: source.targetType,
+    targetId: source.targetId,
+    yearId: targetYear.id,
+    amount: source.amount,
+    createdAt: new Date().toISOString(),
+  };
+  company.budgets = company.budgets ?? [];
+  company.budgets.push(budget);
+  return { ok: true, budget };
+}
+
 export function deleteBudget(company, budgetId) {
   const budget = (company.budgets ?? []).find((item) => item.id === budgetId);
   if (!budget) return { ok: false, error: 'Budget not found.' };

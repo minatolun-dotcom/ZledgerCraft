@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   addBudget,
+  addFinancialYear,
   addGroup,
   addLedger,
   addVoucher,
@@ -9,10 +10,12 @@ import {
   deleteBudget,
   deleteGroup,
   deleteLedger,
+  duplicateBudget,
   exportState,
   findLedgerByName,
   importState,
   normalizeBudgets,
+  updateBudget,
 } from '../src/store.js';
 import { budgetVsActual } from '../src/accounting.js';
 
@@ -106,6 +109,60 @@ test('budgets validate targets, years, amounts and duplicates', () => {
   });
   assert.equal(badAmount.ok, false);
   assert.match(badAmount.error, /zero or more/i);
+});
+
+test('budgets can be edited and duplicated into the next financial year', () => {
+  const { company, rent, salaries } = budgetFixture();
+  const first = addBudget(company, {
+    name: 'Rent plan',
+    targetType: 'ledger',
+    targetId: rent.id,
+    yearId: yearId(company),
+    amount: 1000,
+  }).budget;
+  addBudget(company, {
+    name: 'Salary plan',
+    targetType: 'ledger',
+    targetId: salaries.id,
+    yearId: yearId(company),
+    amount: 5000,
+  });
+
+  const updated = updateBudget(company, first.id, { name: 'Rent revised', amount: 1200 });
+  assert.equal(updated.ok, true, updated.error);
+  assert.equal(updated.budget.name, 'Rent revised');
+  assert.equal(updated.budget.amount, 1200);
+  assert.equal(updated.budget.targetId, rent.id);
+  assert.ok(updated.budget.updatedAt);
+
+  const clash = updateBudget(company, first.id, { name: 'salary plan' });
+  assert.equal(clash.ok, false);
+  assert.match(clash.error, /already exists/);
+
+  const badAmount = updateBudget(company, first.id, { amount: -5 });
+  assert.equal(badAmount.ok, false);
+  assert.match(badAmount.error, /zero or more/);
+
+  const noNextYear = duplicateBudget(company, first.id);
+  assert.equal(noNextYear.ok, false);
+  assert.match(noNextYear.error, /next financial year/);
+
+  const nextYear = addFinancialYear(company);
+  assert.equal(nextYear.ok, true, nextYear.error);
+  const copy = duplicateBudget(company, first.id);
+  assert.equal(copy.ok, true, copy.error);
+  assert.equal(copy.budget.yearId, nextYear.year.id);
+  assert.equal(copy.budget.targetId, rent.id);
+  assert.equal(copy.budget.amount, 1200);
+  assert.match(copy.budget.name, /2027/);
+
+  const again = duplicateBudget(company, first.id);
+  assert.equal(again.ok, false);
+  assert.match(again.error, /already exists/);
+
+  const sameYear = duplicateBudget(company, first.id, { yearId: yearId(company) });
+  assert.equal(sameYear.ok, false);
+  assert.match(sameYear.error, /already exists/);
 });
 
 test('budget vs actual measures expense movement up to the as-on date', () => {

@@ -4457,6 +4457,105 @@ function addBudget(company, input = {}) {
   return { ok: true, budget };
 }
 
+function updateBudget(company, budgetId, input = {}) {
+  const budget = (company.budgets ?? []).find((item) => item.id === budgetId);
+  if (!budget) return { ok: false, error: 'Budget not found.' };
+  const targetType = input.targetType === 'group'
+    ? 'group'
+    : input.targetType === 'ledger'
+      ? 'ledger'
+      : budget.targetType;
+  const targetId = input.targetId ?? budget.targetId;
+  const target =
+    targetType === 'group'
+      ? company.groups.find((group) => group.id === targetId)
+      : company.ledgers.find((ledger) => ledger.id === targetId);
+  if (!target) return { ok: false, error: 'Budget target not found.' };
+  const yearId = input.yearId ?? budget.yearId;
+  const year = (company.years ?? []).find((item) => item.id === yearId);
+  if (!year) return { ok: false, error: 'Choose a financial year for the budget.' };
+  const amount = parseAmount(input.amount === undefined ? budget.amount : input.amount);
+  if (amount === null || amount < 0) return { ok: false, error: 'Budget amount must be zero or more.' };
+  const name = String(input.name ?? '').trim() || budget.name;
+  if (name.length > 80) return { ok: false, error: 'Budget name must be 80 characters or fewer.' };
+  if (
+    (company.budgets ?? []).some(
+      (entry) => entry.id !== budgetId && entry.name.toLowerCase() === name.toLowerCase(),
+    )
+  ) {
+    return { ok: false, error: `A budget named "${name}" already exists.` };
+  }
+  if (
+    (company.budgets ?? []).some(
+      (entry) =>
+        entry.id !== budgetId &&
+        entry.targetType === targetType &&
+        entry.targetId === target.id &&
+        entry.yearId === year.id,
+    )
+  ) {
+    return { ok: false, error: `A budget already exists for "${target.name}" in this financial year.` };
+  }
+  budget.name = name;
+  budget.targetType = targetType;
+  budget.targetId = target.id;
+  budget.yearId = year.id;
+  budget.amount = amount;
+  budget.updatedAt = new Date().toISOString();
+  return { ok: true, budget };
+}
+
+function uniqueBudgetName(company, base) {
+  const budgets = company.budgets ?? [];
+  let name = base.slice(0, 80);
+  let attempt = 2;
+  while (budgets.some((budget) => budget.name.toLowerCase() === name.toLowerCase())) {
+    const suffix = ` (${attempt})`;
+    name = `${base.slice(0, 80 - suffix.length)}${suffix}`;
+    attempt += 1;
+  }
+  return name;
+}
+
+function duplicateBudget(company, budgetId, input = {}) {
+  const source = (company.budgets ?? []).find((item) => item.id === budgetId);
+  if (!source) return { ok: false, error: 'Budget not found.' };
+  const years = [...(company.years ?? [])].sort((a, b) => a.start.localeCompare(b.start));
+  const sourceYear = years.find((year) => year.id === source.yearId);
+  let targetYear = null;
+  if (input.yearId) {
+    targetYear = years.find((year) => year.id === input.yearId) ?? null;
+  } else {
+    targetYear = years.find((year) => year.start > (sourceYear?.start ?? '')) ?? null;
+  }
+  if (!targetYear) {
+    return { ok: false, error: 'Add the next financial year before duplicating this budget.' };
+  }
+  if (
+    (company.budgets ?? []).some(
+      (budget) =>
+        budget.targetType === source.targetType &&
+        budget.targetId === source.targetId &&
+        budget.yearId === targetYear.id,
+    )
+  ) {
+    return { ok: false, error: 'A budget already exists for this target in the next financial year.' };
+  }
+  const baseName = `${source.name} ${targetYear.start.slice(0, 4)}`;
+  const budget = {
+    id: uid('budget'),
+    name: uniqueBudgetName(company, baseName),
+    targetType: source.targetType,
+    targetId: source.targetId,
+    yearId: targetYear.id,
+    amount: source.amount,
+    createdAt: new Date().toISOString(),
+  };
+  company.budgets = company.budgets ?? [];
+  company.budgets.push(budget);
+  return { ok: true, budget };
+}
+
 function deleteBudget(company, budgetId) {
   const budget = (company.budgets ?? []).find((item) => item.id === budgetId);
   if (!budget) return { ok: false, error: 'Budget not found.' };
@@ -12882,6 +12981,9 @@ function budgetTargetOptions(active, selected = '') {
 function budgetMastersPanel(active) {
   const budgets = [...(active.budgets ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   const years = [...(active.years ?? [])].sort((a, b) => b.start.localeCompare(a.start));
+  const editing = view.editingBudgetId
+    ? budgets.find((budget) => budget.id === view.editingBudgetId) ?? null
+    : null;
   const rows = budgets
     .map((budget) => {
       const target =
@@ -12895,6 +12997,8 @@ function budgetMastersPanel(active) {
         <td class="muted">${budget.targetType === 'group' ? 'Group' : 'Ledger'} · ${esc(year ? dateLabel(year.start) : 'Missing year')}</td>
         <td class="num">${money(budget.amount)}</td>
         <td class="row-actions">
+          <button class="btn small" type="button" data-action="edit-budget" data-id="${esc(budget.id)}">Edit</button>
+          <button class="btn small ghost" type="button" data-action="duplicate-budget" data-id="${esc(budget.id)}">Duplicate next year</button>
           <button class="btn small danger" type="button" data-action="delete-budget" data-id="${esc(budget.id)}">Delete</button>
         </td>
       </tr>`;
@@ -12903,28 +13007,29 @@ function budgetMastersPanel(active) {
 
   return panel(
     `Budgets <span class="count">${budgets.length}</span>`,
-    `<p class="muted">Create one annual budget per ledger or group. Actuals are measured from the start of the selected financial year to the as-on date in Budget vs Actual.</p>
+    `    <p class="muted">Create one annual budget per ledger or group. Actuals are measured from the start of the selected financial year to the as-on date in Budget vs Actual.</p>
     <form id="budget-form" class="form-grid" novalidate>
       <label class="field">
         <span>Budget name</span>
-        <input name="name" maxlength="80" placeholder="Optional, e.g. FY marketing budget">
+        <input name="name" maxlength="80" placeholder="Optional, e.g. FY marketing budget" value="${esc(editing?.name ?? '')}">
       </label>
       <label class="field">
         <span>Budget for</span>
-        <select name="target" required>${budgetTargetOptions(active)}</select>
+        <select name="target" required>${budgetTargetOptions(active, editing ? `${editing.targetType}:${editing.targetId}` : '')}</select>
       </label>
       <label class="field">
         <span>Financial year</span>
         <select name="yearId" required>${years
-          .map((year) => `<option value="${esc(year.id)}"${year.id === active.yearId ? ' selected' : ''}>${esc(dateLabel(year.start))} – ${esc(dateLabel(year.end))}</option>`)
+          .map((year) => `<option value="${esc(year.id)}"${year.id === (editing?.yearId ?? active.yearId) ? ' selected' : ''}>${esc(dateLabel(year.start))} – ${esc(dateLabel(year.end))}</option>`)
           .join('')}</select>
       </label>
       <label class="field narrow">
         <span>Amount</span>
-        <input name="amount" inputmode="decimal" placeholder="0.00" required>
+        <input name="amount" inputmode="decimal" placeholder="0.00" value="${esc(editing?.amount ?? '')}" required>
       </label>
       <div class="field form-actions">
-        <button class="btn primary" type="submit">Add budget</button>
+        <button class="btn primary" type="submit">${editing ? 'Save budget' : 'Add budget'}</button>
+        ${editing ? '<button class="btn ghost" type="button" data-action="cancel-budget-edit">Cancel</button>' : ''}
       </div>
       <p id="budget-error" class="form-error" role="alert"></p>
     </form>
@@ -20249,21 +20354,31 @@ async function handleSubmit(event) {
     }
     const data = new FormData(form);
     const [targetType, ...targetParts] = String(data.get('target') ?? '').split(':');
-    const result = addBudget(active, {
+    const payload = {
       name: data.get('name'),
       targetType,
       targetId: targetParts.join(':'),
       yearId: data.get('yearId'),
       amount: data.get('amount'),
-    });
+    };
+    const editingBudgetId = view.editingBudgetId;
+    const result = editingBudgetId
+      ? updateBudget(active, editingBudgetId, payload)
+      : addBudget(active, payload);
     if (!result.ok) {
       showFormError(result.error, 'budget-error');
       return;
     }
-    logAudit('budget.create', `Added budget "${result.budget.name}".`, active, result.budget.name);
+    logAudit(
+      editingBudgetId ? 'budget.update' : 'budget.create',
+      `${editingBudgetId ? 'Updated' : 'Added'} budget "${result.budget.name}".`,
+      active,
+      result.budget.name,
+    );
     persist();
-    setFlash(`Budget "${result.budget.name}" added.`);
-    render();
+    setFlash(`Budget "${result.budget.name}" ${editingBudgetId ? 'updated' : 'added'}.`);
+    if (editingBudgetId) navigate('masters');
+    else render();
     return;
   }
 
@@ -22418,6 +22533,36 @@ async function handleClick(event) {
       }
       setFlash(
         result.ok ? `Stock transfer ST-${result.transfer.no} deleted.` : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
+      break;
+    }
+    case 'edit-budget':
+      navigate('masters', { editingBudgetId: trigger.dataset.id });
+      break;
+    case 'cancel-budget-edit':
+      navigate('masters');
+      break;
+    case 'duplicate-budget': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const result = duplicateBudget(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'budget.duplicate',
+          `Duplicated budget as "${result.budget.name}".`,
+          active,
+          result.budget.name,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok ? `Budget duplicated as "${result.budget.name}".` : result.error,
         result.ok ? 'ok' : 'warn',
       );
       render();

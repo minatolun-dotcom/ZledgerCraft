@@ -632,6 +632,9 @@ export function budgetTargetOptions(active, selected = '') {
 export function budgetMastersPanel(active) {
   const budgets = [...(active.budgets ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   const years = [...(active.years ?? [])].sort((a, b) => b.start.localeCompare(a.start));
+  const editing = view.editingBudgetId
+    ? budgets.find((budget) => budget.id === view.editingBudgetId) ?? null
+    : null;
   const rows = budgets
     .map((budget) => {
       const target =
@@ -645,6 +648,8 @@ export function budgetMastersPanel(active) {
         <td class="muted">${budget.targetType === 'group' ? 'Group' : 'Ledger'} · ${esc(year ? dateLabel(year.start) : 'Missing year')}</td>
         <td class="num">${money(budget.amount)}</td>
         <td class="row-actions">
+          <button class="btn small" type="button" data-action="edit-budget" data-id="${esc(budget.id)}">Edit</button>
+          <button class="btn small ghost" type="button" data-action="duplicate-budget" data-id="${esc(budget.id)}">Duplicate next year</button>
           <button class="btn small danger" type="button" data-action="delete-budget" data-id="${esc(budget.id)}">Delete</button>
         </td>
       </tr>`;
@@ -653,28 +658,29 @@ export function budgetMastersPanel(active) {
 
   return panel(
     `Budgets <span class="count">${budgets.length}</span>`,
-    `<p class="muted">Create one annual budget per ledger or group. Actuals are measured from the start of the selected financial year to the as-on date in Budget vs Actual.</p>
+    `    <p class="muted">Create one annual budget per ledger or group. Actuals are measured from the start of the selected financial year to the as-on date in Budget vs Actual.</p>
     <form id="budget-form" class="form-grid" novalidate>
       <label class="field">
         <span>Budget name</span>
-        <input name="name" maxlength="80" placeholder="Optional, e.g. FY marketing budget">
+        <input name="name" maxlength="80" placeholder="Optional, e.g. FY marketing budget" value="${esc(editing?.name ?? '')}">
       </label>
       <label class="field">
         <span>Budget for</span>
-        <select name="target" required>${budgetTargetOptions(active)}</select>
+        <select name="target" required>${budgetTargetOptions(active, editing ? `${editing.targetType}:${editing.targetId}` : '')}</select>
       </label>
       <label class="field">
         <span>Financial year</span>
         <select name="yearId" required>${years
-          .map((year) => `<option value="${esc(year.id)}"${year.id === active.yearId ? ' selected' : ''}>${esc(dateLabel(year.start))} – ${esc(dateLabel(year.end))}</option>`)
+          .map((year) => `<option value="${esc(year.id)}"${year.id === (editing?.yearId ?? active.yearId) ? ' selected' : ''}>${esc(dateLabel(year.start))} – ${esc(dateLabel(year.end))}</option>`)
           .join('')}</select>
       </label>
       <label class="field narrow">
         <span>Amount</span>
-        <input name="amount" inputmode="decimal" placeholder="0.00" required>
+        <input name="amount" inputmode="decimal" placeholder="0.00" value="${esc(editing?.amount ?? '')}" required>
       </label>
       <div class="field form-actions">
-        <button class="btn primary" type="submit">Add budget</button>
+        <button class="btn primary" type="submit">${editing ? 'Save budget' : 'Add budget'}</button>
+        ${editing ? '<button class="btn ghost" type="button" data-action="cancel-budget-edit">Cancel</button>' : ''}
       </div>
       <p id="budget-error" class="form-error" role="alert"></p>
     </form>

@@ -448,7 +448,7 @@ export function budgetsScreen() {
           <div class="budget-meter"><span style="width:${used}%"></span></div>
           <span class="muted small">${row.usedPercent === null ? 'No budget' : `${fmtQty(row.usedPercent)}%`}</span>
         </td>
-        <td><span class="badge ${row.over ? 'overdue' : ''}">${row.over ? 'Over budget' : 'Within budget'}</span></td>
+        <td><span class="badge ${row.over ? 'overdue' : ''}">${row.over ? 'Over budget' : 'Within budget'}</span>${row.nested ? '<div class="muted small">Inside a group budget</div>' : ''}</td>
       </tr>`;
     })
     .join('');
@@ -472,7 +472,7 @@ export function budgetsScreen() {
           <tbody>${rows}</tbody>
         </table></div>`
       : '<p class="muted">No budgets for this financial year. Add year-wise budgets in Masters.</p>'}`,
-    'Variance is budget less actual. Totals add each budget, so overlapping group and ledger budgets can double-count.',
+    `Variance is budget less actual. Totals exclude ${report.overlapCount || 'no'} budget${report.overlapCount === 1 ? '' : 's'} nested inside a group budget, so overlapping targets are not double-counted.`,
   );
 }
 

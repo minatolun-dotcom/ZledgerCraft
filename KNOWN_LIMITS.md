@@ -59,7 +59,7 @@ README. When a new limit is introduced, add it here in the same change.
 | KL-23 | Unallocated lines are excluded | Cost-centre summary and break-up include only lines with a centre. There is no unallocated-cost reconciliation. |
 | KL-24 | No cost-centre budgets or cost categories in P&L | Cost reports are allocation summaries; there is no cost-category P&L, budget comparison or cost-centre closing. |
 | KL-59 | Cost masters are add/delete only | Cost categories and centres cannot be renamed, merged or moved between categories after creation. |
-| KL-60 | Overlapping budgets can double-count totals | A group budget and a ledger budget inside it can both exist; the report totals add each budget independently. |
+| KL-60 | Overlapping budgets are summarised, not reconciled | A group budget and a ledger budget inside it can both exist. The report still lists both rows but totals exclude the nested budget and label it "Inside a group budget", so totals are not double-counted; there is no per-target reconciliation of the overlap. |
 | KL-61 | Budget actuals exclude openings | Actual is net voucher movement from the financial-year start to the as-on date; ledger opening balances and prior-year activity are excluded. |
 | KL-62 | Budgets have no version history | Budgets can be edited in place and duplicated into the next financial year at the same amount. There is no phased/revised budget versioning, bulk copy for every budget or an audit trail of earlier amounts beyond the app log. |
 | KL-63 | No cost-centre budgets | Budgets target a ledger or group only; they cannot target a cost centre or compare by cost category. |

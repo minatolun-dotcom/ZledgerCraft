@@ -1005,14 +1005,39 @@ export function budgetVsActual(company, filters = {}) {
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  const groupBudgetTargets = new Set(
+    rows.filter((row) => row.targetType === 'group').map((row) => row.targetId),
+  );
+  const groupOrAncestorBudgeted = (groupId) => {
+    let group = groupById(company, groupId);
+    let guard = 0;
+    while (group && guard < 32) {
+      if (groupBudgetTargets.has(group.id)) return true;
+      group = group.parentId ? groupById(company, group.parentId) : null;
+      guard += 1;
+    }
+    return false;
+  };
+  for (const row of rows) {
+    if (row.targetType === 'group') {
+      const target = groupById(company, row.targetId);
+      row.nested = Boolean(target?.parentId && groupOrAncestorBudgeted(target.parentId));
+    } else {
+      const ledger = (company.ledgers ?? []).find((entry) => entry.id === row.targetId);
+      row.nested = Boolean(ledger && groupOrAncestorBudgeted(ledger.groupId));
+    }
+  }
+  const topRows = rows.filter((row) => !row.nested);
+
   return {
     year,
     asOn,
     rows,
     count: rows.length,
-    totalBudget: round2(rows.reduce((sum, row) => sum + row.amount, 0)),
-    totalActual: round2(rows.reduce((sum, row) => sum + row.actual, 0)),
-    totalVariance: round2(rows.reduce((sum, row) => sum + row.variance, 0)),
+    overlapCount: rows.length - topRows.length,
+    totalBudget: round2(topRows.reduce((sum, row) => sum + row.amount, 0)),
+    totalActual: round2(topRows.reduce((sum, row) => sum + row.actual, 0)),
+    totalVariance: round2(topRows.reduce((sum, row) => sum + row.variance, 0)),
     overCount: rows.filter((row) => row.over).length,
   };
 }

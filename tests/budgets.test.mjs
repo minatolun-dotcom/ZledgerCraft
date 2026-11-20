@@ -259,6 +259,40 @@ test('over-budget rows are flagged and budgets can be deleted', () => {
   assert.equal(company.budgets.length, 0);
 });
 
+test('budget totals exclude a ledger budget nested inside a group budget', () => {
+  const { company, rent, salaries } = budgetFixture();
+  const group = company.groups.find((entry) => entry.key === 'indirectExpenses');
+  addBudget(company, {
+    name: 'Overhead plan',
+    targetType: 'group',
+    targetId: group.id,
+    yearId: yearId(company),
+    amount: 10000,
+  });
+  addBudget(company, {
+    name: 'Rent plan',
+    targetType: 'ledger',
+    targetId: rent.id,
+    yearId: yearId(company),
+    amount: 2000,
+  });
+  addBudget(company, {
+    name: 'Salary plan',
+    targetType: 'ledger',
+    targetId: salaries.id,
+    yearId: yearId(company),
+    amount: 6000,
+  });
+
+  const report = budgetVsActual(company, { yearId: yearId(company), asOn: '2026-04-30' });
+  assert.equal(report.rows.length, 3, 'every budget still has its own row');
+  assert.equal(report.overlapCount, 2);
+  assert.equal(report.rows.find((row) => row.name === 'Rent plan').nested, true);
+  assert.equal(report.rows.find((row) => row.name === 'Salary plan').nested, true);
+  assert.equal(report.rows.find((row) => row.name === 'Overhead plan').nested, false);
+  assert.equal(report.totalBudget, 10000, 'only the top-level group budget is totalled');
+});
+
 test('budgets survive backup and reject missing targets on restore', () => {
   const { company, rent } = budgetFixture();
   addBudget(company, {

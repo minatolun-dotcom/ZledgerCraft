@@ -8598,14 +8598,39 @@ function budgetVsActual(company, filters = {}) {
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  const groupBudgetTargets = new Set(
+    rows.filter((row) => row.targetType === 'group').map((row) => row.targetId),
+  );
+  const groupOrAncestorBudgeted = (groupId) => {
+    let group = groupById(company, groupId);
+    let guard = 0;
+    while (group && guard < 32) {
+      if (groupBudgetTargets.has(group.id)) return true;
+      group = group.parentId ? groupById(company, group.parentId) : null;
+      guard += 1;
+    }
+    return false;
+  };
+  for (const row of rows) {
+    if (row.targetType === 'group') {
+      const target = groupById(company, row.targetId);
+      row.nested = Boolean(target?.parentId && groupOrAncestorBudgeted(target.parentId));
+    } else {
+      const ledger = (company.ledgers ?? []).find((entry) => entry.id === row.targetId);
+      row.nested = Boolean(ledger && groupOrAncestorBudgeted(ledger.groupId));
+    }
+  }
+  const topRows = rows.filter((row) => !row.nested);
+
   return {
     year,
     asOn,
     rows,
     count: rows.length,
-    totalBudget: round2(rows.reduce((sum, row) => sum + row.amount, 0)),
-    totalActual: round2(rows.reduce((sum, row) => sum + row.actual, 0)),
-    totalVariance: round2(rows.reduce((sum, row) => sum + row.variance, 0)),
+    overlapCount: rows.length - topRows.length,
+    totalBudget: round2(topRows.reduce((sum, row) => sum + row.amount, 0)),
+    totalActual: round2(topRows.reduce((sum, row) => sum + row.actual, 0)),
+    totalVariance: round2(topRows.reduce((sum, row) => sum + row.variance, 0)),
     overCount: rows.filter((row) => row.over).length,
   };
 }
@@ -16120,7 +16145,7 @@ function budgetsScreen() {
           <div class="budget-meter"><span style="width:${used}%"></span></div>
           <span class="muted small">${row.usedPercent === null ? 'No budget' : `${fmtQty(row.usedPercent)}%`}</span>
         </td>
-        <td><span class="badge ${row.over ? 'overdue' : ''}">${row.over ? 'Over budget' : 'Within budget'}</span></td>
+        <td><span class="badge ${row.over ? 'overdue' : ''}">${row.over ? 'Over budget' : 'Within budget'}</span>${row.nested ? '<div class="muted small">Inside a group budget</div>' : ''}</td>
       </tr>`;
     })
     .join('');
@@ -16144,7 +16169,7 @@ function budgetsScreen() {
           <tbody>${rows}</tbody>
         </table></div>`
       : '<p class="muted">No budgets for this financial year. Add year-wise budgets in Masters.</p>'}`,
-    'Variance is budget less actual. Totals add each budget, so overlapping group and ledger budgets can double-count.',
+    `Variance is budget less actual. Totals exclude ${report.overlapCount || 'no'} budget${report.overlapCount === 1 ? '' : 's'} nested inside a group budget, so overlapping targets are not double-counted.`,
   );
 }
 

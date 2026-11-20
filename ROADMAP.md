@@ -344,6 +344,16 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 30: no double-counted budget totals
+
+- Budget vs Actual still lists every budget, but totals now use only top-level
+  targets: a ledger budget inside a budgeted group, or a subgroup inside a
+  budgeted parent, is marked "Inside a group budget" and left out of the totals.
+- Over-budget counts still consider every row, so a nested budget can still be
+  flagged even though it does not inflate the summary cards.
+- Verification: three-budget overlap, nested flags, row count and top-level total;
+  271 tests (270 pass, 1 skipped) and a 914.8 kB build pass.
+
 ### 2026-11-20 — Phase 29: bill register status date
 
 - The bill-wise register now has a separate status-as-on date, so a bill period

@@ -48,8 +48,9 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 [KNOWN_LIMITS.md § Remaining limits and free paths](KNOWN_LIMITS.md#remaining-limits-and-free-paths):
 App-level encryption (passphrase-encrypted JSON downloads and optional
 AES-256-GCM encryption for server/R2 backups are complete; live-workspace
-encryption remains), incremental master-column promotion, APIs/webhooks and
-statutory integrations. Voucher
+encryption remains), incremental master-column promotion (ledger opening,
+party tax/address and GST-role fields are now typed SQLite columns), APIs/
+webhooks and statutory integrations. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
 now complete.
 
@@ -164,11 +165,12 @@ Working now:
   closing value, top items by value and items with no issues during the year;
   working capital; top expense heads; plus Print/CSV/Excel from the Statistics
   screen.
-- Verification: 247/247 engine tests, including server scoping, scoped merge,
+- Verification: 249/249 engine tests, including server scoping, scoped merge,
   login history, lockout, single-use MFA, save/event audit chains and
   backup/restore coverage plus encrypted JSON and server-backup round trips,
-  wrong-passphrase, missing-key and tamper checks; the existing browser suites
-  were not rerun in this phase; single-file build 880.5 kB.
+  wrong-passphrase, missing-key and tamper checks, and ledger column promotion
+  from schema v2 JSON; the existing browser suites were not rerun in this phase;
+  single-file build 880.5 kB.
 
 Why it is not production-ready: browser mode still lives in one browser's local
 storage with unprotected access-control profiles, the app audit trail is not
@@ -332,6 +334,23 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-20 — Phase 11: ledger master-column promotion
+
+- Promoted ledger opening, opening type, GSTIN, GST state, PAN, address, city,
+  PIN, GST role and creation time into typed SQLite columns. The remaining
+  ledger fields stay in its JSON row, so older data and the accounting engine
+  keep their shape.
+- Raised the normalized SQLite schema to version 3. Existing databases add the
+  columns in place and are re-written from the JSON fallback during migration;
+  no backup restore or manual migration is required.
+- Reads prefer the typed columns but fall back to old JSON when a column is
+  empty, which keeps pre-promotion rows and restored backups readable.
+- Postgres continues to store the whole workspace as one JSONB document; this
+  phase changes the normalized SQLite layout only.
+- Verification: schema-v2 promotion, JSON fallback, write-side column sync and
+  full round-trip tests; 249/249 engine tests and an 880.5 kB single-file build
+  pass.
 
 ### 2026-11-20 — Phase 10: encrypted server backups
 

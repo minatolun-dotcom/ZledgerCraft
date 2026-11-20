@@ -24,6 +24,13 @@ function fixture() {
             opening: 0,
             openingType: 'Dr',
             gstin: '27AABCU9603R1ZM',
+            stateCode: '27',
+            pan: 'ABCDE1234F',
+            address: '1 Market Road',
+            city: 'Pune',
+            pin: '411001',
+            gstRole: 'cgst',
+            createdAt: '2026-04-01T00:00:00.000Z',
           },
         ],
         vouchers: [
@@ -104,6 +111,21 @@ test('normalized storage migrates the legacy workspace and round-trips every cor
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM workspace').get().count, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM companies').get().count, 2);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ledgers').get().count, 1);
+  const promoted = db.prepare('SELECT * FROM ledgers WHERE id = ?').get('led1');
+  assert.equal(promoted.opening, 0);
+  assert.equal(promoted.opening_type, 'Dr');
+  assert.equal(promoted.gstin, '27AABCU9603R1ZM');
+  assert.equal(promoted.state_code, '27');
+  assert.equal(promoted.pan, 'ABCDE1234F');
+  assert.equal(promoted.address, '1 Market Road');
+  assert.equal(promoted.city, 'Pune');
+  assert.equal(promoted.pin, '411001');
+  assert.equal(promoted.gst_role, 'cgst');
+  assert.equal(promoted.created_at, '2026-04-01T00:00:00.000Z');
+  const ledgerJson = JSON.parse(promoted.data);
+  for (const field of ['opening', 'openingType', 'gstin', 'stateCode', 'pan', 'address', 'city', 'pin', 'gstRole', 'createdAt']) {
+    assert.equal(ledgerJson[field], undefined, `${field} should not remain in ledger JSON`);
+  }
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM vouchers').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM voucher_lines').get().count, 2);
   assert.equal(
@@ -259,7 +281,7 @@ test('schema version 1 workspaces migrate their JSON collections into rows', () 
   const upgraded = new WorkspaceStore(db);
   assert.equal(
     db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version,
-    2,
+    3,
   );
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'groups'").get().count,
@@ -267,6 +289,62 @@ test('schema version 1 workspaces migrate their JSON collections into rows', () 
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stock_items').get().count, 1);
   assert.deepEqual(upgraded.read().state, expected);
+});
+
+test('schema version 2 promotes ledger JSON fields into typed columns', () => {
+  const { db, store } = legacyStore(fixture());
+  store.migrateLegacy();
+  const expected = store.read().state;
+  const ledger = expected.companies[0].ledgers[0];
+  const data = JSON.parse(db.prepare('SELECT data FROM ledgers WHERE id = ?').get('led1').data);
+  for (const field of ['opening', 'openingType', 'gstin', 'stateCode', 'pan', 'address', 'city', 'pin', 'gstRole', 'createdAt']) {
+    data[field] = ledger[field];
+  }
+  db.prepare(
+    `UPDATE ledgers SET opening = NULL, opening_type = NULL, gstin = NULL, state_code = NULL,
+       pan = NULL, address = NULL, city = NULL, pin = NULL, gst_role = NULL, created_at = NULL,
+       data = ? WHERE id = ?`,
+  ).run(JSON.stringify(data), 'led1');
+  db.prepare('UPDATE workspace_meta SET schema_version = 2').run();
+
+  const upgraded = new WorkspaceStore(db);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 3);
+  const row = db.prepare('SELECT * FROM ledgers WHERE id = ?').get('led1');
+  assert.equal(row.opening, 0);
+  assert.equal(row.opening_type, 'Dr');
+  assert.equal(row.pan, 'ABCDE1234F');
+  assert.equal(row.pin, '411001');
+  assert.equal(row.gst_role, 'cgst');
+  assert.deepEqual(upgraded.read().state, expected);
+});
+
+test('normalized writes keep promoted ledger columns in sync', () => {
+  const { db, store } = legacyStore(fixture());
+  store.migrateLegacy();
+  const before = store.read();
+  const next = structuredClone(before.state);
+  Object.assign(next.companies[0].ledgers[0], {
+    opening: 500.25,
+    openingType: 'Cr',
+    pan: 'FGHIJ5678K',
+    stateCode: '29',
+    address: '9 Residency Road',
+    city: 'Bengaluru',
+    pin: '560001',
+    gstRole: 'sgst',
+  });
+  assert.equal(store.write(next, before.rev, { updatedAt: '2026-06-01T00:00:00.000Z' }).conflict, false);
+  const row = db.prepare('SELECT * FROM ledgers WHERE id = ?').get('led1');
+  assert.equal(row.opening, 500.25);
+  assert.equal(row.opening_type, 'Cr');
+  assert.equal(row.pan, 'FGHIJ5678K');
+  assert.equal(row.state_code, '29');
+  assert.equal(row.address, '9 Residency Road');
+  assert.equal(row.city, 'Bengaluru');
+  assert.equal(row.pin, '560001');
+  assert.equal(row.gst_role, 'sgst');
+  assert.equal(JSON.parse(row.data).pan, undefined);
+  assert.deepEqual(store.read().state.companies[0].ledgers[0], next.companies[0].ledgers[0]);
 });
 
 test('record leases block other sessions, renew with the same token and expire', () => {

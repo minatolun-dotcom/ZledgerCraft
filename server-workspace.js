@@ -6,8 +6,22 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { deepEqual, mergeWorkspaceStates, repairVoucherNumbers } from './server-merge.js';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const HISTORY_LIMIT = 20;
+// Ledger fields that are useful as typed columns. The complete ledger JSON is
+// still kept for compatibility, but these values are removed from it.
+const PROMOTED_LEDGER_COLUMNS = [
+  ['opening', 'REAL'],
+  ['opening_type', 'TEXT'],
+  ['gstin', 'TEXT'],
+  ['state_code', 'TEXT'],
+  ['pan', 'TEXT'],
+  ['address', 'TEXT'],
+  ['city', 'TEXT'],
+  ['pin', 'TEXT'],
+  ['gst_role', 'TEXT'],
+  ['created_at', 'TEXT'],
+];
 const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 const MAX_LEASE_MS = 10 * 60 * 1000;
 
@@ -122,7 +136,30 @@ function stateFromRows({
 
   for (const row of ledgers) {
     if (!ledgersByCompany.has(row.company_id)) ledgersByCompany.set(row.company_id, []);
-    ledgersByCompany.get(row.company_id).push({ ...JSON.parse(row.data), id: row.id, name: row.name, groupId: row.group_id });
+    const data = JSON.parse(row.data);
+    const ledger = {
+      ...data,
+      id: row.id,
+      name: row.name,
+      groupId: row.group_id,
+      opening: row.opening === null || row.opening === undefined ? number(data.opening) : number(row.opening),
+      openingType: (row.opening_type ?? data.openingType) === 'Cr' ? 'Cr' : 'Dr',
+    };
+    for (const [column, field] of [
+      ['gstin', 'gstin'],
+      ['state_code', 'stateCode'],
+      ['pan', 'pan'],
+      ['address', 'address'],
+      ['city', 'city'],
+      ['pin', 'pin'],
+      ['gst_role', 'gstRole'],
+      ['created_at', 'createdAt'],
+    ]) {
+      if (row[column] !== null && row[column] !== undefined && row[column] !== '') {
+        ledger[field] = row[column];
+      }
+    }
+    ledgersByCompany.get(row.company_id).push(ledger);
   }
   for (const row of vouchers) {
     if (!vouchersByCompany.has(row.company_id)) vouchersByCompany.set(row.company_id, []);
@@ -257,6 +294,16 @@ export class WorkspaceStore {
         position INTEGER NOT NULL,
         name TEXT,
         group_id TEXT,
+        opening REAL,
+        opening_type TEXT,
+        gstin TEXT,
+        state_code TEXT,
+        pan TEXT,
+        address TEXT,
+        city TEXT,
+        pin TEXT,
+        gst_role TEXT,
+        created_at TEXT,
         data TEXT NOT NULL,
         PRIMARY KEY (company_id, id)
       );
@@ -325,6 +372,12 @@ export class WorkspaceStore {
       CREATE INDEX IF NOT EXISTS stock_items_name ON stock_items(company_id, name);
       CREATE INDEX IF NOT EXISTS workspace_leases_expiry ON workspace_leases(expires_at);
     `);
+    const ledgerColumns = new Set(
+      this.db.prepare('PRAGMA table_info(ledgers)').all().map((column) => column.name),
+    );
+    for (const [name, type] of PROMOTED_LEDGER_COLUMNS) {
+      if (!ledgerColumns.has(name)) this.db.exec(`ALTER TABLE ledgers ADD COLUMN ${name} ${type}`);
+    }
 
     this.meta = this.db.prepare('SELECT * FROM workspace_meta WHERE id = 1');
     this.users = this.db.prepare('SELECT data FROM workspace_users ORDER BY position');
@@ -354,8 +407,10 @@ export class WorkspaceStore {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     this.insertLedger = this.db.prepare(`
-      INSERT INTO ledgers (company_id, id, position, name, group_id, data)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO ledgers
+        (company_id, id, position, name, group_id, opening, opening_type,
+         gstin, state_code, pan, address, city, pin, gst_role, created_at, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     this.insertVoucher = this.db.prepare(`
       INSERT INTO vouchers (company_id, id, position, type, no, date, total, data)
@@ -640,15 +695,40 @@ export class WorkspaceStore {
         }
         for (const [position, ledger] of (company.ledgers ?? []).entries()) {
           const ledgerData = { ...ledger };
-          delete ledgerData.id;
-          delete ledgerData.name;
-          delete ledgerData.groupId;
+          for (const field of [
+            'id',
+            'name',
+            'groupId',
+            'opening',
+            'openingType',
+            'gstin',
+            'stateCode',
+            'pan',
+            'address',
+            'city',
+            'pin',
+            'gstRole',
+            'createdAt',
+          ]) {
+            delete ledgerData[field];
+          }
+          const optional = (value) => (text(value) ? text(value) : null);
           this.insertLedger.run(
             text(company.id),
             text(ledger.id),
             position,
             text(ledger.name),
             text(ledger.groupId) || null,
+            number(ledger.opening),
+            ledger.openingType === 'Cr' ? 'Cr' : 'Dr',
+            optional(ledger.gstin),
+            optional(ledger.stateCode),
+            optional(ledger.pan),
+            optional(ledger.address),
+            optional(ledger.city),
+            optional(ledger.pin),
+            optional(ledger.gstRole),
+            optional(ledger.createdAt),
             JSON.stringify(ledgerData),
           );
         }

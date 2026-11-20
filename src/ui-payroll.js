@@ -6,6 +6,7 @@ import {
   payrollBankTransferRows,
   employeeLeaveBalance,
   payrollLedgers,
+  parseAmount,
   payrollMonthEnd,
   round2,
   todayIso,
@@ -28,6 +29,40 @@ import {
   panel,
   emptyCompanyScreen,
 } from './ui.js';
+
+export function parseAttendanceCsv(text, employees = []) {
+  const rows = String(text ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!rows.length) return { ok: false, error: 'Attendance CSV is empty.' };
+  const split = (line) => line.split(',').map((cell) => cell.trim().replace(/^"|"$/g, ''));
+  const header = split(rows[0]).map((cell) => cell.toLowerCase().replace(/\s+/g, ''));
+  const employeeKey = header.findIndex((cell) => ['employee', 'name', 'code'].includes(cell));
+  const daysKey = header.findIndex((cell) => ['paiddays', 'days', 'paid'].includes(cell));
+  if (employeeKey < 0 || daysKey < 0) {
+    return { ok: false, error: 'Attendance CSV needs Employee and PaidDays columns.' };
+  }
+  const byKey = new Map();
+  for (const employee of employees) {
+    byKey.set(employee.name.toLowerCase(), employee.id);
+    if (employee.code) byKey.set(employee.code.toLowerCase(), employee.id);
+  }
+  const paidDays = {};
+  for (const [index, line] of rows.slice(1).entries()) {
+    const cells = split(line);
+    const key = String(cells[employeeKey] ?? '').toLowerCase();
+    const employeeId = byKey.get(key);
+    if (!employeeId) return { ok: false, error: `Row ${index + 2}: employee "${cells[employeeKey]}" was not found.` };
+    const days = parseAmount(cells[daysKey]);
+    if (days === null || days < 0 || days > 31) {
+      return { ok: false, error: `Row ${index + 2}: paid days must be between 0 and 31.` };
+    }
+    if (paidDays[employeeId] !== undefined) {
+      return { ok: false, error: `Row ${index + 2}: employee "${cells[employeeKey]}" appears twice.` };
+    }
+    paidDays[employeeId] = days;
+  }
+  if (!Object.keys(paidDays).length) return { ok: false, error: 'Attendance CSV has no employee rows.' };
+  return { ok: true, paidDays, count: Object.keys(paidDays).length };
+}
 
 export function payrollMonthLabel(month) {
   const [year, index] = String(month ?? '').split('-').map(Number);
@@ -79,7 +114,8 @@ export function payrollScreen() {
       const available = joined > exited
         ? 0
         : Math.round((Date.parse(`${exited}T00:00:00Z`) - Date.parse(`${joined}T00:00:00Z`)) / 86400000) + 1;
-      return `<tr><td><strong>${esc(employee.name)}</strong>${employee.code ? `<div class="muted small">${esc(employee.code)}</div>` : ''}</td><td class="num">${available}</td><td class="num"><input name="paid-${esc(employee.id)}" data-payroll-paid="${esc(employee.id)}" inputmode="decimal" value="${available}" max="${available}" aria-label="Paid days for ${esc(employee.name)}"></td></tr>`;
+      const prefilled = view.payrollAttendance?.[employee.id];
+      return `<tr><td><strong>${esc(employee.name)}</strong>${employee.code ? `<div class="muted small">${esc(employee.code)}</div>` : ''}</td><td class="num">${available}</td><td class="num"><input name="paid-${esc(employee.id)}" data-payroll-paid="${esc(employee.id)}" inputmode="decimal" value="${prefilled ?? available}" max="${available}" aria-label="Paid days for ${esc(employee.name)}"></td></tr>`;
     })
     .join('');
 
@@ -272,6 +308,9 @@ export function payrollScreen() {
         ${attendanceRows
           ? `<table class="data-table compact"><thead><tr><th>Employee</th><th class="num">Available days</th><th class="num">Paid days</th></tr></thead><tbody>${attendanceRows}</tbody></table>`
           : '<p class="muted small">No active employees.</p>'}
+        <label class="field"><span>Attendance CSV</span><input type="file" accept=".csv,text/csv" data-csv-target="attendance-csv"></label>
+        <textarea id="attendance-csv" class="backup-box import-box" rows="4" placeholder="Employee,PaidDays\nAsha Menon,26"></textarea>
+        <div class="form-actions"><button class="btn small" type="button" data-action="load-attendance">Load attendance</button></div>
       </div>
       <div class="field form-actions"><button class="btn small" type="submit">Run payroll and post journal</button></div>
       <p id="payroll-run-error" class="form-error" role="alert"></p>

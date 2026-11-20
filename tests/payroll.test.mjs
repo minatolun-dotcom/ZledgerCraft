@@ -21,6 +21,7 @@ import {
   updateEmployee,
 } from '../src/store.js';
 import { payrollSummary, trialBalance } from '../src/accounting.js';
+import { parseAttendanceCsv } from '../src/ui-payroll.js';
 
 function fixture() {
   const company = createCompany('Payroll Co', '2026-04-01').company;
@@ -220,6 +221,17 @@ test('leave records reduce balances and reject overlaps', () => {
   );
   assert.equal(deleteLeaveRecord(company, leave.record.id).ok, true);
   assert.equal(employeeLeaveBalance(company, asha.id).CL.remaining, 12);
+});
+
+test('attendance CSV matches employees by name or code', () => {
+  const { company } = fixture();
+  const asha = standardEmployee(company);
+  asha.code = 'EMP-1';
+  const parsed = parseAttendanceCsv('Employee,PaidDays\nEMP-1,24\n', company.payroll.employees);
+  assert.equal(parsed.ok, true, parsed.error);
+  assert.equal(parsed.paidDays[asha.id], 24);
+  assert.equal(parseAttendanceCsv('Employee,PaidDays\nMissing,10', company.payroll.employees).ok, false);
+  assert.equal(parseAttendanceCsv('Employee,PaidDays\nAsha Menon,32', company.payroll.employees).ok, false);
 });
 
 test('one payroll run per month and only inside an open financial year', () => {

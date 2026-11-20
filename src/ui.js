@@ -282,6 +282,7 @@ import {
   tdsScreen,
 } from './ui-tax.js';
 import {
+  parseAttendanceCsv,
   payrollMonthLabel,
   defaultPayrollMonth,
   employeeMonthlyTotals,
@@ -5439,6 +5440,26 @@ async function handleClick(event) {
       logAudit('recurring.delete', `Deleted recurring voucher template "${result.template.name}".`, active, trigger.dataset.id);
       persist();
       setFlash('Recurring template deleted.');
+      render();
+      break;
+    }
+
+    case 'load-attendance': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const text = document.getElementById('attendance-csv')?.value ?? '';
+      const parsed = parseAttendanceCsv(text, active.payroll?.employees ?? []);
+      if (!parsed.ok) {
+        setFlash(parsed.error, 'warn');
+        render();
+        break;
+      }
+      view.payrollAttendance = parsed.paidDays;
+      setFlash(`Loaded paid days for ${parsed.count} employee(s). Review before running payroll.`);
       render();
       break;
     }

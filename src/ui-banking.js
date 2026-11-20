@@ -128,13 +128,15 @@ export function postDatedScreen() {
   const to = current.to || active.fyEnd;
   const asOn = current.asOn || todayIso();
   const report = postDatedRegister(active, { from, to, asOn, status: current.status });
-  const statusOptions = ['All', 'Post-dated', 'Due', 'Cleared']
+  const canWrite = can('voucher.write');
+  const statusOptions = ['All', 'Post-dated', 'Due', 'Cleared', 'Stopped', 'Cancelled']
     .map((status) => `<option value="${status}"${current.status === status ? ' selected' : ''}>${status === 'All' ? 'All instruments' : status}</option>`)
     .join('');
   const rows = report.rows
     .map((row) => {
-      const timing =
-        row.status === 'Cleared'
+      const timing = row.manualStatus
+        ? 'set manually'
+        : row.status === 'Cleared'
           ? 'matched in bank reconciliation'
           : row.daysFromAsOn > 0
             ? `${row.daysFromAsOn} day${row.daysFromAsOn === 1 ? '' : 's'} ahead`
@@ -146,7 +148,15 @@ export function postDatedScreen() {
         <td><strong>${esc(row.kind)} ${esc(row.number)}</strong><div class="muted small">${esc(row.bank)}</div></td>
         <td>${esc(row.party)}</td>
         <td>${esc(voucherLabel(row.type))} ${row.no}<div class="muted small">voucher ${esc(dateLabel(row.voucherDate))}</div></td>
-        <td><span class="badge ${row.status === 'Post-dated' ? 'attention' : row.status === 'Due' ? 'overdue' : ''}">${esc(row.status)}</span><div class="muted small">${esc(timing)}</div></td>
+        <td><span class="badge ${row.status === 'Post-dated' ? 'attention' : row.status === 'Due' ? 'overdue' : ''}">${esc(row.status)}</span><div class="muted small">${esc(timing)}</div>
+          ${canWrite
+            ? `<div class="row-actions">${row.manualStatus
+                ? `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="" data-id="${esc(row.voucherId)}">Restore automatic</button>`
+                : `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cleared" data-id="${esc(row.voucherId)}">Mark cleared</button>
+                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Stopped" data-id="${esc(row.voucherId)}">Stop</button>
+                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cancelled" data-id="${esc(row.voucherId)}">Cancel</button>`}</div>`
+            : ''}
+        </td>
         <td class="num">${money(row.amount)}</td>
       </tr>`;
     })
@@ -165,7 +175,7 @@ export function postDatedScreen() {
       <div class="ratio-card"><span class="ratio-label">Post-dated</span><strong>${report.postDatedCount}</strong><span class="muted small">${money(report.postDatedTotal)} value</span></div>
       <div class="ratio-card"><span class="ratio-label">Due</span><strong>${report.dueCount}</strong><span class="muted small">${money(report.dueTotal)} value</span></div>
       <div class="ratio-card"><span class="ratio-label">Cleared</span><strong>${report.clearedCount}</strong><span class="muted small">${money(report.clearedTotal)} value</span></div>
-      <div class="ratio-card"><span class="ratio-label">Instruments</span><strong>${report.count}</strong><span class="muted small">${money(report.total)} value</span></div>
+      <div class="ratio-card"><span class="ratio-label">Instruments</span><strong>${report.count}</strong><span class="muted small">${money(report.total)} value${report.cancelledCount + report.stoppedCount ? ` · ${report.cancelledCount + report.stoppedCount} stopped/cancelled` : ''}</span></div>
     </div>
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact postdated-table">
@@ -173,7 +183,7 @@ export function postDatedScreen() {
           <tbody>${rows}</tbody>
         </table></div>`
       : '<p class="muted">No cheque or DD instruments in this period. Add instrument details on a payment, receipt or contra voucher.</p>'}`,
-    'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation.',
+    'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation unless the instrument was marked cleared, stopped or cancelled manually.',
   );
 }
 

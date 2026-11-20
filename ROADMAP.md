@@ -344,6 +344,18 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 38: manual instrument statuses
+
+- A cheque/DD in the register can be marked cleared, stopped or cancelled, or
+  restored to the automatic status (post-dated/due/bank-reconciliation cleared).
+  The flag is stored on the instrument, survives voucher edits and backup import,
+  and never changes the voucher or posts entries.
+- The register adds status filters and counts for stopped/cancelled instruments
+  and keeps the manual status visible in the row.
+- Verification: status transitions and counts, filtering, voucher-edit
+  preservation, invalid/missing cases and backup round trip; 281 tests (280 pass,
+  1 skipped) and a 935.7 kB build pass.
+
 ### 2026-11-20 — Phase 37: salary bank-transfer file
 
 - Employees can store an optional bank name, account number (6–20 digits) and

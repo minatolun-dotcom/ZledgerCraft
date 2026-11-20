@@ -87,11 +87,11 @@ README. When a new limit is introduced, add it here in the same change.
 | KL-33 | Auto-match is narrow | Exact signed amount, one-to-one voucher, and a seven-day date window. No fuzzy narration, tolerance, split matching or many-to-one matching. |
 | KL-34 | Reconciliation does not post adjustments | Matched/unmatched is a separate layer. There are no bank charges, interest or adjustment vouchers created from the statement. |
 | KL-35 | No statement balance validation | The statement has no opening/closing balance fields, so the import cannot prove it is complete. |
-| KL-36 | No manual clearing/cancellation status | A match is the only "cleared" signal. There is no stale cheque, cancelled cheque, stop-payment or manual cleared flag. |
+| KL-36 | Manual instrument status is a flag | A cheque/DD can be marked cleared, stopped or cancelled manually, or restored to the automatic post-dated/due/reconciliation status. These are flags only: they do not post entries, alter the voucher, or notify a bank. |
 | KL-37 | One instrument per voucher | A voucher can carry one cheque/DD. There are no cheque books, multiple instruments, split payments by cheque, or instrument history. |
 | KL-38 | Cheque print is a browser preview | Only cheque payments can be printed. Alignment depends on the browser and printer; there are no MICR, bank-specific stationery presets, overlay calibration or cheque-number pre-printing. |
 | KL-39 | DD and receipt printing are absent | DD details and receipt instruments are recorded but not printed as a DD advice or deposit slip. |
-| KL-40 | Register scope | Cheque / DD register covers post-dated, due and cleared instruments. No separate exception, stale, cancelled, issued-cheque-book or party-wise cheque register. |
+| KL-40 | Register scope | Cheque / DD register covers post-dated, due, cleared, stopped and cancelled instruments. No separate issued-cheque-book, party-wise cheque or bank-wise instrument register. |
 
 ## Inventory and manufacturing
 

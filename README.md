@@ -448,7 +448,8 @@ disabled.
   the stale match.
 - Cheque / DD register with period and as-on filters, post-dated/due/cleared
   status, instrument and party detail, totals and drill-down to the voucher.
-  Cleared status comes from Bank Reconciliation matches.
+  Cleared status comes from Bank Reconciliation matches; an instrument can also
+  be marked cleared, stopped or cancelled manually and restored to automatic.
 - Cheque preview and print for payment vouchers: bank, cheque number, date,
   payee, Indian-numbering amount in words, figures and A/c Payee crossing.
 - Cost centre summary by category and centre, with debit/credit/net, voucher
@@ -666,7 +667,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
 | Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit proration and bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV; no attendance/leave/arrears, formula or percentage pay heads, PF/ESI/PT computation, employer contributions, ECR/returns, Form 24Q/16 or bank payment workflow |
 | Bank reconciliation and statement import | Covered — CSV statement import, auto/manual matching and book balance; no OFX/QIF or live bank feeds |
-| Cheque/DD details, cheque printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque preview/print and a reconciliation-aware Cheque / DD register; no magnetic-ink cheque stationery presets |
+| Cheque/DD details, cheque printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque preview/print, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no magnetic-ink cheque stationery presets |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary and break-up; no merging categories, split allocations or unallocated reconciliation |
 | Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance and over-budget status; no phased, revised, approval or cost-centre budgets |
 | Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting and an unrealised forex revaluation report; no realised gain/loss posting, foreign inventory/bill allocations or interest calculation |

@@ -451,9 +451,30 @@ export function normalizeInstruments(company) {
       delete voucher.instrument;
       continue;
     }
-    voucher.instrument = { kind: instrument.kind, number, date, bankLedgerId };
+    const status = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
+      ? instrument.status
+      : null;
+    voucher.instrument = {
+      kind: instrument.kind,
+      number,
+      date,
+      bankLedgerId,
+      ...(status ? { status } : {}),
+    };
   }
   return company;
+}
+
+/** Sets or clears a manual cheque/DD status; an empty status returns to the derived one. */
+export function setInstrumentStatus(company, voucherId, status = '') {
+  const voucher = (company.vouchers ?? []).find((entry) => entry.id === voucherId);
+  if (!voucher?.instrument) return { ok: false, error: 'Cheque/DD details not found on that voucher.' };
+  const allowed = ['', 'Cleared', 'Stopped', 'Cancelled'];
+  if (!allowed.includes(status)) return { ok: false, error: 'Unknown cheque/DD status.' };
+  if (status) voucher.instrument.status = status;
+  else delete voucher.instrument.status;
+  voucher.updatedAt = new Date().toISOString();
+  return { ok: true, voucher, status };
 }
 
 /** Keeps statement lines and matches consistent with vouchers and bank ledgers. */
@@ -3420,6 +3441,7 @@ export function updateVoucher(company, voucherId, input) {
     }
   }
 
+  const previousInstrumentStatus = voucher.instrument?.status;
   const settled = allocationsAgainst(company, voucherId);
   if (settled.size > 0) {
     if (type !== 'Sales' && type !== 'Purchase') {
@@ -3461,8 +3483,10 @@ export function updateVoucher(company, voucherId, input) {
   else delete voucher.items;
   if (checked.bill) voucher.bill = checked.bill;
   else delete voucher.bill;
-  if (checked.instrument) voucher.instrument = checked.instrument;
-  else delete voucher.instrument;
+  if (checked.instrument) {
+    voucher.instrument = checked.instrument;
+    if (previousInstrumentStatus) voucher.instrument.status = previousInstrumentStatus;
+  } else delete voucher.instrument;
   if (checked.gst) voucher.gst = checked.gst;
   else delete voucher.gst;
   if (checked.tds) voucher.tds = checked.tds;
@@ -4923,6 +4947,9 @@ function validateImportedCompany(company) {
       }
       if (!String(instrument.number ?? '').trim() || !isValidIsoDate(String(instrument.date ?? ''))) {
         return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid cheque/DD number or date.`;
+      }
+      if (instrument.status !== undefined && !['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)) {
+        return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid cheque/DD status.`;
       }
       if (
         !ledgerIds.has(instrument.bankLedgerId) ||

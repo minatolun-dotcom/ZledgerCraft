@@ -4,12 +4,14 @@ import {
   addLedger,
   addVoucher,
   createCompany,
+  emptyState,
   exportState,
   findLedgerByName,
   importState,
   normalizeInstruments,
   saveBankStatement,
   setBankMatch,
+  setInstrumentStatus,
   updateVoucher,
 } from '../src/store.js';
 import { amountInWords, postDatedRegister } from '../src/accounting.js';
@@ -134,6 +136,73 @@ test('post-dated register status follows the as-on date and reconciliation', () 
   assert.equal(report.clearedCount, 1);
   assert.equal(report.postDatedCount, 0);
   assert.equal(postDatedRegister(company, { asOn: '2026-05-20', status: 'Due' }).count, 0);
+});
+
+test('instruments can be marked cleared, stopped or cancelled manually', () => {
+  const { company, bank, expense } = chequeFixture();
+  const instrument = {
+    kind: 'Cheque',
+    number: '8100',
+    date: '2026-05-25',
+    bankLedgerId: bank.id,
+  };
+  const created = payment(company, bank, expense, 900, '2026-05-10', instrument);
+  assert.equal(created.ok, true, created.error);
+
+  const stopped = setInstrumentStatus(company, created.voucher.id, 'Stopped');
+  assert.equal(stopped.ok, true, stopped.error);
+  assert.equal(created.voucher.instrument.status, 'Stopped');
+  let report = postDatedRegister(company, { asOn: '2026-05-20' });
+  assert.equal(report.rows[0].status, 'Stopped');
+  assert.equal(report.rows[0].manualStatus, 'Stopped');
+  assert.equal(report.stoppedCount, 1);
+  assert.equal(report.postDatedCount, 0);
+  assert.equal(postDatedRegister(company, { asOn: '2026-05-20', status: 'Stopped' }).count, 1);
+
+  const edited = updateVoucher(company, created.voucher.id, {
+    type: 'Payment',
+    date: '2026-05-10',
+    instrument,
+    lines: [
+      { ledgerId: expense.id, side: 'Dr', amount: 900 },
+      { ledgerId: bank.id, side: 'Cr', amount: 900 },
+    ],
+  });
+  assert.equal(edited.ok, true, edited.error);
+  assert.equal(edited.voucher.instrument.status, 'Stopped', 'editing the voucher keeps a manual status');
+
+  assert.equal(setInstrumentStatus(company, created.voucher.id, 'Cancelled').ok, true);
+  report = postDatedRegister(company, { asOn: '2026-05-20' });
+  assert.equal(report.rows[0].status, 'Cancelled');
+  assert.equal(report.cancelledCount, 1);
+
+  assert.equal(setInstrumentStatus(company, created.voucher.id, '').ok, true);
+  report = postDatedRegister(company, { asOn: '2026-05-20' });
+  assert.equal(report.rows[0].status, 'Post-dated');
+  assert.equal(report.rows[0].manualStatus, '');
+
+  assert.equal(setInstrumentStatus(company, created.voucher.id, 'Cleared').ok, true);
+  assert.equal(postDatedRegister(company, { asOn: '2026-05-20' }).rows[0].status, 'Cleared');
+  assert.equal(setInstrumentStatus(company, created.voucher.id, 'Bounced').ok, false);
+  assert.equal(setInstrumentStatus(company, 'missing', 'Stopped').ok, false);
+});
+
+test('manual instrument statuses survive a backup round trip', () => {
+  const { company, bank, expense } = chequeFixture();
+  const created = payment(company, bank, expense, 300, '2026-05-10', {
+    kind: 'DD',
+    number: 'DD-88',
+    date: '2026-05-30',
+    bankLedgerId: bank.id,
+  });
+  assert.equal(setInstrumentStatus(company, created.voucher.id, 'Cancelled').ok, true);
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  assert.equal(restored.state.companies[0].vouchers[0].instrument.status, 'Cancelled');
 });
 
 test('clearing instrument details removes them on alteration', () => {

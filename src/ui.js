@@ -104,6 +104,7 @@ import {
   selectYear,
   setBankMatch,
   setCurrentUser,
+  setInstrumentStatus,
   setOrderStatus,
   signedOpening,
   todayIso,
@@ -3800,6 +3801,35 @@ async function handleClick(event) {
     case 'print-cheque':
       navigate('chequePrint', { id: trigger.dataset.id });
       break;
+    case 'set-instrument-status': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const status = trigger.dataset.status ?? '';
+      const result = setInstrumentStatus(active, trigger.dataset.id, status);
+      if (result.ok) {
+        logAudit(
+          'instrument.status',
+          `${status ? `Marked ${active.vouchers.find((voucher) => voucher.id === trigger.dataset.id)?.instrument?.kind ?? 'instrument'} ${status.toLowerCase()}` : 'Restored automatic instrument status'}.`,
+          active,
+          trigger.dataset.id,
+        );
+      }
+      persist();
+      setFlash(
+        result.ok
+          ? status
+            ? `Instrument marked ${status.toLowerCase()}.`
+            : 'Instrument status restored to automatic.'
+          : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
+      break;
+    }
     case 'open-cost-centre':
       navigate('costCentreDetail', { id: trigger.dataset.id });
       break;

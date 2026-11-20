@@ -712,11 +712,16 @@ export function postDatedRegister(company, filters = {}) {
     .map((voucher) => {
       const instrument = voucher.instrument;
       const bank = company.ledgers.find((ledger) => ledger.id === instrument.bankLedgerId);
-      const status = clearedVoucherIds.has(voucher.id)
-        ? 'Cleared'
-        : instrument.date > asOn
-          ? 'Post-dated'
-          : 'Due';
+      const manualStatus = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
+        ? instrument.status
+        : '';
+      const status = manualStatus
+        ? manualStatus
+        : clearedVoucherIds.has(voucher.id)
+          ? 'Cleared'
+          : instrument.date > asOn
+            ? 'Post-dated'
+            : 'Due';
       const gapDays = Math.round(
         (new Date(`${instrument.date}T00:00:00Z`) - new Date(`${asOn}T00:00:00Z`)) / 86400000,
       );
@@ -732,6 +737,7 @@ export function postDatedRegister(company, filters = {}) {
         instrumentDate: instrument.date,
         amount: round2(voucher.total),
         status,
+        manualStatus,
         daysFromAsOn: gapDays,
       };
     })
@@ -754,9 +760,13 @@ export function postDatedRegister(company, filters = {}) {
     postDatedCount: rows.filter((row) => row.status === 'Post-dated').length,
     dueCount: rows.filter((row) => row.status === 'Due').length,
     clearedCount: rows.filter((row) => row.status === 'Cleared').length,
+    cancelledCount: rows.filter((row) => row.status === 'Cancelled').length,
+    stoppedCount: rows.filter((row) => row.status === 'Stopped').length,
     postDatedTotal: sum('Post-dated'),
     dueTotal: sum('Due'),
     clearedTotal: sum('Cleared'),
+    cancelledTotal: sum('Cancelled'),
+    stoppedTotal: sum('Stopped'),
   };
 }
 

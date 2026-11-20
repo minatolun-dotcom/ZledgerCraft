@@ -2794,9 +2794,30 @@ function normalizeInstruments(company) {
       delete voucher.instrument;
       continue;
     }
-    voucher.instrument = { kind: instrument.kind, number, date, bankLedgerId };
+    const status = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
+      ? instrument.status
+      : null;
+    voucher.instrument = {
+      kind: instrument.kind,
+      number,
+      date,
+      bankLedgerId,
+      ...(status ? { status } : {}),
+    };
   }
   return company;
+}
+
+/** Sets or clears a manual cheque/DD status; an empty status returns to the derived one. */
+function setInstrumentStatus(company, voucherId, status = '') {
+  const voucher = (company.vouchers ?? []).find((entry) => entry.id === voucherId);
+  if (!voucher?.instrument) return { ok: false, error: 'Cheque/DD details not found on that voucher.' };
+  const allowed = ['', 'Cleared', 'Stopped', 'Cancelled'];
+  if (!allowed.includes(status)) return { ok: false, error: 'Unknown cheque/DD status.' };
+  if (status) voucher.instrument.status = status;
+  else delete voucher.instrument.status;
+  voucher.updatedAt = new Date().toISOString();
+  return { ok: true, voucher, status };
 }
 
 /** Keeps statement lines and matches consistent with vouchers and bank ledgers. */
@@ -5763,6 +5784,7 @@ function updateVoucher(company, voucherId, input) {
     }
   }
 
+  const previousInstrumentStatus = voucher.instrument?.status;
   const settled = allocationsAgainst(company, voucherId);
   if (settled.size > 0) {
     if (type !== 'Sales' && type !== 'Purchase') {
@@ -5804,8 +5826,10 @@ function updateVoucher(company, voucherId, input) {
   else delete voucher.items;
   if (checked.bill) voucher.bill = checked.bill;
   else delete voucher.bill;
-  if (checked.instrument) voucher.instrument = checked.instrument;
-  else delete voucher.instrument;
+  if (checked.instrument) {
+    voucher.instrument = checked.instrument;
+    if (previousInstrumentStatus) voucher.instrument.status = previousInstrumentStatus;
+  } else delete voucher.instrument;
   if (checked.gst) voucher.gst = checked.gst;
   else delete voucher.gst;
   if (checked.tds) voucher.tds = checked.tds;
@@ -7267,6 +7291,9 @@ function validateImportedCompany(company) {
       if (!String(instrument.number ?? '').trim() || !isValidIsoDate(String(instrument.date ?? ''))) {
         return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid cheque/DD number or date.`;
       }
+      if (instrument.status !== undefined && !['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)) {
+        return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid cheque/DD status.`;
+      }
       if (
         !ledgerIds.has(instrument.bankLedgerId) ||
         !isBankLedger(company, instrument.bankLedgerId) ||
@@ -8471,11 +8498,16 @@ function postDatedRegister(company, filters = {}) {
     .map((voucher) => {
       const instrument = voucher.instrument;
       const bank = company.ledgers.find((ledger) => ledger.id === instrument.bankLedgerId);
-      const status = clearedVoucherIds.has(voucher.id)
-        ? 'Cleared'
-        : instrument.date > asOn
-          ? 'Post-dated'
-          : 'Due';
+      const manualStatus = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
+        ? instrument.status
+        : '';
+      const status = manualStatus
+        ? manualStatus
+        : clearedVoucherIds.has(voucher.id)
+          ? 'Cleared'
+          : instrument.date > asOn
+            ? 'Post-dated'
+            : 'Due';
       const gapDays = Math.round(
         (new Date(`${instrument.date}T00:00:00Z`) - new Date(`${asOn}T00:00:00Z`)) / 86400000,
       );
@@ -8491,6 +8523,7 @@ function postDatedRegister(company, filters = {}) {
         instrumentDate: instrument.date,
         amount: round2(voucher.total),
         status,
+        manualStatus,
         daysFromAsOn: gapDays,
       };
     })
@@ -8513,9 +8546,13 @@ function postDatedRegister(company, filters = {}) {
     postDatedCount: rows.filter((row) => row.status === 'Post-dated').length,
     dueCount: rows.filter((row) => row.status === 'Due').length,
     clearedCount: rows.filter((row) => row.status === 'Cleared').length,
+    cancelledCount: rows.filter((row) => row.status === 'Cancelled').length,
+    stoppedCount: rows.filter((row) => row.status === 'Stopped').length,
     postDatedTotal: sum('Post-dated'),
     dueTotal: sum('Due'),
     clearedTotal: sum('Cleared'),
+    cancelledTotal: sum('Cancelled'),
+    stoppedTotal: sum('Stopped'),
   };
 }
 
@@ -17813,13 +17850,15 @@ function postDatedScreen() {
   const to = current.to || active.fyEnd;
   const asOn = current.asOn || todayIso();
   const report = postDatedRegister(active, { from, to, asOn, status: current.status });
-  const statusOptions = ['All', 'Post-dated', 'Due', 'Cleared']
+  const canWrite = can('voucher.write');
+  const statusOptions = ['All', 'Post-dated', 'Due', 'Cleared', 'Stopped', 'Cancelled']
     .map((status) => `<option value="${status}"${current.status === status ? ' selected' : ''}>${status === 'All' ? 'All instruments' : status}</option>`)
     .join('');
   const rows = report.rows
     .map((row) => {
-      const timing =
-        row.status === 'Cleared'
+      const timing = row.manualStatus
+        ? 'set manually'
+        : row.status === 'Cleared'
           ? 'matched in bank reconciliation'
           : row.daysFromAsOn > 0
             ? `${row.daysFromAsOn} day${row.daysFromAsOn === 1 ? '' : 's'} ahead`
@@ -17831,7 +17870,15 @@ function postDatedScreen() {
         <td><strong>${esc(row.kind)} ${esc(row.number)}</strong><div class="muted small">${esc(row.bank)}</div></td>
         <td>${esc(row.party)}</td>
         <td>${esc(voucherLabel(row.type))} ${row.no}<div class="muted small">voucher ${esc(dateLabel(row.voucherDate))}</div></td>
-        <td><span class="badge ${row.status === 'Post-dated' ? 'attention' : row.status === 'Due' ? 'overdue' : ''}">${esc(row.status)}</span><div class="muted small">${esc(timing)}</div></td>
+        <td><span class="badge ${row.status === 'Post-dated' ? 'attention' : row.status === 'Due' ? 'overdue' : ''}">${esc(row.status)}</span><div class="muted small">${esc(timing)}</div>
+          ${canWrite
+            ? `<div class="row-actions">${row.manualStatus
+                ? `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="" data-id="${esc(row.voucherId)}">Restore automatic</button>`
+                : `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cleared" data-id="${esc(row.voucherId)}">Mark cleared</button>
+                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Stopped" data-id="${esc(row.voucherId)}">Stop</button>
+                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cancelled" data-id="${esc(row.voucherId)}">Cancel</button>`}</div>`
+            : ''}
+        </td>
         <td class="num">${money(row.amount)}</td>
       </tr>`;
     })
@@ -17850,7 +17897,7 @@ function postDatedScreen() {
       <div class="ratio-card"><span class="ratio-label">Post-dated</span><strong>${report.postDatedCount}</strong><span class="muted small">${money(report.postDatedTotal)} value</span></div>
       <div class="ratio-card"><span class="ratio-label">Due</span><strong>${report.dueCount}</strong><span class="muted small">${money(report.dueTotal)} value</span></div>
       <div class="ratio-card"><span class="ratio-label">Cleared</span><strong>${report.clearedCount}</strong><span class="muted small">${money(report.clearedTotal)} value</span></div>
-      <div class="ratio-card"><span class="ratio-label">Instruments</span><strong>${report.count}</strong><span class="muted small">${money(report.total)} value</span></div>
+      <div class="ratio-card"><span class="ratio-label">Instruments</span><strong>${report.count}</strong><span class="muted small">${money(report.total)} value${report.cancelledCount + report.stoppedCount ? ` · ${report.cancelledCount + report.stoppedCount} stopped/cancelled` : ''}</span></div>
     </div>
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact postdated-table">
@@ -17858,7 +17905,7 @@ function postDatedScreen() {
           <tbody>${rows}</tbody>
         </table></div>`
       : '<p class="muted">No cheque or DD instruments in this period. Add instrument details on a payment, receipt or contra voucher.</p>'}`,
-    'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation.',
+    'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation unless the instrument was marked cleared, stopped or cancelled manually.',
   );
 }
 
@@ -21581,6 +21628,35 @@ async function handleClick(event) {
     case 'print-cheque':
       navigate('chequePrint', { id: trigger.dataset.id });
       break;
+    case 'set-instrument-status': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const status = trigger.dataset.status ?? '';
+      const result = setInstrumentStatus(active, trigger.dataset.id, status);
+      if (result.ok) {
+        logAudit(
+          'instrument.status',
+          `${status ? `Marked ${active.vouchers.find((voucher) => voucher.id === trigger.dataset.id)?.instrument?.kind ?? 'instrument'} ${status.toLowerCase()}` : 'Restored automatic instrument status'}.`,
+          active,
+          trigger.dataset.id,
+        );
+      }
+      persist();
+      setFlash(
+        result.ok
+          ? status
+            ? `Instrument marked ${status.toLowerCase()}.`
+            : 'Instrument status restored to automatic.'
+          : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
+      break;
+    }
     case 'open-cost-centre':
       navigate('costCentreDetail', { id: trigger.dataset.id });
       break;

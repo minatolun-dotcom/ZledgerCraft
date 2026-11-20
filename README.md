@@ -514,7 +514,8 @@ disabled.
 - Compliance calendar: user-managed GST, TDS, payroll and other filing tasks
   with title, due date, category and notes. Open tasks are flagged overdue or
   due within seven days, and tasks can be edited, marked done, reopened and
-  deleted. Due dates are not calculated and nothing is filed or acknowledged.
+  deleted. Optional filed-on date and acknowledgement/reference fields keep a
+  local filing history. Due dates are not calculated and nothing is filed.
 - Tax audit working papers for a period: books turnover from Sales Accounts
   versus GST outward taxable, output-tax and input-credit reconciliation between
   GST-role ledgers and GSTR-3B, TDS/TCS deducted, paid and outstanding, the

@@ -344,6 +344,15 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 51: compliance filing history
+
+- Compliance tasks can store an optional filed-on date and acknowledgement or
+  portal reference, shown in the task list and preserved through backups.
+- These are local working notes; the app still does not file or fetch
+  acknowledgements from any portal.
+- Verification: validation, edit and backup round trip; 300 tests (299 pass,
+  1 skipped) and a 1,044.1 kB build.
+
 ### 2026-11-20 — Phase 50: delivery notes and goods receipts
 
 - Sales orders can produce delivery notes and purchase orders goods receipts

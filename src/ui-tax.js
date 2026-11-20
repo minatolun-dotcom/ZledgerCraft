@@ -554,6 +554,8 @@ export function complianceScreen() {
     <label class="field"><span>Category</span><select name="category">${categoryOptions}</select></label>
     <label class="field"><span>Due date</span><input name="dueDate" type="date" value="${esc(editing?.dueDate ?? '')}"></label>
     <label class="field"><span>Notes</span><input name="notes" maxlength="200" placeholder="Optional working note" value="${esc(editing?.notes ?? '')}"></label>
+    <label class="field"><span>Filed on (optional)</span><input name="filedOn" type="date" value="${esc(editing?.filedOn ?? '')}"></label>
+    <label class="field"><span>Acknowledgement / reference</span><input name="reference" maxlength="80" placeholder="Portal reference or ARN" value="${esc(editing?.reference ?? '')}"></label>
     <div class="form-actions">
       <button class="btn primary" type="submit">${editing ? 'Update task' : 'Add task'}</button>
       ${editing ? '<button class="btn ghost" type="button" data-action="cancel-compliance-task">Cancel</button>' : ''}
@@ -568,9 +570,9 @@ export function complianceScreen() {
       const near = !isDone && !late && task.dueDate <= soon;
       return `<tr>
         <td><span class="badge${isDone ? '' : late ? ' overdue' : near ? ' attention' : ''}">${isDone ? 'Done' : late ? 'Overdue' : near ? 'Due soon' : 'Open'}</span></td>
-        <td><strong>${esc(task.title)}</strong>${task.notes ? `<div class="muted small">${esc(task.notes)}</div>` : ''}</td>
+        <td><strong>${esc(task.title)}</strong>${task.notes ? `<div class="muted small">${esc(task.notes)}</div>` : ''}${task.reference ? `<div class="muted small">Ref ${esc(task.reference)}</div>` : ''}</td>
         <td>${esc(task.category)}</td>
-        <td>${esc(dateLabel(task.dueDate))}</td>
+        <td>${esc(dateLabel(task.dueDate))}${task.filedOn ? `<div class="muted small">Filed ${esc(dateLabel(task.filedOn))}</div>` : ''}</td>
         <td class="row-actions">
           <button class="btn small ghost" type="button" data-action="edit-compliance-task" data-id="${esc(task.id)}">Edit</button>
           <button class="btn small ghost" type="button" data-action="toggle-compliance-task" data-id="${esc(task.id)}">${isDone ? 'Reopen' : 'Mark done'}</button>

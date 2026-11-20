@@ -4344,7 +4344,10 @@ function complianceTaskInput(input = {}) {
   if (!isValidIsoDate(dueDate)) return { error: 'Enter a valid due date.' };
   const category = COMPLIANCE_CATEGORIES.has(input.category) ? input.category : 'Other';
   const notes = String(input.notes ?? '').trim().slice(0, 200);
-  return { title, dueDate, category, notes };
+  const filedOn = String(input.filedOn ?? '').trim();
+  if (filedOn && !isValidIsoDate(filedOn)) return { error: 'Enter a valid filed-on date.' };
+  const reference = String(input.reference ?? '').trim().slice(0, 80);
+  return { title, dueDate, category, notes, filedOn, reference };
 }
 
 export function addComplianceTask(company, input = {}) {
@@ -4360,6 +4363,8 @@ export function addComplianceTask(company, input = {}) {
     category: checked.category,
     dueDate: checked.dueDate,
     notes: checked.notes,
+    ...(checked.filedOn ? { filedOn: checked.filedOn } : {}),
+    ...(checked.reference ? { reference: checked.reference } : {}),
     status: 'Open',
     createdAt: new Date().toISOString(),
   };
@@ -4376,6 +4381,10 @@ export function updateComplianceTask(company, taskId, input = {}) {
   task.category = checked.category;
   task.dueDate = checked.dueDate;
   task.notes = checked.notes;
+  if (checked.filedOn) task.filedOn = checked.filedOn;
+  else delete task.filedOn;
+  if (checked.reference) task.reference = checked.reference;
+  else delete task.reference;
   return { ok: true, task };
 }
 
@@ -4419,6 +4428,8 @@ export function normalizeComplianceTasks(company) {
       category: COMPLIANCE_CATEGORIES.has(task.category) ? task.category : 'Other',
       dueDate: task.dueDate,
       notes: String(task.notes ?? '').trim().slice(0, 200),
+      ...(isValidIsoDate(task.filedOn) ? { filedOn: task.filedOn } : {}),
+      ...(task.reference ? { reference: String(task.reference).slice(0, 80) } : {}),
       status: task.status === 'Done' ? 'Done' : 'Open',
       ...(task.status === 'Done' && task.completedAt ? { completedAt: String(task.completedAt) } : {}),
       createdAt: String(task.createdAt ?? new Date().toISOString()),
@@ -5889,6 +5900,12 @@ function validateImportedCompany(company) {
       }
       if (String(task.notes ?? '').length > 200) {
         return `Company "${name}" has compliance task notes that are too long.`;
+      }
+      if (task.filedOn && !isValidIsoDate(task.filedOn)) {
+        return `Company "${name}" has a compliance task with an invalid filed-on date.`;
+      }
+      if (String(task.reference ?? '').length > 80) {
+        return `Company "${name}" has a compliance reference that is too long.`;
       }
     }
   }

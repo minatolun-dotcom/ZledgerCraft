@@ -300,6 +300,8 @@ test('compliance tasks validate, update, toggle and survive a backup', () => {
     category: 'GST',
     dueDate: '2026-05-11',
     notes: 'Check B2B invoices',
+    filedOn: '2026-05-10',
+    reference: 'ARN-123',
   });
   assert.equal(added.ok, true, added.error);
   assert.equal(added.task.title, 'File GSTR-1 for April');
@@ -318,9 +320,13 @@ test('compliance tasks validate, update, toggle and survive a backup', () => {
     category: 'GST',
     dueDate: '2026-05-20',
     notes: 'After books close',
+    filedOn: '2026-05-19',
+    reference: 'ARN-456',
   });
   assert.equal(updated.ok, true, updated.error);
   assert.equal(updated.task.title, 'File GSTR-3B for April');
+  assert.equal(updated.task.filedOn, '2026-05-19');
+  assert.equal(updated.task.reference, 'ARN-456');
 
   const done = setComplianceTaskStatus(company, added.task.id, 'Done');
   assert.equal(done.ok, true, done.error);
@@ -340,6 +346,7 @@ test('compliance tasks validate, update, toggle and survive a backup', () => {
   const tasks = restored.state.companies[0].complianceTasks;
   assert.equal(tasks.length, 2);
   assert.equal(tasks.find((task) => task.id === added.task.id).dueDate, '2026-05-20');
+  assert.equal(tasks.find((task) => task.id === added.task.id).reference, 'ARN-456');
 
   assert.equal(deleteComplianceTask(company, added.task.id).ok, true);
   assert.equal(company.complianceTasks.length, 1);

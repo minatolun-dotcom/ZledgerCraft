@@ -3112,6 +3112,8 @@ export async function handleSubmit(event) {
       category: data.get('category'),
       dueDate: data.get('dueDate'),
       notes: data.get('notes'),
+      filedOn: data.get('filedOn'),
+      reference: data.get('reference'),
     };
     const result = taskId
       ? updateComplianceTask(active, taskId, input)

@@ -99,6 +99,7 @@ import {
   payrollBankTransferRows,
   payrollLedgers,
   payrollMonthEnd,
+  postForexRevaluation,
   postStockCount,
   rateForCurrency,
   reopenFinancialYear,
@@ -5615,6 +5616,32 @@ async function handleClick(event) {
 
     case 'cancel-stock-count': {
       view.stockCountDraft = null;
+      render();
+      break;
+    }
+
+    case 'post-forex': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Post a forex revaluation journal for this date? This posts unrealised gain or loss to the ledger.')) break;
+      const report = forexRevaluation(active, { asOn: trigger.dataset.date });
+      const result = postForexRevaluation(active, { date: report.asOn, rows: report.rows });
+      if (result.ok) {
+        logAudit(
+          'forex.post',
+          `Posted forex revaluation for ${report.asOn} as voucher ${result.voucher.no}.`,
+          active,
+          `Journal ${result.voucher.no}`,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok ? `Forex revaluation posted as Journal ${result.voucher.no}.` : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
       render();
       break;
     }

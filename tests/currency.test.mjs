@@ -12,6 +12,7 @@ import {
   findLedgerByName,
   importState,
   normalizeCurrencies,
+  postForexRevaluation,
   rateForCurrency,
   updateCurrencyRate,
 } from '../src/store.js';
@@ -185,6 +186,40 @@ test('forex revaluation revalues asset balances and excludes profit and loss', (
   assert.deepEqual(later.currencies, ['USD']);
 
   assert.equal(forexRevaluation(company, { asOn: '2026-04-04' }).rows.length, 0);
+});
+
+test('posting forex revaluation clears the difference and books a gain', () => {
+  const { company, customer, sales } = currencyFixture();
+  usd(company);
+  addCurrencyRate(company, 'USD', { date: '2026-04-10', rate: 84 });
+  const sale = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    currencyCode: 'USD',
+    exchangeRate: 83,
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 1000 },
+      { ledgerId: sales.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+  assert.equal(sale.ok, true, sale.error);
+  const report = forexRevaluation(company, { asOn: '2026-04-10' });
+  const posted = postForexRevaluation(company, { date: report.asOn, rows: report.rows });
+  assert.equal(posted.ok, true, posted.error);
+  assert.equal(posted.voucher.type, 'Journal');
+  assert.equal(posted.gain, 1000);
+  assert.equal(findLedgerByName(company, 'Forex Gain').name, 'Forex Gain');
+  const customerLine = posted.voucher.lines.find((line) => line.ledgerId === customer.id);
+  const gainLine = posted.voucher.lines.find(
+    (line) => line.ledgerId === findLedgerByName(company, 'Forex Gain').id,
+  );
+  assert.deepEqual(
+    { side: customerLine.side, amount: customerLine.amount },
+    { side: 'Dr', amount: 1000 },
+  );
+  assert.deepEqual({ side: gainLine.side, amount: gainLine.amount }, { side: 'Cr', amount: 1000 });
+  assert.equal(forexRevaluation(company, { asOn: '2026-04-10' }).rows[0].difference, 0);
+  assert.equal(postForexRevaluation(company, { date: report.asOn, rows: report.rows }).ok, false);
 });
 
 test('forex revaluation shows a loss on a foreign creditor when the rate rises', () => {

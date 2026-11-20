@@ -3467,6 +3467,70 @@ export function setNextVoucherNumber(company, type, nextValue) {
   return { ok: true, next };
 }
 
+function ensureForexLedger(company, name, groupKey) {
+  const existing = findLedgerByName(company, name);
+  if (existing) return existing;
+  const group = company.groups.find((entry) => entry.key === groupKey);
+  if (!group) return null;
+  const result = addLedger(company, { name, groupId: group.id, opening: 0 });
+  return result.ok ? result.ledger : null;
+}
+
+/**
+ * Post a forex revaluation journal from report rows. Positive differences
+ * increase a ledger's debit balance; the balancing side is a gain or loss.
+ */
+export function postForexRevaluation(company, input = {}) {
+  const date = String(input.date ?? '');
+  if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid revaluation date.' };
+  seedYears(company);
+  const year = yearForDate(company, date);
+  if (!year) return { ok: false, error: 'The revaluation date must fall inside a financial year.' };
+  if (year.closed) return { ok: false, error: 'The financial year is closed. Reopen it before posting revaluation.' };
+  if ((company.vouchers ?? []).some((voucher) => voucher.fxRevaluationDate === date)) {
+    return { ok: false, error: 'A forex revaluation is already posted for this date.' };
+  }
+  const rows = (Array.isArray(input.rows) ? input.rows : [])
+    .map((row) => ({
+      ledgerId: String(row.ledgerId ?? ''),
+      currencyCode: String(row.currencyCode ?? ''),
+      difference: round2(Number(row.difference) || 0),
+    }))
+    .filter((row) => row.ledgerId && Math.abs(row.difference) >= 0.01);
+  if (!rows.length) return { ok: false, error: 'There are no foreign-exchange differences to post.' };
+  const ledgers = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
+  if (rows.some((row) => !ledgers.has(row.ledgerId))) {
+    return { ok: false, error: 'A revaluation ledger no longer exists. Refresh the report.' };
+  }
+  const gainLedger = ensureForexLedger(company, 'Forex Gain', 'indirectIncomes');
+  const lossLedger = ensureForexLedger(company, 'Forex Loss', 'indirectExpenses');
+  if (!gainLedger || !lossLedger) return { ok: false, error: 'Forex gain/loss ledger groups are missing.' };
+  const lines = [];
+  let gain = 0;
+  let loss = 0;
+  for (const row of rows) {
+    lines.push({
+      ledgerId: row.ledgerId,
+      side: row.difference > 0 ? 'Dr' : 'Cr',
+      amount: Math.abs(row.difference),
+    });
+    if (row.difference > 0) gain = round2(gain + row.difference);
+    else loss = round2(loss - row.difference);
+  }
+  if (gain) lines.push({ ledgerId: gainLedger.id, side: 'Cr', amount: gain });
+  if (loss) lines.push({ ledgerId: lossLedger.id, side: 'Dr', amount: loss });
+  const posted = addVoucher(company, {
+    type: 'Journal',
+    date,
+    narration: `Forex revaluation as on ${date}`,
+    lines,
+  });
+  if (!posted.ok) return posted;
+  posted.voucher.fxRevaluationDate = date;
+  posted.voucher.fxRevaluationRows = rows.map((row) => ({ ...row }));
+  return { ok: true, voucher: posted.voucher, gain, loss };
+}
+
 export function addVoucher(company, input) {
   const type = input.type;
   const checked = validateVoucherInput(company, type, input);

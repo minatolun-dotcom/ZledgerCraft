@@ -984,6 +984,14 @@ export function forexRevaluation(company, filters = {}) {
     }
   }
 
+  for (const voucher of company.vouchers ?? []) {
+    if (!voucher.fxRevaluationDate || voucher.fxRevaluationDate > asOn) continue;
+    for (const row of voucher.fxRevaluationRows ?? []) {
+      const bucket = buckets.get(`${row.ledgerId}|${row.currencyCode}`);
+      if (bucket) bucket.bookBalance = round2(bucket.bookBalance + row.difference);
+    }
+  }
+
   const rows = [...buckets.values()]
     .filter((bucket) => Math.abs(bucket.foreignBalance) >= 0.005)
     .map((bucket) => {

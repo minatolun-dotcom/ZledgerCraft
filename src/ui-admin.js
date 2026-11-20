@@ -500,10 +500,13 @@ export function forexScreen() {
     .join('');
   return panel(
     'Forex Revaluation',
-    `<p class="muted">Revalues foreign-currency asset and liability balances at the latest rate dated on or before the as-on date. Profit &amp; loss ledgers are not revalued. This report does not post a journal.</p>
+    `<p class="muted">Revalues foreign-currency asset and liability balances at the latest rate dated on or before the as-on date. Profit &amp; loss ledgers are not revalued.</p>
     <form id="forex-report-form" class="filter-bar">
       <label class="field inline-field"><span>As on</span><input name="asOn" type="date" min="${esc(booksStart(active))}" max="${esc(lastEnd)}" value="${esc(asOnValue)}" data-period></label>
       <button class="btn small" type="submit">Apply</button>
+      ${report.rows.length && can('voucher.write')
+        ? `<button class="btn small primary" type="button" data-action="post-forex" data-date="${esc(report.asOn)}">Post revaluation</button>`
+        : ''}
     </form>
     <div class="ratio-grid">
       <div class="ratio-card"><span class="ratio-label">Unrealised gain</span><strong class="pos">${money(report.gain)}</strong><span class="muted small">${report.count} ledger balance${report.count === 1 ? '' : 's'}</span></div>
@@ -516,7 +519,7 @@ export function forexScreen() {
           <tbody>${rows}</tbody>
         </table></div>`
       : '<p class="muted">No foreign-currency asset or liability balances as on this date. Record a foreign voucher in Vouchers first.</p>'}`,
-    'Foreign balances are signed: debit positive, credit negative. Only foreign vouchers build these balances; a base-currency settlement does not reduce them yet. The report is informational until a revaluation journal is posted manually.',
+    'Foreign balances are signed: debit positive, credit negative. Posting creates one Journal that adjusts the foreign ledgers and books the net difference to Forex Gain or Forex Loss. Only one revaluation can be posted per date; the report itself remains a working paper until posted.',
   );
 }
 

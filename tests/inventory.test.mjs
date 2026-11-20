@@ -186,6 +186,28 @@ test('stock items validate their masters and can be altered', () => {
   assert.equal(updated.item.unitId, unit.id);
 });
 
+test('reorder levels flag items at or below the level', () => {
+  const { company, item } = inventoryFixture();
+  assert.equal(stockSummary(company).rows[0].lowStock, false);
+
+  const low = updateStockItem(company, item.id, { reorderLevel: 12 });
+  assert.equal(low.ok, true, low.error);
+  assert.equal(low.item.reorderLevel, 12);
+  const report = stockSummary(company);
+  assert.equal(report.rows[0].reorderLevel, 12);
+  assert.equal(report.rows[0].closingQty, 10);
+  assert.equal(report.rows[0].lowStock, true);
+
+  const adequate = updateStockItem(company, item.id, { reorderLevel: 5 });
+  assert.equal(adequate.ok, true, adequate.error);
+  assert.equal(stockSummary(company).rows[0].lowStock, false);
+
+  const cleared = updateStockItem(company, item.id, { reorderLevel: 0 });
+  assert.equal(cleared.ok, true, cleared.error);
+  assert.equal(cleared.item.reorderLevel, undefined);
+  assert.equal(updateStockItem(company, item.id, { reorderLevel: -1 }).ok, false);
+});
+
 test('voucher inventory lines must match the voucher total and the item masters', () => {
   const { company, item, cash, sales } = inventoryFixture();
 

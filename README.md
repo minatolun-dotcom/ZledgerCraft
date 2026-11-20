@@ -399,9 +399,9 @@ disabled.
   tags; no return, challan or certificate is produced.
 
 **Inventory**
-- Units of measure, stock groups, stock items (opening quantity, rate and
-  optional HSN/SAC code), a primary godown and additional godowns. Opening stock
-  is held in the primary godown.
+- Units of measure, stock groups, stock items (opening quantity, rate, optional
+  HSN/SAC code and reorder level), a primary godown and additional godowns.
+  Opening stock is held in the primary godown.
 - Optional item lines on Sales, Purchase, Credit Note and Debit Note vouchers,
   each with a godown and, for batch-tracked items, a batch number and expiry
   date. Quantities use up to three decimal places and the item total must equal
@@ -413,7 +413,8 @@ disabled.
   register, audit events and deletion. Transfers move quantity and cost but do
   not change total stock value or post to the ledger.
 - Stock Summary with opening, inward, outward, closing quantity and value at
-  weighted-average cost; Godown balances with transfer-aware quantities; Batch
+  weighted-average cost, plus a reorder level per item and Low badges when the
+  closing quantity is at or below it; Godown balances with transfer-aware quantities; Batch
   balances with expiry and value at item average cost; and a per-item movement
   report with running balances. Opening stock can be split into named batches
   with expiry dates, either in the item form or from Tally batch masters, and
@@ -661,7 +662,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 
 | TallyPrime area | Status |
 | --- | --- |
-| Inventory | Partial — units, stock groups/items, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, sales/purchase orders, BOM recipes and production; no multi-level BOM, wastage, job work, physical stock count, batch-wise costing, WIP accounting or stock posting to the financial statements |
+| Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, sales/purchase orders, BOM recipes and production; no multi-level BOM, wastage, job work, physical stock count, batch-wise costing, WIP accounting or stock posting to the financial statements |
 | GST registration, rates and tax on vouchers | Partial — GSTIN and home state, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and invoice-level tax on four voucher types; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way Part A drafts and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, Part B, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |

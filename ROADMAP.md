@@ -344,6 +344,16 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 39: stock reorder levels
+
+- Stock items carry an optional reorder level (zero clears it), editable in the
+  item form and validated as a non-negative quantity.
+- Stock Summary shows the reorder level, a Low badge and a warning line whenever
+  closing quantity is at or below the level; the item master table shows the
+  level too.
+- Verification: low/adequate/cleared levels, invalid negative level and summary
+  flags; 282 tests (281 pass, 1 skipped) and a 937.0 kB build pass.
+
 ### 2026-11-20 — Phase 38: manual instrument statuses
 
 - A cheque/DD in the register can be marked cleared, stopped or cancelled, or

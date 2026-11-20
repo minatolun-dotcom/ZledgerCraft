@@ -3675,6 +3675,10 @@ function validateStockItemInput(company, input, ignoreId) {
   if (hsn && !/^[0-9A-Z]{4,8}$/.test(hsn)) {
     return { ok: false, error: 'HSN/SAC must be 4–8 letters or digits.' };
   }
+  const reorderLevel = parseQty(input.reorderLevel ?? 0);
+  if (reorderLevel === null || reorderLevel < 0) {
+    return { ok: false, error: 'Reorder level must be zero or more.' };
+  }
   return {
     ok: true,
     name,
@@ -3683,6 +3687,7 @@ function validateStockItemInput(company, input, ignoreId) {
     openingQty,
     openingRate,
     hsn,
+    reorderLevel,
     batchTracking,
     openingBatches: batches.batches,
   };
@@ -3699,6 +3704,7 @@ export function addStockItem(company, input) {
     openingQty: checked.openingQty,
     openingRate: checked.openingRate,
     batchTracking: checked.batchTracking,
+    ...(checked.reorderLevel > 0 ? { reorderLevel: checked.reorderLevel } : {}),
     ...(checked.openingBatches.length ? { openingBatches: checked.openingBatches } : {}),
     ...(checked.hsn ? { hsn: checked.hsn } : {}),
     createdAt: new Date().toISOString(),
@@ -3725,6 +3731,7 @@ export function updateStockItem(company, itemId, input) {
     openingQty: input.openingQty ?? item.openingQty,
     openingRate: input.openingRate ?? item.openingRate,
     hsn: input.hsn ?? item.hsn,
+    reorderLevel: input.reorderLevel ?? item.reorderLevel,
     batchTracking: input.batchTracking ?? item.batchTracking,
     openingBatches: requestedBatches ?? item.openingBatches,
   }, itemId);
@@ -3735,6 +3742,8 @@ export function updateStockItem(company, itemId, input) {
   item.openingQty = checked.openingQty;
   item.openingRate = checked.openingRate;
   item.batchTracking = checked.batchTracking;
+  if (checked.reorderLevel > 0) item.reorderLevel = checked.reorderLevel;
+  else delete item.reorderLevel;
   if (checked.openingBatches.length) item.openingBatches = checked.openingBatches;
   else delete item.openingBatches;
   if (checked.hsn) item.hsn = checked.hsn;

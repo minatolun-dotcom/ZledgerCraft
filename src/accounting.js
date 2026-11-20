@@ -1769,6 +1769,8 @@ export function stockSummary(company, filters = {}) {
       closingQty: state.qty,
       closingValue: state.value,
       averageRate: state.qty > 0 ? round2(state.value / state.qty) : state.lastCost,
+      reorderLevel: round3(item.reorderLevel ?? 0),
+      lowStock: (item.reorderLevel ?? 0) > 0 && state.qty <= (item.reorderLevel ?? 0),
     };
   });
 

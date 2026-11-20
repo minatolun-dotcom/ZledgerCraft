@@ -210,7 +210,8 @@ export function inventoryScreen() {
         <td class="num">${fmtQty(row.openingQty)}</td>
         <td class="num">${row.inQty ? fmtQty(row.inQty) : '—'}</td>
         <td class="num">${row.outQty ? fmtQty(row.outQty) : '—'}</td>
-        <td class="num ${row.closingQty < 0 ? 'neg' : ''}"><strong>${fmtQty(row.closingQty)}</strong></td>
+        <td class="num ${row.closingQty < 0 ? 'neg' : ''}"><strong>${fmtQty(row.closingQty)}</strong>${row.lowStock ? ' <span class="badge attention">Low</span>' : ''}</td>
+        <td class="num">${row.reorderLevel ? fmtQty(row.reorderLevel) : '—'}</td>
         <td class="num">${money(row.averageRate)}</td>
         <td class="num">${money(row.closingValue)}</td>
       </tr>`,
@@ -245,6 +246,7 @@ export function inventoryScreen() {
         <td>${item.hsn ? esc(item.hsn) : '<span class="muted">—</span>'}</td>
         <td>${item.batchTracking ? 'Yes' : '<span class="muted">No</span>'}${item.openingBatches?.length ? `<div class="muted small">${item.openingBatches.length} opening</div>` : ''}</td>
         <td class="num">${fmtQty(item.openingQty)}</td>
+        <td class="num">${item.reorderLevel ? fmtQty(item.reorderLevel) : '—'}</td>
         <td class="num">${money(item.openingRate)}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-stock-item" data-id="${esc(item.id)}">Edit</button>
@@ -420,11 +422,17 @@ export function inventoryScreen() {
             .map((row) => esc(row.name))
             .join(', ')}. Record a purchase to bring the balance back to zero or more.</p>`
         : ''}
+      ${report.rows.some((row) => row.lowStock)
+        ? `<p class="muted small">At or below reorder level: ${report.rows
+            .filter((row) => row.lowStock)
+            .map((row) => esc(row.name))
+            .join(', ')}.</p>`
+        : ''}
       ${report.rows.length
         ? `<table class="data-table">
-            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">Opening</th><th class="num">Inward</th><th class="num">Outward</th><th class="num">Closing</th><th class="num">Rate</th><th class="num">Value</th></tr></thead>
+            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">Opening</th><th class="num">Inward</th><th class="num">Outward</th><th class="num">Closing</th><th class="num">Reorder</th><th class="num">Rate</th><th class="num">Value</th></tr></thead>
             <tbody>${summaryRows}</tbody>
-            <tfoot><tr><td colspan="8">Closing stock value</td><td class="num">${money(report.totals.closingValue)}</td></tr></tfoot>
+            <tfoot><tr><td colspan="9">Closing stock value</td><td class="num">${money(report.totals.closingValue)}</td></tr></tfoot>
           </table>`
         : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,
       'Click an item to see its voucher-wise movement.',
@@ -588,6 +596,10 @@ export function inventoryScreen() {
           <span>HSN / SAC</span>
           <input name="hsn" maxlength="8" placeholder="e.g. 6109" value="${esc(editing?.hsn ?? '')}">
         </label>
+        <label class="field">
+          <span>Reorder level</span>
+          <input name="reorderLevel" inputmode="decimal" placeholder="0 = no alert" value="${esc(editing?.reorderLevel ?? '')}">
+        </label>
         <label class="field gst-check">
           <input type="checkbox" name="batchTracking"${editing?.batchTracking ? ' checked' : ''}>
           <span>Track batches and expiry</span>
@@ -605,7 +617,7 @@ export function inventoryScreen() {
       </form>
       ${items.length
         ? `<table class="data-table">
-            <thead><tr><th>Item</th><th>Stock group</th><th>Unit</th><th>HSN / SAC</th><th>Batches</th><th class="num">Opening qty</th><th class="num">Opening rate</th><th></th></tr></thead>
+            <thead><tr><th>Item</th><th>Stock group</th><th>Unit</th><th>HSN / SAC</th><th>Batches</th><th class="num">Opening qty</th><th class="num">Reorder</th><th class="num">Opening rate</th><th></th></tr></thead>
             <tbody>${itemRows}</tbody>
           </table>`
         : '<p class="muted">No stock items yet. Create units and a stock group first if you need them.</p>'}`,

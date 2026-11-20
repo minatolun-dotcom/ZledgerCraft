@@ -99,6 +99,7 @@ import {
   payrollBankTransferRows,
   payrollLedgers,
   payrollMonthEnd,
+  postBankAdjustment,
   postForexRevaluation,
   postOverdueInterest,
   postStockCount,
@@ -4484,6 +4485,41 @@ async function handleClick(event) {
       navigate('bankRecon', { bankLedgerId: ledgerId });
       break;
     }
+    case 'recon-adjust': {
+      if (!can('recon.write')) {
+        requirePermission('recon.write');
+        break;
+      }
+      const active = company();
+      const ledgerId = selectedBankLedgerId();
+      const lineId = trigger.dataset.line;
+      const offsetLedgerId = document.getElementById('recon-adjust-ledger')?.value ?? '';
+      if (!active || !ledgerId || !offsetLedgerId) {
+        setFlash('Choose an adjustment ledger first.', 'warn');
+        render();
+        break;
+      }
+      if (!window.confirm('Post this statement line as a journal and mark it reconciled?')) break;
+      const result = postBankAdjustment(active, ledgerId, lineId, offsetLedgerId);
+      if (result.ok) {
+        logAudit(
+          'bankRecon.adjust',
+          `Posted bank adjustment as voucher ${result.voucher.no} against ${result.offset.name}.`,
+          active,
+          `Journal ${result.voucher.no}`,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok
+          ? `Bank adjustment posted as Journal ${result.voucher.no}.`
+          : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
+      break;
+    }
+
     case 'recon-match': {
       if (!can('recon.write')) {
         requirePermission('recon.write');

@@ -291,6 +291,11 @@ export function bankReconScreen() {
       (entry) => `<option value="${esc(entry.voucherId)}">${esc(dateLabel(entry.date))} · ${esc(voucherLabel(entry.type))} ${entry.no} · ${money(entry.amount)}</option>`,
     )
     .join('');
+  const adjustmentOptions = active.ledgers
+    .filter((ledger) => ledger.id !== ledgerId)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((ledger) => `<option value="${esc(ledger.id)}">${esc(ledger.name)}</option>`)
+    .join('');
 
   const rows = report.lines
     .map((line) => {
@@ -300,7 +305,8 @@ export function bankReconScreen() {
         : `<select class="recon-voucher" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>
              <option value="">Choose voucher…</option>${entryOptions}
            </select>
-           <button class="btn small primary" type="button" data-action="recon-match" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Match</button>`;
+           <button class="btn small primary" type="button" data-action="recon-match" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Match</button>
+           <button class="btn small" type="button" data-action="recon-adjust" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Adjust</button>`;
       return `<tr class="${line.matchedVoucherId ? '' : 'overdue-row'}">
         <td>${esc(dateLabel(line.date))}</td>
         <td>${esc(line.description || '—')}${line.reference ? ` <span class="muted small">${esc(line.reference)}</span>` : ''}</td>
@@ -328,7 +334,11 @@ export function bankReconScreen() {
         <label class="field inline-field"><span>Bank ledger</span>
           <select id="bank-ledger-select">${bankOptions}</select>
         </label>
+        <label class="field inline-field"><span>Adjustment ledger</span>
+          <select id="recon-adjust-ledger"><option value="">Choose ledger…</option>${adjustmentOptions}</select>
+        </label>
       </div>
+      <p class="muted small">For an unmatched statement line, choose the other side and press Adjust. This posts a Journal to the bank ledger and marks the line matched.</p>
       <div class="ratio-grid">
         <div class="ratio-card"><span class="ratio-label">Matched</span><strong>${report.matchedCount} / ${report.lines.length}</strong><span class="muted small">${report.matchedPercent}% of statement lines</span></div>
         <div class="ratio-card"><span class="ratio-label">Statement unmatched</span><strong>${report.unmatchedCount}</strong><span class="muted small">${money(report.unmatchedStatementAmount)} value</span></div>

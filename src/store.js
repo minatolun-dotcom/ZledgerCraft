@@ -612,6 +612,33 @@ export function setBankMatch(company, ledgerId, lineId, voucherId) {
   return { ok: true, line, voucher };
 }
 
+export function postBankAdjustment(company, ledgerId, lineId, offsetLedgerId) {
+  const config = company.bankReconciliations?.[ledgerId];
+  if (!config) return { ok: false, error: 'Import a bank statement first.' };
+  const line = config.statement.lines.find((entry) => entry.id === lineId);
+  if (!line) return { ok: false, error: 'Statement line not found.' };
+  if (config.matches[lineId]) return { ok: false, error: 'Unmatch this statement line before posting an adjustment.' };
+  if (!isBankLedger(company, ledgerId)) return { ok: false, error: 'Choose a bank ledger.' };
+  const offset = (company.ledgers ?? []).find((ledger) => ledger.id === offsetLedgerId);
+  if (!offset) return { ok: false, error: 'Choose an adjustment ledger.' };
+  if (offset.id === ledgerId) return { ok: false, error: 'The adjustment ledger cannot be the bank ledger itself.' };
+  const amount = round2(Math.abs(Number(line.amount) || 0));
+  if (amount <= 0) return { ok: false, error: 'The statement line has no amount to post.' };
+  const posted = addVoucher(company, {
+    type: 'Journal',
+    date: line.date,
+    narration: `Bank adjustment: ${line.description || line.reference || 'statement line'}`,
+    lines: [
+      { ledgerId, side: line.amount > 0 ? 'Dr' : 'Cr', amount },
+      { ledgerId: offset.id, side: line.amount > 0 ? 'Cr' : 'Dr', amount },
+    ],
+  });
+  if (!posted.ok) return posted;
+  config.matches[lineId] = posted.voucher.id;
+  posted.voucher.bankAdjustmentLineId = lineId;
+  return { ok: true, voucher: posted.voucher, line, offset };
+}
+
 export function unsetBankMatch(company, ledgerId, lineId) {
   const config = company.bankReconciliations?.[ledgerId];
   if (!config?.matches?.[lineId]) return { ok: false, error: 'That line is not matched.' };

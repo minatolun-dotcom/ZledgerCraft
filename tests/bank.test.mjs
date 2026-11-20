@@ -11,6 +11,7 @@ import {
   exportState,
   findLedgerByName,
   importState,
+  postBankAdjustment,
   saveBankStatement,
   setBankMatch,
   unsetBankMatch,
@@ -132,6 +133,28 @@ test('auto-match pairs signed amounts within a week one-to-one', () => {
   assert.equal(matches[report.lines[0].id], firstReceipt.id);
   assert.equal(matches[report.lines[1].id], secondReceipt.id);
   assert.equal(matches[report.lines[2].id], paid.id);
+});
+
+test('unmatched statement lines can be posted as bank adjustments', () => {
+  const { company, bank, rent } = bankFixture();
+  saveBankStatement(company, bank.id, [
+    { date: '2026-04-14', description: 'Bank charge', amount: -50 },
+    { date: '2026-04-15', description: 'Interest credit', amount: 25 },
+  ]);
+  const lines = company.bankReconciliations[bank.id].statement.lines;
+  const before = company.vouchers.length;
+  const posted = postBankAdjustment(company, bank.id, lines[0].id, rent.id);
+  assert.equal(posted.ok, true, posted.error);
+  assert.equal(posted.voucher.type, 'Journal');
+  assert.equal(company.vouchers.length, before + 1);
+  const bankLine = posted.voucher.lines.find((line) => line.ledgerId === bank.id);
+  const rentLine = posted.voucher.lines.find((line) => line.ledgerId === rent.id);
+  assert.deepEqual({ side: bankLine.side, amount: bankLine.amount }, { side: 'Cr', amount: 50 });
+  assert.deepEqual({ side: rentLine.side, amount: rentLine.amount }, { side: 'Dr', amount: 50 });
+  assert.equal(company.bankReconciliations[bank.id].matches[lines[0].id], posted.voucher.id);
+  assert.equal(bankReconciliation(company, bank.id).matchedCount, 1);
+  assert.equal(postBankAdjustment(company, bank.id, lines[0].id, rent.id).ok, false);
+  assert.equal(postBankAdjustment(company, bank.id, lines[1].id, bank.id).ok, false);
 });
 
 test('a manual match requires the exact signed bank amount and is exclusive', () => {

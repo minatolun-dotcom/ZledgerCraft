@@ -11566,6 +11566,179 @@ async function xlsxToCsv(buffer, preferredName) {
   };
 }
 
+// ---- src/backup-crypto.js ----
+// ZledgerCraft - passphrase encryption for downloaded JSON backups.
+// The live workspace stays in its existing store; only the exported copy is
+// protected. AES-256-GCM provides confidentiality and tamper detection, and
+// PBKDF2-SHA-256 derives the key from a user passphrase.
+
+const ENCRYPTED_BACKUP_FORMAT = 'zledgercraft.encrypted-backup';
+const ENCRYPTED_BACKUP_VERSION = 1;
+const MIN_BACKUP_PASSPHRASE = 8;
+
+const KDF_ITERATIONS = 310_000;
+const MAX_KDF_ITERATIONS = 1_000_000;
+const SALT_BYTES = 16;
+const IV_BYTES = 12;
+const AAD = new TextEncoder().encode(`${ENCRYPTED_BACKUP_FORMAT}:v${ENCRYPTED_BACKUP_VERSION}`);
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(value, label) {
+  if (typeof value !== 'string' || value.length === 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    throw new Error(`That encrypted backup has an invalid ${label}.`);
+  }
+  let binary;
+  try {
+    binary = atob(value);
+  } catch {
+    throw new Error(`That encrypted backup has an invalid ${label}.`);
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function backupEncryptionAvailable() {
+  return Boolean(globalThis.crypto?.subtle && globalThis.crypto?.getRandomValues);
+}
+
+function cryptoApi() {
+  if (!backupEncryptionAvailable()) {
+    throw new Error('Encrypted backups require HTTPS or localhost because this browser blocks Web Crypto.');
+  }
+  return globalThis.crypto;
+}
+
+async function deriveKey(passphrase, salt, iterations) {
+  const { subtle } = cryptoApi();
+  const material = await subtle.importKey(
+    'raw',
+    new TextEncoder().encode(passphrase),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  );
+  return subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+/**
+ * Encrypts a plaintext backup payload with a passphrase.
+ * Returns a JSON-safe envelope; the passphrase is never stored in it.
+ */
+async function encryptBackup(plaintext, passphrase) {
+  if (typeof plaintext !== 'string' || plaintext.trim() === '') {
+    throw new Error('There is no backup data to encrypt.');
+  }
+  if (typeof passphrase !== 'string' || passphrase.length < MIN_BACKUP_PASSPHRASE) {
+    throw new Error(`Use a passphrase of at least ${MIN_BACKUP_PASSPHRASE} characters.`);
+  }
+  const crypto = cryptoApi();
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const key = await deriveKey(passphrase, salt, KDF_ITERATIONS);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: AAD },
+    key,
+    new TextEncoder().encode(plaintext),
+  );
+  return {
+    format: ENCRYPTED_BACKUP_FORMAT,
+    version: ENCRYPTED_BACKUP_VERSION,
+    kdf: {
+      name: 'PBKDF2',
+      hash: 'SHA-256',
+      iterations: KDF_ITERATIONS,
+      salt: bytesToBase64(salt),
+    },
+    cipher: {
+      name: 'AES-GCM',
+      iv: bytesToBase64(iv),
+    },
+    data: bytesToBase64(new Uint8Array(ciphertext)),
+  };
+}
+
+/** True when the pasted text is an encrypted-backup envelope. */
+function isEncryptedBackup(value) {
+  if (typeof value !== 'string') return false;
+  const text = value.trim();
+  if (!text.startsWith('{')) return false;
+  try {
+    return JSON.parse(text)?.format === ENCRYPTED_BACKUP_FORMAT;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Decrypts an encrypted-backup envelope. Throws a generic error for a wrong
+ * passphrase or a modified file so callers do not reveal which one failed.
+ */
+async function decryptBackup(envelope, passphrase) {
+  if (typeof passphrase !== 'string' || passphrase.length === 0) {
+    throw new Error('Enter the passphrase used for this encrypted backup.');
+  }
+  let parsed;
+  try {
+    parsed = typeof envelope === 'string' ? JSON.parse(envelope) : envelope;
+  } catch {
+    throw new Error('That encrypted backup is not valid JSON.');
+  }
+  if (!parsed || parsed.format !== ENCRYPTED_BACKUP_FORMAT) {
+    throw new Error('That file is not a ZledgerCraft encrypted backup.');
+  }
+  if (parsed.version !== ENCRYPTED_BACKUP_VERSION) {
+    throw new Error('This encrypted backup version is not supported.');
+  }
+  const iterations = Number(parsed.kdf?.iterations);
+  if (
+    parsed.kdf?.name !== 'PBKDF2'
+    || parsed.kdf?.hash !== 'SHA-256'
+    || !Number.isInteger(iterations)
+    || iterations < 100_000
+    || iterations > MAX_KDF_ITERATIONS
+  ) {
+    throw new Error('That encrypted backup has unsupported key-derivation settings.');
+  }
+  if (parsed.cipher?.name !== 'AES-GCM') {
+    throw new Error('That encrypted backup has an unsupported cipher.');
+  }
+  const salt = base64ToBytes(parsed.kdf.salt, 'salt');
+  const iv = base64ToBytes(parsed.cipher.iv, 'initialization vector');
+  const data = base64ToBytes(parsed.data, 'payload');
+  if (salt.length !== SALT_BYTES || iv.length !== IV_BYTES) {
+    throw new Error('That encrypted backup has invalid encryption parameters.');
+  }
+  const crypto = cryptoApi();
+  try {
+    const key = await deriveKey(passphrase, salt, iterations);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv, additionalData: AAD },
+      key,
+      data,
+    );
+    return new TextDecoder('utf-8', { fatal: true }).decode(plaintext);
+  } catch {
+    throw new Error('Could not decrypt this backup. Check the passphrase and file.');
+  }
+}
+
 // ---- src/ui-constants.js ----
 // ZledgerCraft - shared UI navigation, report labels and audit labels.
 
@@ -14957,6 +15130,7 @@ function inventoryScreen() {
 
 
 
+
 function loadSnapshots() {
   try {
     const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SNAPSHOT_KEY) : null;
@@ -15068,6 +15242,7 @@ function workspacePanel() {
 
 function backupScreen() {
   const payload = exportState(state);
+  const canEncrypt = backupEncryptionAvailable();
   return `
     ${workspacePanel()}
     ${panel(
@@ -15078,6 +15253,20 @@ function backupScreen() {
         <a class="btn primary" download="zledgercraft-backup-${todayIso()}.json" href="data:application/json;charset=utf-8,${encodeURIComponent(payload)}">Download JSON</a>
       </div>`,
     )}
+    ${panel(
+      'Encrypted backup',
+      canEncrypt
+        ? `<p class="muted">Download a passphrase-protected copy of the same data. The file is encrypted in this browser with AES-256-GCM; the passphrase is never uploaded or stored, and it cannot be recovered if lost.</p>
+      <form id="encrypted-backup-form" class="form-grid" novalidate>
+        <label class="field"><span>Passphrase</span><input name="passphrase" type="password" minlength="8" autocomplete="new-password" required aria-label="Encrypted backup passphrase"></label>
+        <label class="field"><span>Confirm passphrase</span><input name="confirm" type="password" minlength="8" autocomplete="new-password" required aria-label="Confirm encrypted backup passphrase"></label>
+        <p id="encrypted-backup-error" class="form-error" role="alert"></p>
+        <div class="form-actions">
+          <button class="btn primary" type="button" data-action="download-encrypted-backup">Download encrypted JSON</button>
+        </div>
+      </form>`
+        : '<p class="muted">Encrypted downloads need HTTPS or localhost because browsers expose Web Crypto only in secure contexts. A plain-HTTP LAN server is not a secure context; enable TLS or use the server-backup flow instead.</p>',
+    )}
     ${snapshotHtml()}
     ${panel(
       'Import data',
@@ -15087,12 +15276,17 @@ function backupScreen() {
     ${can('data.restore')
       ? panel(
           'Restore backup',
-          `<p class="muted">Paste a backup below. Restoring replaces all companies currently stored in this browser.</p>
+          `<p class="muted">Paste a plain or encrypted backup below. Restoring replaces all companies currently stored in this browser.</p>
           <form id="restore-form" novalidate>
             <label class="field">
               <span>Backup JSON</span>
               <textarea name="payload" class="backup-box" rows="10" placeholder='{ "companies": [ ... ] }' aria-label="Restore JSON payload"></textarea>
             </label>
+            <label class="field">
+              <span>Passphrase for encrypted backups</span>
+              <input name="passphrase" type="password" autocomplete="current-password" aria-label="Encrypted backup passphrase">
+            </label>
+            <p class="muted small">Leave the passphrase blank for an unencrypted backup.</p>
             <p id="restore-preview" class="muted" aria-live="polite"></p>
             <p id="form-error" class="form-error" role="alert"></p>
             <div class="form-actions">
@@ -17024,6 +17218,7 @@ function importScreen() {
 
 // ---- src/ui.js ----
 // ZledgerCraft - keyboard-first UI: gateway, masters, vouchers and reports.
+
 
 
 
@@ -19209,7 +19404,17 @@ async function handleSubmit(event) {
     }
     const data = new FormData(form);
     if (!window.confirm('Replace all current companies with this backup?')) return;
-    const result = importState(data.get('payload'));
+    const payload = String(data.get('payload') ?? '').trim();
+    let plaintext = payload;
+    if (isEncryptedBackup(payload)) {
+      try {
+        plaintext = await decryptBackup(payload, String(data.get('passphrase') ?? ''));
+      } catch (error) {
+        showFormError(error.message);
+        return;
+      }
+    }
+    const result = importState(plaintext);
     if (!result.ok) {
       showFormError(result.error);
       return;
@@ -20981,6 +21186,30 @@ async function handleClick(event) {
     case 'logout-server':
       logoutServer();
       break;
+    case 'download-encrypted-backup': {
+      const form = document.getElementById('encrypted-backup-form');
+      if (!form) break;
+      const data = new FormData(form);
+      const passphrase = String(data.get('passphrase') ?? '');
+      if (passphrase.length < 8) {
+        showFormError('Use a passphrase of at least 8 characters.', 'encrypted-backup-error');
+        break;
+      }
+      if (passphrase !== String(data.get('confirm') ?? '')) {
+        showFormError('The passphrase confirmation does not match.', 'encrypted-backup-error');
+        break;
+      }
+      try {
+        const envelope = await encryptBackup(exportState(state), passphrase);
+        downloadJsonFile(`zledgercraft-backup-${todayIso()}.encrypted.json`, envelope);
+        form.reset();
+        setFlash('Encrypted backup downloaded. Store its passphrase separately; it cannot be recovered.');
+        render();
+      } catch (error) {
+        showFormError(error.message, 'encrypted-backup-error');
+      }
+      break;
+    }
     case 'restore-server-backup': {
       if (!can('user.manage')) {
         requirePermission('user.manage');
@@ -22010,6 +22239,10 @@ function previewRestore(payload) {
   if (!target) return;
   if (!payload.trim()) {
     target.textContent = '';
+    return;
+  }
+  if (isEncryptedBackup(payload)) {
+    target.textContent = 'Encrypted backup. Enter its passphrase to restore.';
     return;
   }
   try {

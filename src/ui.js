@@ -157,6 +157,7 @@ import {
   voucherSummary,
   withholdingSummary,
 } from './accounting.js';
+import { decryptBackup, encryptBackup, isEncryptedBackup } from './backup-crypto.js';
 import { importTallyXml } from './tally.js';
 import { buildXlsx, xlsxToCsv } from './xlsx.js';
 import { serverUsersPanel } from './ui-server.js';
@@ -2439,7 +2440,17 @@ export async function handleSubmit(event) {
     }
     const data = new FormData(form);
     if (!window.confirm('Replace all current companies with this backup?')) return;
-    const result = importState(data.get('payload'));
+    const payload = String(data.get('payload') ?? '').trim();
+    let plaintext = payload;
+    if (isEncryptedBackup(payload)) {
+      try {
+        plaintext = await decryptBackup(payload, String(data.get('passphrase') ?? ''));
+      } catch (error) {
+        showFormError(error.message);
+        return;
+      }
+    }
+    const result = importState(plaintext);
     if (!result.ok) {
       showFormError(result.error);
       return;
@@ -4211,6 +4222,30 @@ async function handleClick(event) {
     case 'logout-server':
       logoutServer();
       break;
+    case 'download-encrypted-backup': {
+      const form = document.getElementById('encrypted-backup-form');
+      if (!form) break;
+      const data = new FormData(form);
+      const passphrase = String(data.get('passphrase') ?? '');
+      if (passphrase.length < 8) {
+        showFormError('Use a passphrase of at least 8 characters.', 'encrypted-backup-error');
+        break;
+      }
+      if (passphrase !== String(data.get('confirm') ?? '')) {
+        showFormError('The passphrase confirmation does not match.', 'encrypted-backup-error');
+        break;
+      }
+      try {
+        const envelope = await encryptBackup(exportState(state), passphrase);
+        downloadJsonFile(`zledgercraft-backup-${todayIso()}.encrypted.json`, envelope);
+        form.reset();
+        setFlash('Encrypted backup downloaded. Store its passphrase separately; it cannot be recovered.');
+        render();
+      } catch (error) {
+        showFormError(error.message, 'encrypted-backup-error');
+      }
+      break;
+    }
     case 'restore-server-backup': {
       if (!can('user.manage')) {
         requirePermission('user.manage');
@@ -5240,6 +5275,10 @@ export function previewRestore(payload) {
   if (!target) return;
   if (!payload.trim()) {
     target.textContent = '';
+    return;
+  }
+  if (isEncryptedBackup(payload)) {
+    target.textContent = 'Encrypted backup. Enter its passphrase to restore.';
     return;
   }
   try {

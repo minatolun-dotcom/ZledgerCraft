@@ -15,6 +15,7 @@ import {
   budgetVsActual,
   forexRevaluation,
 } from './accounting.js';
+import { backupEncryptionAvailable } from './backup-crypto.js';
 import {
   SNAPSHOT_KEY,
   SNAPSHOT_LIMIT,
@@ -147,6 +148,7 @@ export function workspacePanel() {
 
 export function backupScreen() {
   const payload = exportState(state);
+  const canEncrypt = backupEncryptionAvailable();
   return `
     ${workspacePanel()}
     ${panel(
@@ -157,6 +159,20 @@ export function backupScreen() {
         <a class="btn primary" download="zledgercraft-backup-${todayIso()}.json" href="data:application/json;charset=utf-8,${encodeURIComponent(payload)}">Download JSON</a>
       </div>`,
     )}
+    ${panel(
+      'Encrypted backup',
+      canEncrypt
+        ? `<p class="muted">Download a passphrase-protected copy of the same data. The file is encrypted in this browser with AES-256-GCM; the passphrase is never uploaded or stored, and it cannot be recovered if lost.</p>
+      <form id="encrypted-backup-form" class="form-grid" novalidate>
+        <label class="field"><span>Passphrase</span><input name="passphrase" type="password" minlength="8" autocomplete="new-password" required aria-label="Encrypted backup passphrase"></label>
+        <label class="field"><span>Confirm passphrase</span><input name="confirm" type="password" minlength="8" autocomplete="new-password" required aria-label="Confirm encrypted backup passphrase"></label>
+        <p id="encrypted-backup-error" class="form-error" role="alert"></p>
+        <div class="form-actions">
+          <button class="btn primary" type="button" data-action="download-encrypted-backup">Download encrypted JSON</button>
+        </div>
+      </form>`
+        : '<p class="muted">Encrypted downloads need HTTPS or localhost because browsers expose Web Crypto only in secure contexts. A plain-HTTP LAN server is not a secure context; enable TLS or use the server-backup flow instead.</p>',
+    )}
     ${snapshotHtml()}
     ${panel(
       'Import data',
@@ -166,12 +182,17 @@ export function backupScreen() {
     ${can('data.restore')
       ? panel(
           'Restore backup',
-          `<p class="muted">Paste a backup below. Restoring replaces all companies currently stored in this browser.</p>
+          `<p class="muted">Paste a plain or encrypted backup below. Restoring replaces all companies currently stored in this browser.</p>
           <form id="restore-form" novalidate>
             <label class="field">
               <span>Backup JSON</span>
               <textarea name="payload" class="backup-box" rows="10" placeholder='{ "companies": [ ... ] }' aria-label="Restore JSON payload"></textarea>
             </label>
+            <label class="field">
+              <span>Passphrase for encrypted backups</span>
+              <input name="passphrase" type="password" autocomplete="current-password" aria-label="Encrypted backup passphrase">
+            </label>
+            <p class="muted small">Leave the passphrase blank for an unencrypted backup.</p>
             <p id="restore-preview" class="muted" aria-live="polite"></p>
             <p id="form-error" class="form-error" role="alert"></p>
             <div class="form-actions">

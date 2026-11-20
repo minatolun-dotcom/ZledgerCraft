@@ -10,6 +10,7 @@ const MODULE_ORDER = [
   'src/accounting.js',
   'src/tally.js',
   'src/xlsx.js',
+  'src/backup-crypto.js',
   'src/ui-constants.js',
   'src/ui-server.js',
   'src/ui-screens.js',

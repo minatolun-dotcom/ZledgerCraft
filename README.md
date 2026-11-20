@@ -104,8 +104,8 @@ dev workflow. Set `ZL_AUTH=1` to require login on localhost as well.
   network path. For HTTPS, set `TLS_CERT_PATH` and `TLS_KEY_PATH`. Use this only
   on a trusted private network; do not forward the port from the internet.
 - In signed-in LAN mode the browser does not keep a book mirror or browser
-  snapshots. Download a JSON backup from **Backup & restore**, and keep the
-  server backups or an off-server copy.
+  snapshots. Download a plain or passphrase-encrypted JSON backup from
+  **Backup & restore**, and keep the server backups or an off-server copy.
 
 ## Build a single file
 
@@ -518,6 +518,13 @@ disabled.
 - Restore shows a preview of what the backup contains and snapshots the current
   data first; the last ten manual, daily and pre-restore snapshots can be
   restored or superseded.
+- Passphrase-encrypted JSON downloads are available from **Backup & restore**.
+  The browser encrypts the backup with AES-256-GCM and a PBKDF2-derived key; the
+  passphrase is never stored or uploaded. Encrypted downloads require a secure
+  context (HTTPS or localhost), so a plain-HTTP LAN page shows an explanation
+  instead of the form. Restore accepts either plain or encrypted JSON and asks
+  for the passphrase when needed. The live workspace and server/R2 snapshots
+  remain unencrypted at rest.
 - Backups include profiles and the audit trail. A restore keeps existing local
   profiles, merges the current log with the backup's log and appends a restore
   event rather than erasing history.

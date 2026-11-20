@@ -1,6 +1,6 @@
 # ZledgerCraft roadmap and status
 
-Last updated: 2026-11-19
+Last updated: 2026-11-20
 
 This file is the source of truth for **where the app stands** and **what gets
 built next**. Every completed task updates the tracker below and the final task
@@ -34,7 +34,9 @@ an advanced local MVP, not production or statutory ready.
 papers, inventory depth, SQLite and Neon Postgres workspaces, LAN authentication,
 Neon Auth sign-in, MFA in SQLite mode, company scoping, conservative merge,
 backup/restore, shared Postgres profiles/sessions and hash-chained server audit
-are implemented and tested. The app is suitable for a trusted single-office LAN
+are implemented and tested. Exported JSON backups can be passphrase-encrypted
+in the browser, while the live workspace and server/R2 snapshots remain
+plaintext. The app is suitable for a trusted single-office LAN
 or a shared Neon-backed team with an operator who understands its limits. The
 Cloudflare Pages site and Neon Function API are live at
 `https://books.lengkhawm.online/` with HTTPS, secure HttpOnly session cookies
@@ -44,9 +46,11 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 
 **Recommended next work:** follow the free-path order in
 [KNOWN_LIMITS.md § Remaining limits and free paths](KNOWN_LIMITS.md#remaining-limits-and-free-paths):
-App-level encryption, incremental master-column promotion, APIs/webhooks and
-statutory integrations. Voucher approvals, the SQLite/LAN per-account 2FA policy
-and branded PDF reports are now complete.
+App-level encryption (passphrase-encrypted JSON backups are complete; live
+workspace and server/R2 snapshot encryption remain), incremental
+master-column promotion, APIs/webhooks and statutory integrations. Voucher
+approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
+now complete.
 
 Working now:
 
@@ -159,10 +163,11 @@ Working now:
   closing value, top items by value and items with no issues during the year;
   working capital; top expense heads; plus Print/CSV/Excel from the Statistics
   screen.
-- Verification: 195/195 engine tests, including server scoping, scoped merge,
+- Verification: 242/242 engine tests, including server scoping, scoped merge,
   login history, lockout, single-use MFA, save/event audit chains and
-  backup/restore coverage; all 27 browser suites pass, including the workspace
-  conflict suite and a LAN account/backup smoke test; single-file build 815.8 kB.
+  backup/restore coverage plus encrypted-backup round trip, wrong-passphrase
+  and tamper checks; the existing browser suites were not rerun in this phase;
+  single-file build 880.1 kB.
 
 Why it is not production-ready: browser mode still lives in one browser's local
 storage with unprotected access-control profiles, the app audit trail is not
@@ -326,6 +331,19 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-20 — Phase 9: encrypted backup downloads
+
+- Added a passphrase-encrypted JSON backup download to **Backup & restore**.
+  The browser uses PBKDF2-SHA-256 and AES-256-GCM through Web Crypto, stores no
+  passphrase and keeps the live SQLite/Postgres workspace unchanged. Encrypted
+  download requires HTTPS or localhost; a plain-HTTP LAN page explains why the
+  form is unavailable.
+- Restore accepts plain or encrypted backups and reports a wrong passphrase or
+  modified file without changing current books.
+- Added round-trip, fresh-salt/IV, wrong-passphrase, tamper-detection and
+  parameter-validation tests. This is a first app-level-encryption slice; the
+  live workspace and server/R2 snapshots are still unencrypted at rest.
 
 ### 2026-11-19 — Phase 8: API usage visibility
 

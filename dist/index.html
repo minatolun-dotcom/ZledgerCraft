@@ -4236,6 +4236,7 @@ function normalizePayroll(company) {
     })
     .filter(Boolean);
   const headIds = new Set(payHeads.map((head) => head.id));
+  const headById = new Map(payHeads.map((head) => [head.id, head]));
   const earningHeads = new Set(payHeads.filter((head) => head.kind === 'Earning').map((head) => head.id));
 
   const seenEmployees = new Set();
@@ -4252,6 +4253,7 @@ function normalizePayroll(company) {
         .map((entry) => {
           const amount = parseAmount(entry.amount);
           if (!entry.payHeadId || !headIds.has(entry.payHeadId) || amount === null || amount <= 0) return null;
+          if (headById.get(entry.payHeadId)?.percentOfBasic && amount > 100) return null;
           return { payHeadId: String(entry.payHeadId).slice(0, 80), amount: round2(amount) };
         })
         .filter(Boolean);
@@ -4456,7 +4458,7 @@ function employeePayComponents(employee, headMap, factor = 1) {
     const head = headMap.get(entry.payHeadId);
     if (!head) continue;
     const amount = head.percentOfBasic
-      ? round2((basic * head.percentOfBasic) / 100)
+      ? round2((basic * round2(entry.amount)) / 100)
       : round2(round2(entry.amount) * factor);
     if (amount <= 0) continue;
     const line = { payHeadId: head.id, name: head.name, amount };
@@ -20626,8 +20628,8 @@ function payrollScreen() {
     .map((head) => {
       const entry = editing?.pay?.find((item) => item.payHeadId === head.id);
       return `<label class="field">
-        <span>${esc(head.name)} <span class="muted small">${esc(head.kind)}${head.percentOfBasic ? ` · ${head.percentOfBasic}% of Basic` : ''}</span></span>
-        <input name="pay_${esc(head.id)}" inputmode="decimal" value="${entry ? esc(entry.amount) : ''}" placeholder="${head.percentOfBasic ? 'Percent' : '0.00'}">
+        <span>${esc(head.name)} <span class="muted small">${esc(head.kind)}${head.percentOfBasic ? ` · default ${head.percentOfBasic}% of Basic` : ''}</span></span>
+        <input name="pay_${esc(head.id)}" inputmode="decimal" value="${esc(entry ? entry.amount : head.percentOfBasic ?? '')}" placeholder="${head.percentOfBasic ? 'Percent' : '0.00'}">
       </label>`;
     })
     .join('');
@@ -20651,7 +20653,7 @@ function payrollScreen() {
           <span>Include in payroll runs</span>
         </label>
         <div class="pay-heads-block">
-          <p class="muted small">Monthly amounts. For a percentage pay head, enter the percent of Basic; leave it blank when it does not apply.</p>
+          <p class="muted small">Monthly amounts. A percentage pay head starts at its default percent of Basic and can be changed per employee; leave it blank when it does not apply.</p>
           <div class="pay-grid">${payFields}</div>
         </div>
         <div class="field form-actions">

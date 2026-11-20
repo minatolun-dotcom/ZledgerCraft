@@ -160,7 +160,7 @@ test('percentage-of-basic pay heads compute from fixed Basic and prorate', () =>
     name: 'Ravi Kumar',
     pay: [
       { payHeadId: basic, amount: 10000 },
-      { payHeadId: bonus, amount: 10 },
+      { payHeadId: bonus, amount: 12 },
     ],
   });
   assert.equal(result.ok, true, result.error);
@@ -168,13 +168,13 @@ test('percentage-of-basic pay heads compute from fixed Basic and prorate', () =>
   const run = runPayroll(company, { month: '2026-04' });
   assert.equal(run.ok, true, run.error);
   const bonusLine = run.run.rows[0].earnings.find((line) => line.payHeadId === bonus);
-  assert.equal(bonusLine.amount, 1000);
-  assert.equal(run.run.rows[0].gross, 11000);
+  assert.equal(bonusLine.amount, 1200);
+  assert.equal(run.run.rows[0].gross, 11200);
 
   const part = runPayroll(company, { month: '2026-06', paidDays: { [result.employee.id]: 15 } });
   assert.equal(part.ok, true, part.error);
-  assert.equal(part.run.rows[0].earnings.find((line) => line.payHeadId === bonus).amount, 500);
-  assert.equal(part.run.rows[0].gross, 5500);
+  assert.equal(part.run.rows[0].earnings.find((line) => line.payHeadId === bonus).amount, 600);
+  assert.equal(part.run.rows[0].gross, 5600);
 });
 
 test('a payroll run posts a balanced journal and stores the run snapshot', () => {

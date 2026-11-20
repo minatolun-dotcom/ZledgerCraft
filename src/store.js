@@ -1810,6 +1810,7 @@ export function normalizePayroll(company) {
     })
     .filter(Boolean);
   const headIds = new Set(payHeads.map((head) => head.id));
+  const headById = new Map(payHeads.map((head) => [head.id, head]));
   const earningHeads = new Set(payHeads.filter((head) => head.kind === 'Earning').map((head) => head.id));
 
   const seenEmployees = new Set();
@@ -1826,6 +1827,7 @@ export function normalizePayroll(company) {
         .map((entry) => {
           const amount = parseAmount(entry.amount);
           if (!entry.payHeadId || !headIds.has(entry.payHeadId) || amount === null || amount <= 0) return null;
+          if (headById.get(entry.payHeadId)?.percentOfBasic && amount > 100) return null;
           return { payHeadId: String(entry.payHeadId).slice(0, 80), amount: round2(amount) };
         })
         .filter(Boolean);
@@ -2030,7 +2032,7 @@ export function employeePayComponents(employee, headMap, factor = 1) {
     const head = headMap.get(entry.payHeadId);
     if (!head) continue;
     const amount = head.percentOfBasic
-      ? round2((basic * head.percentOfBasic) / 100)
+      ? round2((basic * round2(entry.amount)) / 100)
       : round2(round2(entry.amount) * factor);
     if (amount <= 0) continue;
     const line = { payHeadId: head.id, name: head.name, amount };

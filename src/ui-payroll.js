@@ -217,8 +217,8 @@ export function payrollScreen() {
     .map((head) => {
       const entry = editing?.pay?.find((item) => item.payHeadId === head.id);
       return `<label class="field">
-        <span>${esc(head.name)} <span class="muted small">${esc(head.kind)}${head.percentOfBasic ? ` · ${head.percentOfBasic}% of Basic` : ''}</span></span>
-        <input name="pay_${esc(head.id)}" inputmode="decimal" value="${entry ? esc(entry.amount) : ''}" placeholder="${head.percentOfBasic ? 'Percent' : '0.00'}">
+        <span>${esc(head.name)} <span class="muted small">${esc(head.kind)}${head.percentOfBasic ? ` · default ${head.percentOfBasic}% of Basic` : ''}</span></span>
+        <input name="pay_${esc(head.id)}" inputmode="decimal" value="${esc(entry ? entry.amount : head.percentOfBasic ?? '')}" placeholder="${head.percentOfBasic ? 'Percent' : '0.00'}">
       </label>`;
     })
     .join('');
@@ -242,7 +242,7 @@ export function payrollScreen() {
           <span>Include in payroll runs</span>
         </label>
         <div class="pay-heads-block">
-          <p class="muted small">Monthly amounts. For a percentage pay head, enter the percent of Basic; leave it blank when it does not apply.</p>
+          <p class="muted small">Monthly amounts. A percentage pay head starts at its default percent of Basic and can be changed per employee; leave it blank when it does not apply.</p>
           <div class="pay-grid">${payFields}</div>
         </div>
         <div class="field form-actions">

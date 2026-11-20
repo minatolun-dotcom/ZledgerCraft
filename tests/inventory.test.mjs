@@ -12,6 +12,7 @@ import {
   addStockTransfer,
   addUnit,
   addVoucher,
+  convertQuotationToOrder,
   createCompany,
   deleteBom,
   deleteGodown,
@@ -875,6 +876,39 @@ test('orders record sales and purchase commitments without moving stock', () => 
   assert.equal(purchase.ok, true, purchase.error);
   assert.equal(purchase.order.no, 1, 'purchase orders have their own sequence');
   assert.equal(deleteOrder(company, purchase.order.id).ok, true);
+});
+
+test('a quotation converts into a sales order and keeps its own sequence', () => {
+  const { company, item } = inventoryFixture();
+  const customer = addLedger(company, {
+    name: 'Quotation Customer',
+    groupId: company.groups.find((group) => group.key === 'sundryDebtors').id,
+    opening: 0,
+  }).ledger;
+  const quotation = addOrder(company, {
+    kind: 'Quotation',
+    type: 'Sales',
+    date: '2026-04-05',
+    partyLedgerId: customer.id,
+    deliveryDate: '2026-04-30',
+    stockItemId: item.id,
+    qty: 2,
+    rate: 150,
+  });
+  assert.equal(quotation.ok, true, quotation.error);
+  assert.equal(quotation.order.kind, 'Quotation');
+  assert.equal(quotation.order.no, 1);
+  assert.equal(Number(company.counters.__salesOrder) || 0, 0);
+  assert.equal(stockOnHand(company, item.id, '2026-04-05'), 10);
+
+  const converted = convertQuotationToOrder(company, quotation.order.id);
+  assert.equal(converted.ok, true, converted.error);
+  assert.equal(converted.quotation.status, 'Converted');
+  assert.equal(converted.order.no, 1);
+  assert.equal(converted.order.type, 'Sales');
+  assert.equal(converted.order.items[0].qty, 2);
+  assert.equal(converted.quotation.convertedOrderId, converted.order.id);
+  assert.equal(convertQuotationToOrder(company, quotation.order.id).ok, false);
 });
 
 test('an order tracks partial fulfilment across linked vouchers', () => {

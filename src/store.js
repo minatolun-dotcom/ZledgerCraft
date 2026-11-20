@@ -2634,9 +2634,15 @@ function seedInventoryMasters(company) {
     const key = type === 'Sales' ? '__salesOrder' : '__purchaseOrder';
     company.counters[key] = Math.max(
       Number(company.counters[key]) || 0,
-      ...company.orders.filter((order) => order.type === type).map((order) => Number(order.no) || 0),
+      ...company.orders
+        .filter((order) => order.type === type && order.kind !== 'Quotation')
+        .map((order) => Number(order.no) || 0),
     );
   }
+  company.counters.__salesQuotation = Math.max(
+    Number(company.counters.__salesQuotation) || 0,
+    ...company.orders.filter((order) => order.kind === 'Quotation').map((order) => Number(order.no) || 0),
+  );
   for (const item of company.stockItems) item.batchTracking = Boolean(item.batchTracking);
   return company;
 }
@@ -3351,6 +3357,9 @@ function orderLinkFor(company, type, orderId) {
   const order = (company.orders ?? []).find((entry) => entry.id === orderId);
   if (!order) return { ok: false, error: 'The linked order no longer exists.' };
   const label = `${order.type === 'Sales' ? 'SO' : 'PO'}-${order.no}`;
+  if (order.kind === 'Quotation') {
+    return { ok: false, error: 'A quotation must be converted to a sales order before creating a voucher.' };
+  }
   if (order.type !== type) {
     return {
       ok: false,
@@ -4414,6 +4423,8 @@ export function normalizeComplianceTasks(company) {
 export function addOrder(company, input) {
   const type = input.type === 'Purchase' ? 'Purchase' : input.type === 'Sales' ? 'Sales' : '';
   if (!type) return { ok: false, error: 'Choose a sales or purchase order.' };
+  const quotation = input.kind === 'Quotation';
+  if (quotation && type !== 'Sales') return { ok: false, error: 'A quotation must be a sales document.' };
   const date = String(input.date ?? '');
   if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid order date.' };
   seedYears(company);
@@ -4480,11 +4491,12 @@ export function addOrder(company, input) {
   if (total <= 0) return { ok: false, error: 'The order value must be greater than zero.' };
   company.orders = company.orders ?? [];
   company.counters = company.counters ?? {};
-  const key = type === 'Sales' ? '__salesOrder' : '__purchaseOrder';
+  const key = quotation ? '__salesQuotation' : type === 'Sales' ? '__salesOrder' : '__purchaseOrder';
   const sequence = (Number(company.counters[key]) || 0) + 1;
   company.counters[key] = sequence;
   const order = {
-    id: uid('ord'),
+    id: uid(quotation ? 'qtn' : 'ord'),
+    ...(quotation ? { kind: 'Quotation' } : {}),
     type,
     no: sequence,
     date,
@@ -4511,7 +4523,7 @@ export function orderRemainingItems(order) {
 
 /** Recomputes an order's fulfilled quantities from every linked voucher. */
 export function refreshOrderFulfilment(company, order) {
-  if (!order || order.status === 'Cancelled') return order;
+  if (!order || order.status === 'Cancelled' || order.kind === 'Quotation') return order;
   for (const line of order.items ?? []) line.fulfilledQty = 0;
   const vouchers = (company.vouchers ?? []).filter((voucher) => voucher.orderId === order.id);
   for (const voucher of vouchers) {
@@ -4539,6 +4551,34 @@ export function refreshOrderFulfilment(company, order) {
     delete order.closedByFulfilment;
   }
   return order;
+}
+
+export function convertQuotationToOrder(company, quotationId) {
+  const quotation = (company.orders ?? []).find(
+    (entry) => entry.id === quotationId && entry.kind === 'Quotation',
+  );
+  if (!quotation) return { ok: false, error: 'Quotation not found.' };
+  if (quotation.status !== 'Open') return { ok: false, error: 'Only an open quotation can be converted.' };
+  const result = addOrder(company, {
+    type: 'Sales',
+    date: quotation.date,
+    partyLedgerId: quotation.partyLedgerId,
+    deliveryDate: quotation.deliveryDate,
+    items: (quotation.items ?? []).map((line) => ({
+      stockItemId: line.stockItemId,
+      qty: line.qty,
+      rate: line.rate,
+      godownId: line.godownId,
+      ...(line.batchNo ? { batchNo: line.batchNo } : {}),
+      ...(line.expiryDate ? { expiryDate: line.expiryDate } : {}),
+    })),
+    narration: quotation.narration ? `From quotation ${quotation.no}: ${quotation.narration}` : `From quotation ${quotation.no}`,
+  });
+  if (!result.ok) return result;
+  quotation.status = 'Converted';
+  quotation.convertedOrderId = result.order.id;
+  quotation.convertedAt = new Date().toISOString();
+  return { ok: true, quotation, order: result.order };
 }
 
 export function setOrderStatus(company, orderId, status) {
@@ -5852,7 +5892,7 @@ function validateImportedCompany(company) {
     }
     if (orderIds.has(order.id)) return `Company "${name}" has duplicate order ids.`;
     orderIds.add(order.id);
-    if (!['Open', 'Closed', 'Cancelled'].includes(order.status)) {
+    if (!['Open', 'Closed', 'Cancelled', 'Converted'].includes(order.status)) {
       return `Company "${name}": order ${order.no ?? ''} has an invalid status.`;
     }
     if (!ledgerIds.has(order.partyLedgerId)) {

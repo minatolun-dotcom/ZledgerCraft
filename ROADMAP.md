@@ -344,6 +344,16 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 49: quotations
+
+- Sales quotations carry party, validity date and the same item lines as an
+  order, with their own QTN sequence and Open/Converted/Cancelled status.
+- An open quotation converts to a linked sales order and retains the source
+  quotation reference; conversion does not create a voucher or move stock.
+- Verification: quotation creation, independent numbering, conversion and
+  duplicate-conversion rejection; 299 tests (298 pass, 1 skipped) and a
+  1,038.8 kB build.
+
 ### 2026-11-20 — Phase 48: attendance, wastage and consolidation
 
 - Payroll runs accept paid days per employee, defaulting to the calendar days

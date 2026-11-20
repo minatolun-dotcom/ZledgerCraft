@@ -4977,9 +4977,15 @@ function seedInventoryMasters(company) {
     const key = type === 'Sales' ? '__salesOrder' : '__purchaseOrder';
     company.counters[key] = Math.max(
       Number(company.counters[key]) || 0,
-      ...company.orders.filter((order) => order.type === type).map((order) => Number(order.no) || 0),
+      ...company.orders
+        .filter((order) => order.type === type && order.kind !== 'Quotation')
+        .map((order) => Number(order.no) || 0),
     );
   }
+  company.counters.__salesQuotation = Math.max(
+    Number(company.counters.__salesQuotation) || 0,
+    ...company.orders.filter((order) => order.kind === 'Quotation').map((order) => Number(order.no) || 0),
+  );
   for (const item of company.stockItems) item.batchTracking = Boolean(item.batchTracking);
   return company;
 }
@@ -5694,6 +5700,9 @@ function orderLinkFor(company, type, orderId) {
   const order = (company.orders ?? []).find((entry) => entry.id === orderId);
   if (!order) return { ok: false, error: 'The linked order no longer exists.' };
   const label = `${order.type === 'Sales' ? 'SO' : 'PO'}-${order.no}`;
+  if (order.kind === 'Quotation') {
+    return { ok: false, error: 'A quotation must be converted to a sales order before creating a voucher.' };
+  }
   if (order.type !== type) {
     return {
       ok: false,
@@ -6757,6 +6766,8 @@ function normalizeComplianceTasks(company) {
 function addOrder(company, input) {
   const type = input.type === 'Purchase' ? 'Purchase' : input.type === 'Sales' ? 'Sales' : '';
   if (!type) return { ok: false, error: 'Choose a sales or purchase order.' };
+  const quotation = input.kind === 'Quotation';
+  if (quotation && type !== 'Sales') return { ok: false, error: 'A quotation must be a sales document.' };
   const date = String(input.date ?? '');
   if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid order date.' };
   seedYears(company);
@@ -6823,11 +6834,12 @@ function addOrder(company, input) {
   if (total <= 0) return { ok: false, error: 'The order value must be greater than zero.' };
   company.orders = company.orders ?? [];
   company.counters = company.counters ?? {};
-  const key = type === 'Sales' ? '__salesOrder' : '__purchaseOrder';
+  const key = quotation ? '__salesQuotation' : type === 'Sales' ? '__salesOrder' : '__purchaseOrder';
   const sequence = (Number(company.counters[key]) || 0) + 1;
   company.counters[key] = sequence;
   const order = {
-    id: uid('ord'),
+    id: uid(quotation ? 'qtn' : 'ord'),
+    ...(quotation ? { kind: 'Quotation' } : {}),
     type,
     no: sequence,
     date,
@@ -6854,7 +6866,7 @@ function orderRemainingItems(order) {
 
 /** Recomputes an order's fulfilled quantities from every linked voucher. */
 function refreshOrderFulfilment(company, order) {
-  if (!order || order.status === 'Cancelled') return order;
+  if (!order || order.status === 'Cancelled' || order.kind === 'Quotation') return order;
   for (const line of order.items ?? []) line.fulfilledQty = 0;
   const vouchers = (company.vouchers ?? []).filter((voucher) => voucher.orderId === order.id);
   for (const voucher of vouchers) {
@@ -6882,6 +6894,34 @@ function refreshOrderFulfilment(company, order) {
     delete order.closedByFulfilment;
   }
   return order;
+}
+
+function convertQuotationToOrder(company, quotationId) {
+  const quotation = (company.orders ?? []).find(
+    (entry) => entry.id === quotationId && entry.kind === 'Quotation',
+  );
+  if (!quotation) return { ok: false, error: 'Quotation not found.' };
+  if (quotation.status !== 'Open') return { ok: false, error: 'Only an open quotation can be converted.' };
+  const result = addOrder(company, {
+    type: 'Sales',
+    date: quotation.date,
+    partyLedgerId: quotation.partyLedgerId,
+    deliveryDate: quotation.deliveryDate,
+    items: (quotation.items ?? []).map((line) => ({
+      stockItemId: line.stockItemId,
+      qty: line.qty,
+      rate: line.rate,
+      godownId: line.godownId,
+      ...(line.batchNo ? { batchNo: line.batchNo } : {}),
+      ...(line.expiryDate ? { expiryDate: line.expiryDate } : {}),
+    })),
+    narration: quotation.narration ? `From quotation ${quotation.no}: ${quotation.narration}` : `From quotation ${quotation.no}`,
+  });
+  if (!result.ok) return result;
+  quotation.status = 'Converted';
+  quotation.convertedOrderId = result.order.id;
+  quotation.convertedAt = new Date().toISOString();
+  return { ok: true, quotation, order: result.order };
 }
 
 function setOrderStatus(company, orderId, status) {
@@ -8195,7 +8235,7 @@ function validateImportedCompany(company) {
     }
     if (orderIds.has(order.id)) return `Company "${name}" has duplicate order ids.`;
     orderIds.add(order.id);
-    if (!['Open', 'Closed', 'Cancelled'].includes(order.status)) {
+    if (!['Open', 'Closed', 'Cancelled', 'Converted'].includes(order.status)) {
       return `Company "${name}": order ${order.no ?? ''} has an invalid status.`;
     }
     if (!ledgerIds.has(order.partyLedgerId)) {
@@ -16651,8 +16691,12 @@ function ordersScreen() {
   const to = current.to || active.fyEnd;
   const status = current.status || 'All';
   const orders = [...(active.orders ?? [])]
+    .filter((order) => order.kind !== 'Quotation')
     .filter((order) => order.date >= from && order.date <= to)
     .filter((order) => status === 'All' || order.status === status)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no);
+  const quotations = [...(active.orders ?? [])]
+    .filter((order) => order.kind === 'Quotation' && order.date >= from && order.date <= to)
     .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no);
   const parties = new Map((active.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
   const items = new Map((active.stockItems ?? []).map((item) => [item.id, item]));
@@ -16709,6 +16753,21 @@ function ordersScreen() {
     })
     .join('');
 
+  const quotationRows = quotations
+    .map((quotation) => `<tr>
+      <td><strong>QTN-${quotation.no}</strong><div class="muted small">${esc(dateLabel(quotation.date))}</div></td>
+      <td>${esc(parties.get(quotation.partyLedgerId)?.name ?? 'Unknown party')}</td>
+      <td>${quotation.deliveryDate ? esc(dateLabel(quotation.deliveryDate)) : '—'}</td>
+      <td class="num">${money(quotation.total)}</td>
+      <td><span class="badge${quotation.status === 'Open' ? '' : quotation.status === 'Cancelled' ? ' overdue' : ' attention'}">${esc(quotation.status)}</span></td>
+      <td class="row-actions">
+        ${quotation.status === 'Open' ? `<button class="btn small" type="button" data-action="convert-quotation" data-id="${esc(quotation.id)}">Convert to order</button>` : ''}
+        ${quotation.status === 'Open' ? `<button class="btn small ghost" type="button" data-action="order-status" data-id="${esc(quotation.id)}" data-status="Cancelled">Cancel</button>` : ''}
+        <button class="btn small danger" type="button" data-action="delete-order" data-id="${esc(quotation.id)}">Delete</button>
+      </td>
+    </tr>`)
+    .join('');
+
   return `${panel(
     'Orders',
     `<form id="orders-filter" class="filter-bar">
@@ -16729,6 +16788,26 @@ function ordersScreen() {
         </table>`
       : '<p class="muted">No orders in this period. Record one below; orders do not post to the ledger or move stock.</p>'}`,
     'Open orders can prefill a sales or purchase voucher. Creating the voucher does not change the order status.',
+  )}
+  ${panel(
+    'Quotations',
+    `<form id="quotation-form" class="form-grid" novalidate>
+      <label class="field"><span>Quotation date</span><input name="date" type="date" value="${esc(to <= todayIso() ? to : todayIso())}" min="${esc(booksStart(active))}" required></label>
+      <label class="field"><span>Party</span><select name="partyLedgerId">${allPartyLedgerOptions(active, '')}</select></label>
+      <label class="field"><span>Valid until</span><input name="deliveryDate" type="date"></label>
+      <div class="bom-components">
+        <span class="muted small">Quotation lines</span>
+        <div id="quotation-lines">${orderItemRow(active)}</div>
+        <button class="btn small" type="button" data-action="add-quotation-line">Add item</button>
+      </div>
+      <label class="field"><span>Narration</span><input name="narration" maxlength="400" placeholder="Optional note"></label>
+      <div class="field form-actions"><button class="btn primary" type="submit">Create quotation</button></div>
+      <p id="quotation-error" class="form-error" role="alert"></p>
+    </form>
+    ${quotations.length
+      ? `<table class="data-table compact"><thead><tr><th>Quotation</th><th>Party</th><th>Valid until</th><th class="num">Value</th><th>Status</th><th></th></tr></thead><tbody>${quotationRows}</tbody></table>`
+      : '<p class="muted">No quotations in this period. Convert an open quotation into a sales order before creating a voucher.</p>'}`,
+    'Quotations use sales-order item lines but do not move stock or post to the ledger. Conversion creates a linked sales order; it does not create a voucher.',
   )}
   ${panel(
     'New order',
@@ -22264,6 +22343,40 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'quotation-form') {
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const items = [...form.querySelectorAll('#quotation-lines .order-row')].map((row) => ({
+      stockItemId: row.querySelector('[name="orderItemId"]')?.value ?? '',
+      godownId: row.querySelector('[name="orderGodownId"]')?.value ?? '',
+      batchNo: row.querySelector('[name="orderBatchNo"]')?.value ?? '',
+      expiryDate: row.querySelector('[name="orderExpiryDate"]')?.value ?? '',
+      qty: row.querySelector('[name="orderQty"]')?.value ?? '',
+      rate: row.querySelector('[name="orderRate"]')?.value ?? '',
+    }));
+    const result = addOrder(active, {
+      kind: 'Quotation',
+      type: 'Sales',
+      date: data.get('date'),
+      partyLedgerId: data.get('partyLedgerId'),
+      deliveryDate: data.get('deliveryDate'),
+      items,
+      narration: data.get('narration'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'quotation-error');
+      return;
+    }
+    logAudit('quotation.create', `Created quotation QTN-${result.order.no}.`, active, `QTN-${result.order.no}`);
+    persist();
+    setFlash(`Quotation QTN-${result.order.no} created.`);
+    render();
+    return;
+  }
+
   if (form.id === 'order-form') {
     if (!can('voucher.write')) {
       requirePermission('voucher.write');
@@ -25144,6 +25257,35 @@ async function handleClick(event) {
       const container = document.getElementById('order-lines');
       const active = company();
       if (container && active) container.insertAdjacentHTML('beforeend', orderItemRow(active));
+      break;
+    }
+    case 'add-quotation-line': {
+      const container = document.getElementById('quotation-lines');
+      const active = company();
+      if (container && active) container.insertAdjacentHTML('beforeend', orderItemRow(active));
+      break;
+    }
+    case 'convert-quotation': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const result = convertQuotationToOrder(active, trigger.dataset.id);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit(
+        'quotation.convert',
+        `Converted quotation QTN-${result.quotation.no} to sales order SO-${result.order.no}.`,
+        active,
+        `QTN-${result.quotation.no}`,
+      );
+      persist();
+      setFlash(`Quotation converted to sales order SO-${result.order.no}.`);
+      navigate('orders');
       break;
     }
     case 'remove-order-line':

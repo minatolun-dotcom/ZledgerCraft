@@ -46,6 +46,7 @@ import {
   billLabel,
   clearBankStatement,
   closeFinancialYear,
+  convertQuotationToOrder,
   costCentreUsage,
   dateLabel,
   defaultFyStart,
@@ -2816,6 +2817,40 @@ export async function handleSubmit(event) {
       to: data.get('to') || '',
       status: data.get('status') || 'All',
     };
+    render();
+    return;
+  }
+
+  if (form.id === 'quotation-form') {
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const items = [...form.querySelectorAll('#quotation-lines .order-row')].map((row) => ({
+      stockItemId: row.querySelector('[name="orderItemId"]')?.value ?? '',
+      godownId: row.querySelector('[name="orderGodownId"]')?.value ?? '',
+      batchNo: row.querySelector('[name="orderBatchNo"]')?.value ?? '',
+      expiryDate: row.querySelector('[name="orderExpiryDate"]')?.value ?? '',
+      qty: row.querySelector('[name="orderQty"]')?.value ?? '',
+      rate: row.querySelector('[name="orderRate"]')?.value ?? '',
+    }));
+    const result = addOrder(active, {
+      kind: 'Quotation',
+      type: 'Sales',
+      date: data.get('date'),
+      partyLedgerId: data.get('partyLedgerId'),
+      deliveryDate: data.get('deliveryDate'),
+      items,
+      narration: data.get('narration'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'quotation-error');
+      return;
+    }
+    logAudit('quotation.create', `Created quotation QTN-${result.order.no}.`, active, `QTN-${result.order.no}`);
+    persist();
+    setFlash(`Quotation QTN-${result.order.no} created.`);
     render();
     return;
   }
@@ -5700,6 +5735,35 @@ async function handleClick(event) {
       const container = document.getElementById('order-lines');
       const active = company();
       if (container && active) container.insertAdjacentHTML('beforeend', orderItemRow(active));
+      break;
+    }
+    case 'add-quotation-line': {
+      const container = document.getElementById('quotation-lines');
+      const active = company();
+      if (container && active) container.insertAdjacentHTML('beforeend', orderItemRow(active));
+      break;
+    }
+    case 'convert-quotation': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const result = convertQuotationToOrder(active, trigger.dataset.id);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit(
+        'quotation.convert',
+        `Converted quotation QTN-${result.quotation.no} to sales order SO-${result.order.no}.`,
+        active,
+        `QTN-${result.quotation.no}`,
+      );
+      persist();
+      setFlash(`Quotation converted to sales order SO-${result.order.no}.`);
+      navigate('orders');
       break;
     }
     case 'remove-order-line':

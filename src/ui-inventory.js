@@ -42,8 +42,12 @@ export function ordersScreen() {
   const to = current.to || active.fyEnd;
   const status = current.status || 'All';
   const orders = [...(active.orders ?? [])]
+    .filter((order) => order.kind !== 'Quotation')
     .filter((order) => order.date >= from && order.date <= to)
     .filter((order) => status === 'All' || order.status === status)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no);
+  const quotations = [...(active.orders ?? [])]
+    .filter((order) => order.kind === 'Quotation' && order.date >= from && order.date <= to)
     .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no);
   const parties = new Map((active.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
   const items = new Map((active.stockItems ?? []).map((item) => [item.id, item]));
@@ -100,6 +104,21 @@ export function ordersScreen() {
     })
     .join('');
 
+  const quotationRows = quotations
+    .map((quotation) => `<tr>
+      <td><strong>QTN-${quotation.no}</strong><div class="muted small">${esc(dateLabel(quotation.date))}</div></td>
+      <td>${esc(parties.get(quotation.partyLedgerId)?.name ?? 'Unknown party')}</td>
+      <td>${quotation.deliveryDate ? esc(dateLabel(quotation.deliveryDate)) : '—'}</td>
+      <td class="num">${money(quotation.total)}</td>
+      <td><span class="badge${quotation.status === 'Open' ? '' : quotation.status === 'Cancelled' ? ' overdue' : ' attention'}">${esc(quotation.status)}</span></td>
+      <td class="row-actions">
+        ${quotation.status === 'Open' ? `<button class="btn small" type="button" data-action="convert-quotation" data-id="${esc(quotation.id)}">Convert to order</button>` : ''}
+        ${quotation.status === 'Open' ? `<button class="btn small ghost" type="button" data-action="order-status" data-id="${esc(quotation.id)}" data-status="Cancelled">Cancel</button>` : ''}
+        <button class="btn small danger" type="button" data-action="delete-order" data-id="${esc(quotation.id)}">Delete</button>
+      </td>
+    </tr>`)
+    .join('');
+
   return `${panel(
     'Orders',
     `<form id="orders-filter" class="filter-bar">
@@ -120,6 +139,26 @@ export function ordersScreen() {
         </table>`
       : '<p class="muted">No orders in this period. Record one below; orders do not post to the ledger or move stock.</p>'}`,
     'Open orders can prefill a sales or purchase voucher. Creating the voucher does not change the order status.',
+  )}
+  ${panel(
+    'Quotations',
+    `<form id="quotation-form" class="form-grid" novalidate>
+      <label class="field"><span>Quotation date</span><input name="date" type="date" value="${esc(to <= todayIso() ? to : todayIso())}" min="${esc(booksStart(active))}" required></label>
+      <label class="field"><span>Party</span><select name="partyLedgerId">${allPartyLedgerOptions(active, '')}</select></label>
+      <label class="field"><span>Valid until</span><input name="deliveryDate" type="date"></label>
+      <div class="bom-components">
+        <span class="muted small">Quotation lines</span>
+        <div id="quotation-lines">${orderItemRow(active)}</div>
+        <button class="btn small" type="button" data-action="add-quotation-line">Add item</button>
+      </div>
+      <label class="field"><span>Narration</span><input name="narration" maxlength="400" placeholder="Optional note"></label>
+      <div class="field form-actions"><button class="btn primary" type="submit">Create quotation</button></div>
+      <p id="quotation-error" class="form-error" role="alert"></p>
+    </form>
+    ${quotations.length
+      ? `<table class="data-table compact"><thead><tr><th>Quotation</th><th>Party</th><th>Valid until</th><th class="num">Value</th><th>Status</th><th></th></tr></thead><tbody>${quotationRows}</tbody></table>`
+      : '<p class="muted">No quotations in this period. Convert an open quotation into a sales order before creating a voucher.</p>'}`,
+    'Quotations use sales-order item lines but do not move stock or post to the ledger. Conversion creates a linked sales order; it does not create a voucher.',
   )}
   ${panel(
     'New order',

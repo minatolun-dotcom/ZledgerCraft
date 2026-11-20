@@ -436,6 +436,9 @@ disabled.
   balance; the order closes only when every line is fulfilled, and deleting a
   linked voucher recalculates fulfilment. Orders do not post to the ledger or
   move stock.
+- Quotations with party, validity date and item lines, kept in their own
+  sequence. An open quotation can be converted to a linked sales order; it
+  does not create a voucher or move stock by itself.
 - BOM recipes with a finished item, output quantity and up to twenty component
   items. Production consumes components in proportion to the output quantity
   from a chosen godown and brings finished goods into a chosen godown, with an

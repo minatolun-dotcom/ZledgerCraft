@@ -225,6 +225,27 @@ test('leave records reduce balances and reject overlaps', () => {
   assert.equal(employeeLeaveBalance(company, asha.id).CL.remaining, 12);
 });
 
+test('changing a pay structure records a dated salary revision', () => {
+  const { company } = fixture();
+  const asha = standardEmployee(company);
+  assert.equal(asha.revisions.length, 1);
+  const basic = head(company, 'Basic Salary');
+  const updated = updateEmployee(company, asha.id, {
+    name: asha.name,
+    pay: [{ payHeadId: basic.id, amount: 35000 }],
+    leave: { CL: 0, SL: 0, EL: 0 },
+  });
+  assert.equal(updated.ok, true, updated.error);
+  assert.equal(updated.employee.revisions.length, 2);
+  assert.equal(updated.employee.revisions[1].pay[0].amount, 35000);
+  const unchanged = updateEmployee(company, asha.id, {
+    name: asha.name,
+    pay: [{ payHeadId: basic.id, amount: 35000 }],
+    leave: { CL: 0, SL: 0, EL: 0 },
+  });
+  assert.equal(unchanged.employee.revisions.length, 2);
+});
+
 test('statutory calculator applies capped PF and professional tax', () => {
   const { company } = fixture();
   standardEmployee(company);

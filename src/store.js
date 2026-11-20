@@ -1830,6 +1830,9 @@ export function normalizePayroll(company) {
           : {}),
         active: employee.active !== false,
         pay,
+        ...(Array.isArray(employee.revisions) && employee.revisions.length
+          ? { revisions: normalizePayRevisions(employee.revisions, headIds) }
+          : {}),
         leave: normalizeLeaveBalances(employee.leave),
       };
     })
@@ -2161,6 +2164,7 @@ export function addEmployee(company, input = {}) {
     name,
     active: input.active !== false && input.active !== 'false',
     pay: checked.pay,
+    revisions: [{ date: dateOfJoining || todayIso(), pay: paySnapshot(checked.pay) }],
     leave: normalizeLeaveBalances(input.leave),
   };
   const code = String(input.code ?? '').trim().slice(0, 20);
@@ -2208,7 +2212,11 @@ export function updateEmployee(company, employeeId, input = {}) {
   if (bank.error) return { ok: false, error: bank.error };
   employee.name = name;
   employee.active = input.active !== false && input.active !== 'false';
+  const payChanged = JSON.stringify(paySnapshot(employee.pay)) !== JSON.stringify(paySnapshot(checked.pay));
   employee.pay = checked.pay;
+  if (payChanged) {
+    employee.revisions = [...(employee.revisions ?? []), { date: todayIso(), pay: paySnapshot(checked.pay) }].slice(-100);
+  }
   employee.leave = normalizeLeaveBalances(input.leave);
   const optional = { code: 20, designation: 60 };
   for (const [key, max] of Object.entries(optional)) {
@@ -2229,6 +2237,27 @@ export function updateEmployee(company, employeeId, input = {}) {
   if (dateOfExit) employee.dateOfExit = dateOfExit;
   else delete employee.dateOfExit;
   return { ok: true, employee };
+}
+
+function paySnapshot(pay = []) {
+  return pay
+    .map((entry) => ({ payHeadId: entry.payHeadId, amount: round2(entry.amount) }))
+    .sort((a, b) => a.payHeadId.localeCompare(b.payHeadId));
+}
+
+function normalizePayRevisions(input, headIds) {
+  return (Array.isArray(input) ? input : [])
+    .filter((revision) => revision && isValidIsoDate(String(revision.date ?? '')))
+    .map((revision) => ({
+      date: String(revision.date),
+      pay: paySnapshot(
+        (Array.isArray(revision.pay) ? revision.pay : [])
+          .filter((entry) => entry && headIds.has(entry.payHeadId) && parseAmount(entry.amount) > 0)
+          .map((entry) => ({ payHeadId: String(entry.payHeadId).slice(0, 80), amount: parseAmount(entry.amount) })),
+      ),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-100);
 }
 
 function normalizeLeaveBalances(input = {}) {

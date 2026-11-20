@@ -347,7 +347,9 @@ disabled.
   preload those paid-days values by employee name or code for review. A
   statutory calculator applies configurable PF/ESI rates, wage ceilings and a
   fixed professional-tax amount to employee deduction amounts on request;
-  employer contributions are not computed.
+  employer contributions are not computed. Changing an employee's pay structure
+  appends a dated salary revision with the full snapshot; revisions do not have
+  future effective dates.
 - Ledgers with opening Dr/Cr, optional party GSTIN/GST state, optional party
   address/city/PIN for e-invoices and optional PAN for deductee reporting. Alter
   a ledger's name, group or opening; delete a ledger only when no voucher uses

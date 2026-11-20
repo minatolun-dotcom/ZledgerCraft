@@ -275,9 +275,26 @@ export function payrollScreen() {
       </tr>`;
     })
     .join('');
+  const revisionRows = (editing?.revisions ?? [])
+    .slice()
+    .reverse()
+    .map((revision) => `<tr>
+      <td>${esc(dateLabel(revision.date))}</td>
+      <td class="muted small">${(revision.pay ?? [])
+        .map((entry) => `${esc(headMap.get(entry.payHeadId)?.name ?? 'Removed head')}: ${money(entry.amount)}`)
+        .join(' · ') || 'No amounts'}</td>
+    </tr>`)
+    .join('');
   const employeesPanel = panel(
     editing ? `Edit employee · ${esc(editing.name)}` : `Employees <span class="count">${employees.length}</span>`,
     `${employeeForm}
+    ${editing && revisionRows
+      ? `<h3 class="column-title">Salary revisions</h3>
+        <div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
+          <thead><tr><th>Recorded</th><th>Pay structure</th></tr></thead>
+          <tbody>${revisionRows}</tbody>
+        </table></div>`
+      : ''}
     ${employees.length
       ? `<h3 class="column-title">Monthly pay structure</h3>
         <div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">

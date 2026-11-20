@@ -6,6 +6,7 @@ import {
   addCostCategory,
   addCostCentre,
   addCurrency,
+  addEmployee,
   addCurrencyRate,
   addGodown,
   addPayHead,
@@ -425,6 +426,59 @@ export function importMasterCsv(text, type, target = null) {
     if (!result.ok) return { ok: false, error: result.error };
   }
   return { ok: true, count: additions.length, type };
+}
+
+export function importEmployeeCsv(text, target = null) {
+  const active = target ?? company();
+  if (!active) return { ok: false, error: 'Open a company first.' };
+  if (!active.payroll?.enabled) return { ok: false, error: 'Enable payroll before importing employees.' };
+  const parsed = csvObjects(text);
+  if (!parsed.ok) return parsed;
+  for (const column of ['name', 'payhead', 'amount']) {
+    if (!parsed.header.includes(column)) {
+      return { ok: false, error: `Employee CSV needs a ${column} column. Repeat the employee name for each pay head.` };
+    }
+  }
+  const clone = JSON.parse(JSON.stringify(active));
+  const heads = new Map((clone.payroll?.payHeads ?? []).map((head) => [head.name.toLowerCase(), head]));
+  const employees = new Map();
+  for (const record of parsed.rows) {
+    const name = String(record.name ?? '').trim();
+    if (!name) return { ok: false, error: `Row ${record.__row}: employee name is required.` };
+    const head = heads.get(String(record.payhead ?? '').trim().toLowerCase());
+    if (!head) return { ok: false, error: `Row ${record.__row}: pay head "${record.payhead}" was not found.` };
+    if (!employees.has(name.toLowerCase())) employees.set(name.toLowerCase(), { input: null, pay: [] });
+    const entry = employees.get(name.toLowerCase());
+    if (entry.pay.some((item) => item.payHeadId === head.id)) {
+      return { ok: false, error: `Row ${record.__row}: ${head.name} appears twice for ${name}.` };
+    }
+    entry.pay.push({ payHeadId: head.id, amount: record.amount });
+    if (!entry.input) {
+      const textValue = (key) => String(record[key] ?? '').trim();
+      entry.input = {
+        name,
+        code: textValue('code'),
+        designation: textValue('designation'),
+        pan: textValue('pan'),
+        dateOfJoining: textValue('joining') || textValue('date of joining'),
+        dateOfExit: textValue('exit') || textValue('date of exit'),
+        active: !/^(no|false|0)$/i.test(textValue('active')),
+        bankName: textValue('bank'),
+        bankAccount: textValue('account') || textValue('account number'),
+        ifsc: textValue('ifsc'),
+      };
+    }
+  }
+  const inputs = [...employees.values()].map((entry) => ({ ...entry.input, pay: entry.pay }));
+  for (const input of inputs) {
+    const checked = addEmployee(clone, input);
+    if (!checked.ok) return { ok: false, error: `${input.name}: ${checked.error}` };
+  }
+  for (const input of inputs) {
+    const result = addEmployee(active, input);
+    if (!result.ok) return { ok: false, error: result.error };
+  }
+  return { ok: true, count: inputs.length };
 }
 
 export function importStockItemCsv(text, target = null) {

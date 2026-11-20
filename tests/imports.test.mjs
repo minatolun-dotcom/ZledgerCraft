@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { addCurrency, createCompany } from '../src/store.js';
+import { addCurrency, addPayHead, createCompany } from '../src/store.js';
 import {
   csvObjects,
   importStockItemCsv,
   importCurrencyRateCsv,
+  importEmployeeCsv,
   importMasterCsv,
   parseBankStatement,
   parseBankStatementCsv,
@@ -111,6 +112,25 @@ test('master CSV import handles units, groups, godowns and cost categories atomi
   assert.equal(importMasterCsv('Name,Symbol\nGood,GD\nBad', 'units', company).ok, false);
   assert.equal(company.units.length, before);
   assert.equal(importMasterCsv('Name\nX', 'unknown', company).ok, false);
+});
+
+test('employee CSV import groups pay heads and is atomic', () => {
+  const company = createCompany('Payroll Import Co', '2026-04-01').company;
+  company.payroll = { enabled: true, payHeads: [], employees: [] };
+  assert.equal(addPayHead(company, { name: 'Basic', kind: 'Earning', ledgerId: company.ledgers[0].id }).ok, true);
+  assert.equal(addPayHead(company, { name: 'HRA', kind: 'Earning', ledgerId: company.ledgers[0].id }).ok, true);
+  const imported = importEmployeeCsv(
+    'Name,Code,Designation,PayHead,Amount,Joining,Active\nAlice,A1,Developer,Basic,50000,2026-04-01,Yes\nAlice,A1,Developer,HRA,10000,2026-04-01,Yes',
+    company,
+  );
+  assert.equal(imported.ok, true, imported.error);
+  assert.equal(imported.count, 1);
+  assert.equal(company.payroll.employees.length, 1);
+  assert.equal(company.payroll.employees[0].pay.length, 2);
+  assert.equal(company.payroll.employees[0].designation, 'Developer');
+  const before = company.payroll.employees.length;
+  assert.equal(importEmployeeCsv('Name,PayHead,Amount\nBob,Missing,100', company).ok, false);
+  assert.equal(company.payroll.employees.length, before);
 });
 
 test('MT940 transactions parse with signed amounts and details', () => {

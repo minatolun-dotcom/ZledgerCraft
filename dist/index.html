@@ -18645,6 +18645,59 @@ function importMasterCsv(text, type, target = null) {
   return { ok: true, count: additions.length, type };
 }
 
+function importEmployeeCsv(text, target = null) {
+  const active = target ?? company();
+  if (!active) return { ok: false, error: 'Open a company first.' };
+  if (!active.payroll?.enabled) return { ok: false, error: 'Enable payroll before importing employees.' };
+  const parsed = csvObjects(text);
+  if (!parsed.ok) return parsed;
+  for (const column of ['name', 'payhead', 'amount']) {
+    if (!parsed.header.includes(column)) {
+      return { ok: false, error: `Employee CSV needs a ${column} column. Repeat the employee name for each pay head.` };
+    }
+  }
+  const clone = JSON.parse(JSON.stringify(active));
+  const heads = new Map((clone.payroll?.payHeads ?? []).map((head) => [head.name.toLowerCase(), head]));
+  const employees = new Map();
+  for (const record of parsed.rows) {
+    const name = String(record.name ?? '').trim();
+    if (!name) return { ok: false, error: `Row ${record.__row}: employee name is required.` };
+    const head = heads.get(String(record.payhead ?? '').trim().toLowerCase());
+    if (!head) return { ok: false, error: `Row ${record.__row}: pay head "${record.payhead}" was not found.` };
+    if (!employees.has(name.toLowerCase())) employees.set(name.toLowerCase(), { input: null, pay: [] });
+    const entry = employees.get(name.toLowerCase());
+    if (entry.pay.some((item) => item.payHeadId === head.id)) {
+      return { ok: false, error: `Row ${record.__row}: ${head.name} appears twice for ${name}.` };
+    }
+    entry.pay.push({ payHeadId: head.id, amount: record.amount });
+    if (!entry.input) {
+      const textValue = (key) => String(record[key] ?? '').trim();
+      entry.input = {
+        name,
+        code: textValue('code'),
+        designation: textValue('designation'),
+        pan: textValue('pan'),
+        dateOfJoining: textValue('joining') || textValue('date of joining'),
+        dateOfExit: textValue('exit') || textValue('date of exit'),
+        active: !/^(no|false|0)$/i.test(textValue('active')),
+        bankName: textValue('bank'),
+        bankAccount: textValue('account') || textValue('account number'),
+        ifsc: textValue('ifsc'),
+      };
+    }
+  }
+  const inputs = [...employees.values()].map((entry) => ({ ...entry.input, pay: entry.pay }));
+  for (const input of inputs) {
+    const checked = addEmployee(clone, input);
+    if (!checked.ok) return { ok: false, error: `${input.name}: ${checked.error}` };
+  }
+  for (const input of inputs) {
+    const result = addEmployee(active, input);
+    if (!result.ok) return { ok: false, error: result.error };
+  }
+  return { ok: true, count: inputs.length };
+}
+
 function importStockItemCsv(text, target = null) {
   const active = target ?? company();
   if (!active) return { ok: false, error: 'Open a company first.' };
@@ -20848,8 +20901,8 @@ function importScreen() {
   )}
   ${panel(
     'Import other masters from CSV',
-    `<p class="muted">Choose the master type. Units need <code>Name,Symbol</code>; cost centres need <code>Name,Category</code>; pay heads need <code>Name,Kind,Ledger,Statutory</code>; currencies need <code>Code,Name,Symbol,Rate,Date</code>; other masters need <code>Name</code>. Existing names are rejected and the whole file is atomic.</p>
-    <label class="field"><span>Master type</span><select id="master-import-type"><option value="units">Units</option><option value="stockGroups">Stock groups</option><option value="godowns">Godowns</option><option value="costCategories">Cost categories</option><option value="costCentres">Cost centres</option><option value="payHeads">Pay heads</option><option value="currencies">Currencies</option></select></label>
+    `<p class="muted">Choose the master type. Units need <code>Name,Symbol</code>; cost centres need <code>Name,Category</code>; pay heads need <code>Name,Kind,Ledger,Statutory</code>; currencies need <code>Code,Name,Symbol,Rate,Date</code>; employees need <code>Name,PayHead,Amount</code> with one row per pay head, plus optional code, designation, PAN, joining, exit, active, bank, account and IFSC columns. Other masters need <code>Name</code>. Existing names are rejected and the whole file is atomic.</p>
+    <label class="field"><span>Master type</span><select id="master-import-type"><option value="units">Units</option><option value="stockGroups">Stock groups</option><option value="godowns">Godowns</option><option value="costCategories">Cost categories</option><option value="costCentres">Cost centres</option><option value="payHeads">Pay heads</option><option value="currencies">Currencies</option><option value="employees">Employees</option></select></label>
     <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="master-csv"></label>
     <label class="field"><span>Excel workbook (.xlsx)</span><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" data-xlsx-target="master-csv" data-xlsx-sheet="Masters"></label>
     <textarea id="master-csv" class="backup-box import-box" rows="6" placeholder="Name,Symbol\nBoxes,Box\nDozens,Doz" aria-label="Other master import CSV"></textarea>
@@ -25230,7 +25283,7 @@ async function handleClick(event) {
       }
       const type = document.getElementById('master-import-type')?.value ?? '';
       const text = document.getElementById('master-csv')?.value ?? '';
-      const result = importMasterCsv(text, type);
+      const result = type === 'employees' ? importEmployeeCsv(text) : importMasterCsv(text, type);
       if (!result.ok) {
         setFlash(result.error, 'warn');
         render();

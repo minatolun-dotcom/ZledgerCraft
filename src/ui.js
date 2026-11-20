@@ -257,6 +257,7 @@ import {
   parseCsv,
   csvObjects,
   importCurrencyRateCsv,
+  importEmployeeCsv,
   importLedgerCsv,
   importMasterCsv,
   importStockItemCsv,
@@ -4649,7 +4650,7 @@ async function handleClick(event) {
       }
       const type = document.getElementById('master-import-type')?.value ?? '';
       const text = document.getElementById('master-csv')?.value ?? '';
-      const result = importMasterCsv(text, type);
+      const result = type === 'employees' ? importEmployeeCsv(text) : importMasterCsv(text, type);
       if (!result.ok) {
         setFlash(result.error, 'warn');
         render();

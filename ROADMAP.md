@@ -344,6 +344,17 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 37: salary bank-transfer file
+
+- Employees can store an optional bank name, account number (6–20 digits) and
+  IFSC, validated on add/update and preserved through backup import.
+- A payroll run can export a CSV bank-transfer working file with month,
+  employee, code, bank, account, IFSC and net pay. Employees without bank
+  details are included with blank fields and named in a warning.
+- Verification: field validation, cleaned account/IFSC values, transfer rows and
+  missing-detail list, missing run and backup round trip; 279 tests (278 pass, 1
+  skipped) and a 932.0 kB build pass.
+
 ### 2026-11-20 — Phase 36: editable TDS/TCS sections
 
 - A TDS/TCS section's description, rate and threshold can be edited in place,

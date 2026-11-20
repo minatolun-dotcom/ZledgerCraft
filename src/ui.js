@@ -87,6 +87,7 @@ import {
   parseAmount,
   parseQty,
   partyOpenBills,
+  payrollBankTransferRows,
   payrollLedgers,
   payrollMonthEnd,
   rateForCurrency,
@@ -3152,6 +3153,9 @@ export async function handleSubmit(event) {
       code: data.get('code'),
       designation: data.get('designation'),
       pan: data.get('pan'),
+      bankName: data.get('bankName'),
+      bankAccount: data.get('bankAccount'),
+      ifsc: data.get('ifsc'),
       dateOfJoining: data.get('dateOfJoining'),
       dateOfExit: data.get('dateOfExit'),
       active: data.get('active') === 'on',
@@ -3931,6 +3935,44 @@ async function handleClick(event) {
     case 'open-payslip':
       navigate('payslip', { runId: trigger.dataset.run, employeeId: trigger.dataset.id });
       break;
+    case 'download-payroll-bank': {
+      const active = company();
+      if (!active) break;
+      const result = payrollBankTransferRows(active, trigger.dataset.id);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      const rows = [
+        ['Month', 'Employee', 'Code', 'Bank', 'Account number', 'IFSC', 'Net pay'],
+        ...result.rows.map((row) => [
+          result.run.month,
+          row.name,
+          row.code,
+          row.bankName,
+          row.accountNumber,
+          row.ifsc,
+          row.net,
+        ]),
+      ];
+      const csv = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
+      const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ZledgerCraft-Bank-transfer-${result.run.month}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setFlash(
+        result.missing.length
+          ? `Bank transfer file for ${result.run.month} exported; ${result.missing.length} employee(s) have no account/IFSC.`
+          : `Bank transfer file for ${result.run.month} exported.`,
+        result.missing.length ? 'warn' : 'ok',
+      );
+      break;
+    }
     case 'delete-payroll-run': {
       if (!can('voucher.delete')) {
         requirePermission('voucher.delete');

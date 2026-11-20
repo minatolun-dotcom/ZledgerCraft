@@ -3,6 +3,7 @@
 import {
   dateLabel,
   ledgerOptions,
+  payrollBankTransferRows,
   payrollLedgers,
   payrollMonthEnd,
   round2,
@@ -173,6 +174,9 @@ export function payrollScreen() {
         <label class="field"><span>Code</span><input name="code" maxlength="20" value="${esc(editing?.code ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Designation</span><input name="designation" maxlength="60" value="${esc(editing?.designation ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>PAN</span><input name="pan" maxlength="10" value="${esc(editing?.pan ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>Bank name</span><input name="bankName" maxlength="60" value="${esc(editing?.bankName ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>Bank account</span><input name="bankAccount" maxlength="20" inputmode="numeric" value="${esc(editing?.bankAccount ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>IFSC</span><input name="ifsc" maxlength="11" value="${esc(editing?.ifsc ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Date of joining</span><input name="dateOfJoining" type="date" value="${esc(editing?.dateOfJoining ?? '')}"></label>
         <label class="field"><span>Date of exit</span><input name="dateOfExit" type="date" value="${esc(editing?.dateOfExit ?? '')}"><span class="muted small">Optional. Pay is prorated by calendar days in the joining and exit months.</span></label>
         <label class="field gst-check">
@@ -373,6 +377,7 @@ export function payrollRunScreen() {
     );
   }
   const voucher = active.vouchers.find((item) => item.id === run.voucherId);
+  const bank = payrollBankTransferRows(active, run.id);
   const rows = run.rows
     .map(
       (row) => `<tr>
@@ -401,8 +406,12 @@ export function payrollRunScreen() {
     <div class="form-actions">
       <button class="btn" type="button" data-screen="payroll">Back to payroll</button>
       ${voucher ? `<button class="btn ghost" type="button" data-action="open-voucher" data-id="${esc(voucher.id)}">Open journal ${voucher.no}</button>` : ''}
+      <button class="btn ghost" type="button" data-action="download-payroll-bank" data-id="${esc(run.id)}">Bank transfer CSV</button>
       <button class="btn danger" type="button" data-action="delete-payroll-run" data-id="${esc(run.id)}">Delete this run</button>
-    </div>`,
+    </div>
+    ${bank.missing.length
+      ? `<p class="muted small">${bank.missing.length} employee${bank.missing.length === 1 ? '' : 's'} (${esc(bank.missing.join(', '))}) have no bank account/IFSC; those rows are included with blank bank fields.</p>`
+      : '<p class="muted small">Bank transfer CSV includes each employee\'s bank name, account number and IFSC with net pay. It is a working file, not a bank-validated payment instruction.</p>'}`,
     `One journal voucher${voucher ? ` · ${esc(voucherLabel(voucher.type))} ${voucher.no}` : ''} · stored snapshot of each employee's earnings and deductions.`,
   );
 }
@@ -442,6 +451,7 @@ export function payslipScreen() {
     <div class="pay-grid payslip-meta-grid">
       <div><span class="muted small">Designation</span><strong>${esc(employee?.designation || '—')}</strong></div>
       <div><span class="muted small">PAN</span><strong>${esc(employee?.pan || '—')}</strong></div>
+      <div><span class="muted small">Bank</span><strong>${esc(employee?.bankName || '—')}${employee?.bankAccount ? ` · ${esc(employee.bankAccount.slice(-4).padStart(employee.bankAccount.length, '•'))}` : ''}${employee?.ifsc ? ` · ${esc(employee.ifsc)}` : ''}</strong></div>
       <div><span class="muted small">Date of joining</span><strong>${esc(employee?.dateOfJoining ? dateLabel(employee.dateOfJoining) : '—')}</strong></div>
       <div><span class="muted small">Date of exit</span><strong>${esc(employee?.dateOfExit ? dateLabel(employee.dateOfExit) : '—')}</strong></div>
       <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}${row.workedDays ? ` · ${row.workedDays}/${row.monthDays} days` : ''}</strong></div>

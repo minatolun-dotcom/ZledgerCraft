@@ -4004,6 +4004,13 @@ function normalizePayroll(company) {
         ...(isValidPan(employee.pan) ? { pan: String(employee.pan).trim().toUpperCase() } : {}),
         ...(isValidIsoDate(String(employee.dateOfJoining ?? '')) ? { dateOfJoining: String(employee.dateOfJoining) } : {}),
         ...(isValidIsoDate(String(employee.dateOfExit ?? '')) ? { dateOfExit: String(employee.dateOfExit) } : {}),
+        ...(employee.bankName ? { bankName: String(employee.bankName).trim().slice(0, 60) } : {}),
+        ...(/^\d{6,20}$/.test(String(employee.bankAccount ?? '').replace(/\s+/g, ''))
+          ? { bankAccount: String(employee.bankAccount).replace(/\s+/g, '') }
+          : {}),
+        ...(/^[A-Z]{4}0[A-Z0-9]{6}$/.test(String(employee.ifsc ?? '').trim().toUpperCase())
+          ? { ifsc: String(employee.ifsc).trim().toUpperCase() }
+          : {}),
         active: employee.active !== false,
         pay,
       };
@@ -4210,6 +4217,19 @@ function employeePayEntries(company, input) {
   return { pay };
 }
 
+function employeeBankFields(input = {}) {
+  const bankName = String(input.bankName ?? '').trim().slice(0, 60);
+  const accountNumber = String(input.bankAccount ?? '').replace(/\s+/g, '').trim();
+  const ifsc = String(input.ifsc ?? '').trim().toUpperCase();
+  if (accountNumber && !/^\d{6,20}$/.test(accountNumber)) {
+    return { error: 'Employee bank account must be 6 to 20 digits.' };
+  }
+  if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
+    return { error: 'Employee IFSC must be 11 characters: four letters, zero and six letters/digits.' };
+  }
+  return { bankName, accountNumber, ifsc };
+}
+
 function addEmployee(company, input = {}) {
   if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before adding employees.' };
   const name = String(input.name ?? '').trim().slice(0, 80);
@@ -4232,6 +4252,8 @@ function addEmployee(company, input = {}) {
   }
   const checked = employeePayEntries(company, input.pay);
   if (checked.error) return { ok: false, error: checked.error };
+  const bank = employeeBankFields(input);
+  if (bank.error) return { ok: false, error: bank.error };
   const employee = {
     id: uid('emp'),
     name,
@@ -4243,6 +4265,9 @@ function addEmployee(company, input = {}) {
   if (code) employee.code = code;
   if (designation) employee.designation = designation;
   if (pan) employee.pan = pan;
+  if (bank.bankName) employee.bankName = bank.bankName;
+  if (bank.accountNumber) employee.bankAccount = bank.accountNumber;
+  if (bank.ifsc) employee.ifsc = bank.ifsc;
   if (dateOfJoining) employee.dateOfJoining = dateOfJoining;
   if (dateOfExit) employee.dateOfExit = dateOfExit;
   company.payroll.employees.push(employee);
@@ -4276,6 +4301,8 @@ function updateEmployee(company, employeeId, input = {}) {
   }
   const checked = employeePayEntries(company, input.pay);
   if (checked.error) return { ok: false, error: checked.error };
+  const bank = employeeBankFields(input);
+  if (bank.error) return { ok: false, error: bank.error };
   employee.name = name;
   employee.active = input.active !== false && input.active !== 'false';
   employee.pay = checked.pay;
@@ -4287,6 +4314,12 @@ function updateEmployee(company, employeeId, input = {}) {
   }
   if (pan) employee.pan = pan;
   else delete employee.pan;
+  if (bank.bankName) employee.bankName = bank.bankName;
+  else delete employee.bankName;
+  if (bank.accountNumber) employee.bankAccount = bank.accountNumber;
+  else delete employee.bankAccount;
+  if (bank.ifsc) employee.ifsc = bank.ifsc;
+  else delete employee.ifsc;
   if (dateOfJoining) employee.dateOfJoining = dateOfJoining;
   else delete employee.dateOfJoining;
   if (dateOfExit) employee.dateOfExit = dateOfExit;
@@ -4426,6 +4459,25 @@ function runPayroll(company, input = {}) {
   posted.voucher.payrollRunId = run.id;
   company.payroll.runs = [...(company.payroll.runs ?? []), run].sort((a, b) => a.month.localeCompare(b.month));
   return { ok: true, run, voucher: posted.voucher };
+}
+
+function payrollBankTransferRows(company, runId) {
+  const run = (company.payroll?.runs ?? []).find((entry) => entry.id === runId);
+  if (!run) return { ok: false, error: 'Payroll run not found.' };
+  const rows = run.rows.map((row) => {
+    const employee = (company.payroll?.employees ?? []).find((entry) => entry.id === row.employeeId);
+    return {
+      employeeId: row.employeeId,
+      name: row.name,
+      code: row.code ?? employee?.code ?? '',
+      bankName: employee?.bankName ?? '',
+      accountNumber: employee?.bankAccount ?? '',
+      ifsc: employee?.ifsc ?? '',
+      net: row.net,
+    };
+  });
+  const missing = rows.filter((row) => !row.accountNumber || !row.ifsc).map((row) => row.name);
+  return { ok: true, run, rows, missing };
 }
 
 function deletePayrollRun(company, runId) {
@@ -17344,6 +17396,9 @@ function payrollScreen() {
         <label class="field"><span>Code</span><input name="code" maxlength="20" value="${esc(editing?.code ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Designation</span><input name="designation" maxlength="60" value="${esc(editing?.designation ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>PAN</span><input name="pan" maxlength="10" value="${esc(editing?.pan ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>Bank name</span><input name="bankName" maxlength="60" value="${esc(editing?.bankName ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>Bank account</span><input name="bankAccount" maxlength="20" inputmode="numeric" value="${esc(editing?.bankAccount ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>IFSC</span><input name="ifsc" maxlength="11" value="${esc(editing?.ifsc ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Date of joining</span><input name="dateOfJoining" type="date" value="${esc(editing?.dateOfJoining ?? '')}"></label>
         <label class="field"><span>Date of exit</span><input name="dateOfExit" type="date" value="${esc(editing?.dateOfExit ?? '')}"><span class="muted small">Optional. Pay is prorated by calendar days in the joining and exit months.</span></label>
         <label class="field gst-check">
@@ -17544,6 +17599,7 @@ function payrollRunScreen() {
     );
   }
   const voucher = active.vouchers.find((item) => item.id === run.voucherId);
+  const bank = payrollBankTransferRows(active, run.id);
   const rows = run.rows
     .map(
       (row) => `<tr>
@@ -17572,8 +17628,12 @@ function payrollRunScreen() {
     <div class="form-actions">
       <button class="btn" type="button" data-screen="payroll">Back to payroll</button>
       ${voucher ? `<button class="btn ghost" type="button" data-action="open-voucher" data-id="${esc(voucher.id)}">Open journal ${voucher.no}</button>` : ''}
+      <button class="btn ghost" type="button" data-action="download-payroll-bank" data-id="${esc(run.id)}">Bank transfer CSV</button>
       <button class="btn danger" type="button" data-action="delete-payroll-run" data-id="${esc(run.id)}">Delete this run</button>
-    </div>`,
+    </div>
+    ${bank.missing.length
+      ? `<p class="muted small">${bank.missing.length} employee${bank.missing.length === 1 ? '' : 's'} (${esc(bank.missing.join(', '))}) have no bank account/IFSC; those rows are included with blank bank fields.</p>`
+      : '<p class="muted small">Bank transfer CSV includes each employee\'s bank name, account number and IFSC with net pay. It is a working file, not a bank-validated payment instruction.</p>'}`,
     `One journal voucher${voucher ? ` · ${esc(voucherLabel(voucher.type))} ${voucher.no}` : ''} · stored snapshot of each employee's earnings and deductions.`,
   );
 }
@@ -17613,6 +17673,7 @@ function payslipScreen() {
     <div class="pay-grid payslip-meta-grid">
       <div><span class="muted small">Designation</span><strong>${esc(employee?.designation || '—')}</strong></div>
       <div><span class="muted small">PAN</span><strong>${esc(employee?.pan || '—')}</strong></div>
+      <div><span class="muted small">Bank</span><strong>${esc(employee?.bankName || '—')}${employee?.bankAccount ? ` · ${esc(employee.bankAccount.slice(-4).padStart(employee.bankAccount.length, '•'))}` : ''}${employee?.ifsc ? ` · ${esc(employee.ifsc)}` : ''}</strong></div>
       <div><span class="muted small">Date of joining</span><strong>${esc(employee?.dateOfJoining ? dateLabel(employee.dateOfJoining) : '—')}</strong></div>
       <div><span class="muted small">Date of exit</span><strong>${esc(employee?.dateOfExit ? dateLabel(employee.dateOfExit) : '—')}</strong></div>
       <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}${row.workedDays ? ` · ${row.workedDays}/${row.monthDays} days` : ''}</strong></div>
@@ -20873,6 +20934,9 @@ async function handleSubmit(event) {
       code: data.get('code'),
       designation: data.get('designation'),
       pan: data.get('pan'),
+      bankName: data.get('bankName'),
+      bankAccount: data.get('bankAccount'),
+      ifsc: data.get('ifsc'),
       dateOfJoining: data.get('dateOfJoining'),
       dateOfExit: data.get('dateOfExit'),
       active: data.get('active') === 'on',
@@ -21652,6 +21716,44 @@ async function handleClick(event) {
     case 'open-payslip':
       navigate('payslip', { runId: trigger.dataset.run, employeeId: trigger.dataset.id });
       break;
+    case 'download-payroll-bank': {
+      const active = company();
+      if (!active) break;
+      const result = payrollBankTransferRows(active, trigger.dataset.id);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      const rows = [
+        ['Month', 'Employee', 'Code', 'Bank', 'Account number', 'IFSC', 'Net pay'],
+        ...result.rows.map((row) => [
+          result.run.month,
+          row.name,
+          row.code,
+          row.bankName,
+          row.accountNumber,
+          row.ifsc,
+          row.net,
+        ]),
+      ];
+      const csv = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
+      const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ZledgerCraft-Bank-transfer-${result.run.month}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setFlash(
+        result.missing.length
+          ? `Bank transfer file for ${result.run.month} exported; ${result.missing.length} employee(s) have no account/IFSC.`
+          : `Bank transfer file for ${result.run.month} exported.`,
+        result.missing.length ? 'warn' : 'ok',
+      );
+      break;
+    }
     case 'delete-payroll-run': {
       if (!can('voucher.delete')) {
         requirePermission('voucher.delete');

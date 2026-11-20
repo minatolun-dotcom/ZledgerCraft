@@ -1661,6 +1661,13 @@ export function normalizePayroll(company) {
         ...(isValidPan(employee.pan) ? { pan: String(employee.pan).trim().toUpperCase() } : {}),
         ...(isValidIsoDate(String(employee.dateOfJoining ?? '')) ? { dateOfJoining: String(employee.dateOfJoining) } : {}),
         ...(isValidIsoDate(String(employee.dateOfExit ?? '')) ? { dateOfExit: String(employee.dateOfExit) } : {}),
+        ...(employee.bankName ? { bankName: String(employee.bankName).trim().slice(0, 60) } : {}),
+        ...(/^\d{6,20}$/.test(String(employee.bankAccount ?? '').replace(/\s+/g, ''))
+          ? { bankAccount: String(employee.bankAccount).replace(/\s+/g, '') }
+          : {}),
+        ...(/^[A-Z]{4}0[A-Z0-9]{6}$/.test(String(employee.ifsc ?? '').trim().toUpperCase())
+          ? { ifsc: String(employee.ifsc).trim().toUpperCase() }
+          : {}),
         active: employee.active !== false,
         pay,
       };
@@ -1867,6 +1874,19 @@ function employeePayEntries(company, input) {
   return { pay };
 }
 
+function employeeBankFields(input = {}) {
+  const bankName = String(input.bankName ?? '').trim().slice(0, 60);
+  const accountNumber = String(input.bankAccount ?? '').replace(/\s+/g, '').trim();
+  const ifsc = String(input.ifsc ?? '').trim().toUpperCase();
+  if (accountNumber && !/^\d{6,20}$/.test(accountNumber)) {
+    return { error: 'Employee bank account must be 6 to 20 digits.' };
+  }
+  if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
+    return { error: 'Employee IFSC must be 11 characters: four letters, zero and six letters/digits.' };
+  }
+  return { bankName, accountNumber, ifsc };
+}
+
 export function addEmployee(company, input = {}) {
   if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before adding employees.' };
   const name = String(input.name ?? '').trim().slice(0, 80);
@@ -1889,6 +1909,8 @@ export function addEmployee(company, input = {}) {
   }
   const checked = employeePayEntries(company, input.pay);
   if (checked.error) return { ok: false, error: checked.error };
+  const bank = employeeBankFields(input);
+  if (bank.error) return { ok: false, error: bank.error };
   const employee = {
     id: uid('emp'),
     name,
@@ -1900,6 +1922,9 @@ export function addEmployee(company, input = {}) {
   if (code) employee.code = code;
   if (designation) employee.designation = designation;
   if (pan) employee.pan = pan;
+  if (bank.bankName) employee.bankName = bank.bankName;
+  if (bank.accountNumber) employee.bankAccount = bank.accountNumber;
+  if (bank.ifsc) employee.ifsc = bank.ifsc;
   if (dateOfJoining) employee.dateOfJoining = dateOfJoining;
   if (dateOfExit) employee.dateOfExit = dateOfExit;
   company.payroll.employees.push(employee);
@@ -1933,6 +1958,8 @@ export function updateEmployee(company, employeeId, input = {}) {
   }
   const checked = employeePayEntries(company, input.pay);
   if (checked.error) return { ok: false, error: checked.error };
+  const bank = employeeBankFields(input);
+  if (bank.error) return { ok: false, error: bank.error };
   employee.name = name;
   employee.active = input.active !== false && input.active !== 'false';
   employee.pay = checked.pay;
@@ -1944,6 +1971,12 @@ export function updateEmployee(company, employeeId, input = {}) {
   }
   if (pan) employee.pan = pan;
   else delete employee.pan;
+  if (bank.bankName) employee.bankName = bank.bankName;
+  else delete employee.bankName;
+  if (bank.accountNumber) employee.bankAccount = bank.accountNumber;
+  else delete employee.bankAccount;
+  if (bank.ifsc) employee.ifsc = bank.ifsc;
+  else delete employee.ifsc;
   if (dateOfJoining) employee.dateOfJoining = dateOfJoining;
   else delete employee.dateOfJoining;
   if (dateOfExit) employee.dateOfExit = dateOfExit;
@@ -2083,6 +2116,25 @@ export function runPayroll(company, input = {}) {
   posted.voucher.payrollRunId = run.id;
   company.payroll.runs = [...(company.payroll.runs ?? []), run].sort((a, b) => a.month.localeCompare(b.month));
   return { ok: true, run, voucher: posted.voucher };
+}
+
+export function payrollBankTransferRows(company, runId) {
+  const run = (company.payroll?.runs ?? []).find((entry) => entry.id === runId);
+  if (!run) return { ok: false, error: 'Payroll run not found.' };
+  const rows = run.rows.map((row) => {
+    const employee = (company.payroll?.employees ?? []).find((entry) => entry.id === row.employeeId);
+    return {
+      employeeId: row.employeeId,
+      name: row.name,
+      code: row.code ?? employee?.code ?? '',
+      bankName: employee?.bankName ?? '',
+      accountNumber: employee?.bankAccount ?? '',
+      ifsc: employee?.ifsc ?? '',
+      net: row.net,
+    };
+  });
+  const missing = rows.filter((row) => !row.accountNumber || !row.ifsc).map((row) => row.name);
+  return { ok: true, run, rows, missing };
 }
 
 export function deletePayrollRun(company, runId) {

@@ -11,6 +11,7 @@ import {
   exportState,
   findLedgerByName,
   importState,
+  payrollBankTransferRows,
   payrollLedgers,
   runPayroll,
   savePayrollSettings,
@@ -302,6 +303,44 @@ test('joining and exit dates prorate pay by calendar days', () => {
   const empty = runPayroll(exitedBeforeMonth, { month: '2026-04' });
   assert.equal(empty.ok, false);
   assert.match(empty.error, /No employee worked during 2026-04/);
+});
+
+test('employee bank details validate and build a bank transfer file', () => {
+  const { company } = fixture();
+  const pay = [{ payHeadId: head(company, 'Basic Salary').id, amount: 30000 }];
+  assert.equal(addEmployee(company, { name: 'Bad Account', bankAccount: 'ABC', pay }).ok, false);
+  assert.equal(addEmployee(company, { name: 'Bad IFSC', ifsc: 'HDFC123', pay }).ok, false);
+  const added = addEmployee(company, {
+    name: 'Asha Menon',
+    bankName: 'HDFC Bank',
+    bankAccount: '1234 5678 9012',
+    ifsc: 'hdfc0001234',
+    pay,
+  });
+  assert.equal(added.ok, true, added.error);
+  assert.equal(added.employee.bankAccount, '123456789012');
+  assert.equal(added.employee.ifsc, 'HDFC0001234');
+
+  standardEmployee(company, 'Ravi Kumar');
+  const run = runPayroll(company, { month: '2026-04' }).run;
+  const file = payrollBankTransferRows(company, run.id);
+  assert.equal(file.ok, true, file.error);
+  const asha = file.rows.find((row) => row.name === 'Asha Menon');
+  assert.equal(asha.accountNumber, '123456789012');
+  assert.equal(asha.ifsc, 'HDFC0001234');
+  assert.equal(asha.net, 30000);
+  assert.deepEqual(file.missing, ['Ravi Kumar']);
+  assert.equal(payrollBankTransferRows(company, 'missing').ok, false);
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  const copy = restored.state.companies[0].payroll.employees.find((employee) => employee.name === 'Asha Menon');
+  assert.equal(copy.bankName, 'HDFC Bank');
+  assert.equal(copy.bankAccount, '123456789012');
+  assert.equal(copy.ifsc, 'HDFC0001234');
 });
 
 test('employee exit dates are validated and survive a backup round trip', () => {

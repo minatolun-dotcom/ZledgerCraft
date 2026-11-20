@@ -3,9 +3,13 @@
 import {
   VOUCHER_TYPES,
   booksStart,
+  addCostCategory,
   addCurrencyRate,
+  addGodown,
   addLedger,
+  addStockGroup,
   addStockItem,
+  addUnit,
   addVoucher,
   dateLabel,
   exportState,
@@ -336,6 +340,54 @@ export function importCurrencyRateCsv(text, target = null) {
     if (!result.ok) return { ok: false, error: result.error };
   }
   return { ok: true, count: additions.length };
+}
+
+export function importMasterCsv(text, type, target = null) {
+  const active = target ?? company();
+  if (!active) return { ok: false, error: 'Open a company first.' };
+  const label = {
+    units: 'unit',
+    stockGroups: 'stock group',
+    godowns: 'godown',
+    costCategories: 'cost category',
+  }[type];
+  if (!label) return { ok: false, error: 'Choose a valid master-data type.' };
+  const parsed = csvObjects(text);
+  if (!parsed.ok) return parsed;
+  if (!parsed.header.includes('name')) return { ok: false, error: `The ${label} CSV needs a Name column.` };
+  const clone = JSON.parse(JSON.stringify(active));
+  const additions = [];
+  for (const record of parsed.rows) {
+    const name = String(record.name ?? '').trim();
+    if (!name) return { ok: false, error: `Row ${record.__row}: ${label} name is required.` };
+    let result;
+    if (type === 'units') {
+      const symbol = String(record.symbol ?? '').trim();
+      result = addUnit(clone, { name, symbol });
+      if (result.ok) additions.push({ name, symbol });
+    } else if (type === 'stockGroups') {
+      result = addStockGroup(clone, { name });
+      if (result.ok) additions.push({ name });
+    } else if (type === 'godowns') {
+      result = addGodown(clone, { name });
+      if (result.ok) additions.push({ name });
+    } else {
+      result = addCostCategory(clone, { name });
+      if (result.ok) additions.push({ name });
+    }
+    if (!result.ok) return { ok: false, error: `Row ${record.__row}: ${result.error}` };
+  }
+  const builders = {
+    units: (input) => addUnit(active, input),
+    stockGroups: (input) => addStockGroup(active, input),
+    godowns: (input) => addGodown(active, input),
+    costCategories: (input) => addCostCategory(active, input),
+  };
+  for (const input of additions) {
+    const result = builders[type](input);
+    if (!result.ok) return { ok: false, error: result.error };
+  }
+  return { ok: true, count: additions.length, type };
 }
 
 export function importStockItemCsv(text, target = null) {

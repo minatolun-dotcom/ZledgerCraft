@@ -258,6 +258,7 @@ import {
   csvObjects,
   importCurrencyRateCsv,
   importLedgerCsv,
+  importMasterCsv,
   importStockItemCsv,
   importVoucherCsv,
   parseStatementDate,
@@ -4638,6 +4639,25 @@ async function handleClick(event) {
       logAudit('currency.import', `Imported ${result.count} exchange rate${result.count === 1 ? '' : 's'} from CSV.`);
       persist();
       setFlash(`Imported ${result.count} exchange rate${result.count === 1 ? '' : 's'}.`);
+      render();
+      break;
+    }
+    case 'import-masters': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const type = document.getElementById('master-import-type')?.value ?? '';
+      const text = document.getElementById('master-csv')?.value ?? '';
+      const result = importMasterCsv(text, type);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit('master.import', `Imported ${result.count} ${result.type} from CSV.`);
+      persist();
+      setFlash(`Imported ${result.count} master record${result.count === 1 ? '' : 's'}.`);
       render();
       break;
     }

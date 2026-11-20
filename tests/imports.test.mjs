@@ -6,6 +6,7 @@ import {
   csvObjects,
   importStockItemCsv,
   importCurrencyRateCsv,
+  importMasterCsv,
   parseBankStatement,
   parseBankStatementCsv,
   parseMt940Statement,
@@ -92,6 +93,20 @@ test('OFX and QIF statements parse into signed bank lines', () => {
   assert.equal(qif.lines[0].amount, -75.5);
   assert.equal(qif.lines[1].amount, 1000);
   assert.equal(parseBankStatement('!Type:Bank\nD4/11/2026\nT-1\n^').ok, true);
+});
+
+test('master CSV import handles units, groups, godowns and cost categories atomically', () => {
+  const company = createCompany('Master Import Co', '2026-04-01').company;
+  const unit = importMasterCsv('Name,Symbol\nCrates,Crate\nPacks,Pk', 'units', company);
+  assert.equal(unit.ok, true, unit.error);
+  assert.equal(company.units.filter((item) => item.symbol === 'Crate').length, 1);
+  assert.equal(importMasterCsv('Name\nTrading', 'stockGroups', company).ok, true);
+  assert.equal(importMasterCsv('Name\nWarehouse', 'godowns', company).ok, true);
+  assert.equal(importMasterCsv('Name\nMarketing', 'costCategories', company).ok, true);
+  const before = company.units.length;
+  assert.equal(importMasterCsv('Name,Symbol\nGood,GD\nBad', 'units', company).ok, false);
+  assert.equal(company.units.length, before);
+  assert.equal(importMasterCsv('Name\nX', 'unknown', company).ok, false);
 });
 
 test('MT940 transactions parse with signed amounts and details', () => {

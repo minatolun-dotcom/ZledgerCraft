@@ -419,6 +419,14 @@ export function importScreen() {
     <div class="form-actions"><button class="btn small primary" type="button" data-action="import-currency-rates"${can('master.write') ? '' : ' disabled'}>Import rates</button></div>`,
   )}
   ${panel(
+    'Import other masters from CSV',
+    `<p class="muted">Choose the master type, then import a CSV with <code>Name</code> and, for units, <code>Symbol</code>. Existing names are rejected and the whole file is atomic.</p>
+    <label class="field"><span>Master type</span><select id="master-import-type"><option value="units">Units</option><option value="stockGroups">Stock groups</option><option value="godowns">Godowns</option><option value="costCategories">Cost categories</option></select></label>
+    <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="master-csv"></label>
+    <textarea id="master-csv" class="backup-box import-box" rows="6" placeholder="Name,Symbol\nBoxes,Box\nDozens,Doz" aria-label="Other master import CSV"></textarea>
+    <div class="form-actions"><button class="btn small primary" type="button" data-action="import-masters"${can('master.write') ? '' : ' disabled'}>Import masters</button></div>`,
+  )}
+  ${panel(
     'Import vouchers from CSV or Excel',
     `<p class="muted">Header: <code>Date, Type, No, Ledger, Side, Amount, Narration</code>. Use one row per voucher line and repeat Date, Type and No for lines of the same voucher. Dates use YYYY-MM-DD. Stock items and bill allocations are not imported; use the voucher screen for those. An .xlsx workbook can be loaded into the box below for review first; it uses the <code>Vouchers</code> sheet when present, otherwise the first sheet.</p>
     <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="voucher-csv"></label>

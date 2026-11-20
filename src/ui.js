@@ -128,6 +128,7 @@ import {
   setInstrumentStatus,
   setOrderStatus,
   signedOpening,
+  suggestedComplianceDueDate,
   todayIso,
   updateCompany,
   updateComplianceTask,
@@ -3416,6 +3417,7 @@ export async function handleSubmit(event) {
       ifsc: data.get('ifsc'),
       dateOfJoining: data.get('dateOfJoining'),
       dateOfExit: data.get('dateOfExit'),
+      revisionDate: data.get('revisionDate'),
       active: data.get('active') === 'on',
       pay,
       leave: {
@@ -5465,6 +5467,17 @@ async function handleClick(event) {
       break;
     }
 
+    case 'fill-attendance-template': {
+      const active = company();
+      if (!active) break;
+      const textarea = document.getElementById('attendance-csv');
+      if (!textarea) break;
+      const employees = (active.payroll?.employees ?? []).filter((employee) => employee.active);
+      textarea.value = `Employee,PaidDays\n${employees.map((employee) => `${employee.name},`).join('\n')}`;
+      setFlash('Employee names filled. Enter paid days, then load the attendance.');
+      break;
+    }
+
     case 'load-attendance': {
       if (!can('voucher.write')) {
         requirePermission('voucher.write');
@@ -5503,6 +5516,13 @@ async function handleClick(event) {
         break;
       }
       view.complianceTaskId = trigger.dataset.id;
+      render();
+      break;
+    }
+
+    case 'suggest-compliance-date': {
+      const category = document.querySelector('#compliance-task-form [name="category"]')?.value ?? 'Other';
+      view.complianceDueDate = suggestedComplianceDueDate(category);
       render();
       break;
     }
@@ -6186,7 +6206,13 @@ async function handleClick(event) {
       }
       const active = company();
       if (!active) break;
-      const result = setOrderStatus(active, trigger.dataset.id, trigger.dataset.status);
+      let reason = '';
+      if (trigger.dataset.status !== 'Open') {
+        const entered = window.prompt('Reason for closing or cancelling this order (optional):', '');
+        if (entered === null) break;
+        reason = entered;
+      }
+      const result = setOrderStatus(active, trigger.dataset.id, trigger.dataset.status, reason);
       if (result.ok) {
         logAudit(
           'order.status',

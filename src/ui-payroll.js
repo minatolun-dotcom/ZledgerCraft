@@ -241,6 +241,7 @@ export function payrollScreen() {
         <label class="field"><span>Leave balance · Earned</span><input name="leaveEL" inputmode="decimal" value="${esc(editing?.leave?.EL ?? 0)}"></label>
         <label class="field"><span>Date of joining</span><input name="dateOfJoining" type="date" value="${esc(editing?.dateOfJoining ?? '')}"></label>
         <label class="field"><span>Date of exit</span><input name="dateOfExit" type="date" value="${esc(editing?.dateOfExit ?? '')}"><span class="muted small">Optional. Pay is prorated by calendar days in the joining and exit months.</span></label>
+        ${editing ? '<label class="field"><span>Revision date</span><input name="revisionDate" type="date"><span class="muted small">Used only when pay amounts change; defaults to today.</span></label>' : ''}
         <label class="field gst-check">
           <input type="checkbox" name="active"${editing && editing.active === false ? '' : ' checked'}>
           <span>Include in payroll runs</span>
@@ -357,7 +358,7 @@ export function payrollScreen() {
           : '<p class="muted small">No active employees.</p>'}
         <label class="field"><span>Attendance CSV</span><input type="file" accept=".csv,text/csv" data-csv-target="attendance-csv"></label>
         <textarea id="attendance-csv" class="backup-box import-box" rows="4" placeholder="Employee,PaidDays\nAsha Menon,26"></textarea>
-        <div class="form-actions"><button class="btn small" type="button" data-action="load-attendance">Load attendance</button></div>
+        <div class="form-actions"><button class="btn small" type="button" data-action="load-attendance">Load attendance</button><button class="btn small ghost" type="button" data-action="fill-attendance-template">Fill employee template</button></div>
       </div>
       <div class="field form-actions"><button class="btn small" type="submit">Run payroll and post journal</button></div>
       <p id="payroll-run-error" class="form-error" role="alert"></p>

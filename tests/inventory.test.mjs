@@ -968,9 +968,10 @@ test('orders record sales and purchase commitments without moving stock', () => 
   assert.equal(lateDelivery.ok, false);
   assert.match(lateDelivery.error, /delivery date/i);
 
-  const closed = setOrderStatus(company, order.order.id, 'Closed');
+  const closed = setOrderStatus(company, order.order.id, 'Closed', 'Customer cancelled the rest');
   assert.equal(closed.ok, true);
   assert.equal(closed.order.status, 'Closed');
+  assert.equal(closed.order.closeReason, 'Customer cancelled the rest');
   assert.equal(stockSummary(company).rows[0].reservedQty, 0);
   assert.equal(stockSummary(company).rows[0].availableQty, 10);
   assert.equal(setOrderStatus(company, order.order.id, 'Unknown').ok, false);

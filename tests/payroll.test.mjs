@@ -234,9 +234,11 @@ test('changing a pay structure records a dated salary revision', () => {
     name: asha.name,
     pay: [{ payHeadId: basic.id, amount: 35000 }],
     leave: { CL: 0, SL: 0, EL: 0 },
+    revisionDate: '2026-05-01',
   });
   assert.equal(updated.ok, true, updated.error);
   assert.equal(updated.employee.revisions.length, 2);
+  assert.equal(updated.employee.revisions[1].date, '2026-05-01');
   assert.equal(updated.employee.revisions[1].pay[0].amount, 35000);
   const unchanged = updateEmployee(company, asha.id, {
     name: asha.name,

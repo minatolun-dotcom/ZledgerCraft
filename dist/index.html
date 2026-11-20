@@ -3584,6 +3584,19 @@ function isValidGstin(value) {
   return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(String(value ?? '').trim().toUpperCase());
 }
 
+/** Verifies the GSTIN's final base-36 check character. */
+function gstinChecksumValid(value) {
+  const code = String(value ?? '').trim().toUpperCase();
+  if (!isValidGstin(code)) return false;
+  const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let sum = 0;
+  for (let index = 0; index < 14; index += 1) {
+    const product = alphabet.indexOf(code[index]) * (index % 2 === 0 ? 1 : 2);
+    sum += Math.floor(product / 36) + (product % 36);
+  }
+  return alphabet[(36 - (sum % 36)) % 36] === code[14];
+}
+
 function gstRateLabel(rate, cess = 0) {
   const base = Number(rate) === 0 ? 'Nil / Exempt' : `${Number(rate)}%`;
   return Number(cess) > 0 ? `${base} + ${Number(cess)}% cess` : base;
@@ -4634,6 +4647,8 @@ function updateEmployee(company, employeeId, input = {}) {
   }
   const checked = employeePayEntries(company, input.pay);
   if (checked.error) return { ok: false, error: checked.error };
+  const revisionDate = String(input.revisionDate ?? '').trim();
+  if (revisionDate && !isValidIsoDate(revisionDate)) return { ok: false, error: 'Enter a valid revision date.' };
   const bank = employeeBankFields(input);
   if (bank.error) return { ok: false, error: bank.error };
   employee.name = name;
@@ -4641,7 +4656,7 @@ function updateEmployee(company, employeeId, input = {}) {
   const payChanged = JSON.stringify(paySnapshot(employee.pay)) !== JSON.stringify(paySnapshot(checked.pay));
   employee.pay = checked.pay;
   if (payChanged) {
-    employee.revisions = [...(employee.revisions ?? []), { date: todayIso(), pay: paySnapshot(checked.pay) }].slice(-100);
+    employee.revisions = [...(employee.revisions ?? []), { date: revisionDate || todayIso(), pay: paySnapshot(checked.pay) }].slice(-100);
   }
   employee.leave = normalizeLeaveBalances(input.leave);
   const optional = { code: 20, designation: 60 };
@@ -6764,8 +6779,8 @@ function validateStockItemInput(company, input, ignoreId) {
     return { ok: false, error: 'Opening rate must be zero or more.' };
   }
   const hsn = String(input.hsn ?? '').trim().toUpperCase();
-  if (hsn && !/^[0-9A-Z]{4,8}$/.test(hsn)) {
-    return { ok: false, error: 'HSN/SAC must be 4–8 letters or digits.' };
+  if (hsn && !/^[0-9]{4}([0-9]{2}){0,2}$/.test(hsn)) {
+    return { ok: false, error: 'HSN/SAC must be 4, 6 or 8 digits.' };
   }
   const reorderLevel = parseQty(input.reorderLevel ?? 0);
   if (reorderLevel === null || reorderLevel < 0) {
@@ -7259,6 +7274,19 @@ function normalizeStockCounts(company) {
 
 const COMPLIANCE_CATEGORIES = new Set(['GST', 'TDS', 'Payroll', 'Other']);
 
+/** Suggested next monthly due date: GST 20th, TDS and payroll 7th, other 30 days. */
+function suggestedComplianceDueDate(category, from = todayIso()) {
+  const base = isValidIsoDate(String(from ?? '')) ? new Date(`${from}T00:00:00Z`) : new Date();
+  if (category === 'Other') {
+    const later = new Date(base);
+    later.setUTCDate(later.getUTCDate() + 30);
+    return later.toISOString().slice(0, 10);
+  }
+  const due = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 1));
+  due.setUTCDate(category === 'GST' ? 20 : 7);
+  return due.toISOString().slice(0, 10);
+}
+
 function complianceTaskInput(input = {}) {
   const title = String(input.title ?? '').trim().slice(0, 100);
   if (!title) return { error: 'Enter a compliance task title.' };
@@ -7549,7 +7577,7 @@ function convertQuotationToOrder(company, quotationId) {
   return { ok: true, quotation, order: result.order };
 }
 
-function setOrderStatus(company, orderId, status) {
+function setOrderStatus(company, orderId, status, reason = '') {
   const order = (company.orders ?? []).find((entry) => entry.id === orderId);
   if (!order) return { ok: false, error: 'Order not found.' };
   if (!['Open', 'Closed', 'Cancelled'].includes(status)) {
@@ -7557,6 +7585,15 @@ function setOrderStatus(company, orderId, status) {
   }
   order.status = status;
   delete order.closedByFulfilment;
+  if (status === 'Open') {
+    delete order.closeReason;
+    delete order.closedAt;
+  } else {
+    const note = String(reason ?? '').trim().slice(0, 200);
+    if (note) order.closeReason = note;
+    else delete order.closeReason;
+    order.closedAt = new Date().toISOString();
+  }
   return { ok: true, order };
 }
 
@@ -7660,6 +7697,11 @@ function addManufacture(company, input) {
   if (wastageQty === null || wastageQty < 0) {
     return { ok: false, error: 'Wastage quantity must be zero or more.' };
   }
+  const labourCost = parseAmount(input.labourCost ?? 0);
+  const overheadCost = parseAmount(input.overheadCost ?? 0);
+  if (labourCost === null || labourCost < 0 || overheadCost === null || overheadCost < 0) {
+    return { ok: false, error: 'Labour and overhead cost must be zero or more.' };
+  }
   const componentGodown = (company.godowns ?? []).find((godown) => godown.id === input.componentGodownId);
   const outputGodown = (company.godowns ?? []).find((godown) => godown.id === input.outputGodownId);
   if (!componentGodown || !outputGodown) return { ok: false, error: 'Choose both the component and output godown.' };
@@ -7700,6 +7742,8 @@ function addManufacture(company, input) {
     outputItemId: output.id,
     outputQty,
     ...(wastageQty ? { wastageQty } : {}),
+    ...(labourCost > 0 ? { labourCost: round2(labourCost) } : {}),
+    ...(overheadCost > 0 ? { overheadCost: round2(overheadCost) } : {}),
     componentGodownId: componentGodown.id,
     outputGodownId: outputGodown.id,
     components,
@@ -8445,7 +8489,7 @@ function validateImportedCompany(company) {
         return `Company "${name}": stock item "${item.name}" opening batches do not add up to its opening quantity.`;
       }
     }
-    if (item.hsn !== undefined && !/^[0-9A-Z]{4,8}$/.test(String(item.hsn))) {
+    if (item.hsn !== undefined && !/^[0-9]{4}([0-9]{2}){0,2}$/.test(String(item.hsn))) {
       return `Company "${name}": stock item "${item.name}" has an invalid HSN/SAC.`;
     }
     stockItemIds.add(item.id);
@@ -11090,6 +11134,8 @@ function applyStockEvent(states, event) {
       cost = round2(cost + value);
       add(line.stockItemId, { inQty: 0, inValue: 0, outQty: round3(line.qty), outValue: value });
     }
+    const conversionCost = round2(Number(manufacture.labourCost ?? 0) + Number(manufacture.overheadCost ?? 0));
+    cost = round2(cost + conversionCost);
     const output = states.get(manufacture.outputItemId);
     if (output) {
       const qty = round3(manufacture.outputQty);
@@ -11515,10 +11561,19 @@ function batchStockSummary(company, filters = {}) {
   }
 
   rows.sort((a, b) => a.name.localeCompare(b.name) || a.batchNo.localeCompare(b.batchNo));
+  const byItem = new Map();
+  for (const row of rows) {
+    const entry = byItem.get(row.itemId) ?? { itemId: row.itemId, name: row.name, unit: row.unit, batches: 0, closingQty: 0, closingValue: 0 };
+    entry.batches += 1;
+    entry.closingQty = round3(entry.closingQty + row.closingQty);
+    entry.closingValue = round2(entry.closingValue + row.closingValue);
+    byItem.set(row.itemId, entry);
+  }
   return {
     from,
     to,
     rows,
+    items: [...byItem.values()].sort((a, b) => a.name.localeCompare(b.name)),
     totals: {
       closingQty: round3(rows.reduce((sum, row) => sum + row.closingQty, 0)),
       closingValue: round2(rows.reduce((sum, row) => sum + row.closingValue, 0)),
@@ -12711,6 +12766,11 @@ function eInvoiceRegister(company, filters = {}) {
     if (!lines.length) warnings.push('No stock lines; a single service line is assumed.');
     if (lines.some((line) => !line.hsn)) warnings.push('HSN / SAC is missing on one or more lines.');
     if (lines.some((line) => line.unit === 'OTH')) warnings.push('A stock unit has no UQC mapping; OTH is used.');
+    if (seller.gstin && !gstinChecksumValid(seller.gstin)) warnings.push('Seller GSTIN checksum does not match.');
+    if (document.partyGstin && !gstinChecksumValid(document.partyGstin)) warnings.push('Buyer GSTIN checksum does not match.');
+    if (document.partyGstin && document.placeOfSupply && document.partyGstin.slice(0, 2) !== document.placeOfSupply) {
+      warnings.push('Buyer GSTIN state does not match the place of supply.');
+    }
     return {
       ...document,
       voucherId: document.id,
@@ -17633,11 +17693,11 @@ function ordersScreen() {
       return `<tr>
         <td><strong>${prefix}-${order.no}</strong><div class="muted small">${esc(dateLabel(order.date))}</div></td>
         <td>${esc(party?.name ?? 'Unknown party')}<div class="muted small">${order.type}</div></td>
-        <td>${order.deliveryDate ? esc(dateLabel(order.deliveryDate)) : '<span class="muted">—</span>'}</td>
+        <td>${order.deliveryDate ? `${esc(dateLabel(order.deliveryDate))}${order.status === 'Open' && order.deliveryDate < todayIso() ? '<div class="muted small">Overdue</div>' : ''}` : '<span class="muted">—</span>'}</td>
         <td>${lines.length ? itemCell : '<span class="muted">No items</span>'}</td>
         <td class="num">${qtyCell}</td>
         <td class="num">${money(order.total)}</td>
-        <td><span class="badge${tone ? ` ${tone}` : ''}">${esc(order.status)}</span>${order.status === 'Open' && partiallyFulfilled ? '<div class="muted small">Partially fulfilled</div>' : ''}</td>
+        <td><span class="badge${tone ? ` ${tone}` : ''}">${esc(order.status)}</span>${order.status === 'Open' && partiallyFulfilled ? '<div class="muted small">Partially fulfilled</div>' : ''}${order.closeReason ? `<div class="muted small">${esc(order.closeReason)}</div>` : ''}</td>
         <td class="row-actions">${actions}</td>
       </tr>`;
     })
@@ -18026,6 +18086,16 @@ function inventoryScreen() {
     )
     .join('');
 
+  const batchItemRows = batchReport.items
+    .map((row) => `<tr>
+      <td><strong>${esc(row.name)}</strong></td>
+      <td class="num">${row.batches}</td>
+      <td class="num">${fmtQty(row.closingQty)} ${esc(row.unit)}</td>
+      <td class="num">${money(row.closingValue)}</td>
+      <td class="num">${row.closingQty ? money(row.closingValue / row.closingQty) : '—'}</td>
+    </tr>`)
+    .join('');
+
   const transferRows = transfers
     .map((transfer) => {
       const source = godowns.find((entry) => entry.id === transfer.fromGodownId)?.name ?? '—';
@@ -18274,6 +18344,16 @@ function inventoryScreen() {
           'Batch values use a per-batch moving average: purchases add their receipt rate and issues consume the batch average. Expiry is the latest date entered on a batch line.',
         )
       : ''}
+    ${batchReport.items.length
+      ? panel(
+          'Batch value by item',
+          `<table class="data-table compact">
+            <thead><tr><th>Item</th><th class="num">Batches</th><th class="num">Closing quantity</th><th class="num">Closing value</th><th class="num">Average rate</th></tr></thead>
+            <tbody>${batchItemRows}</tbody>
+          </table>`,
+          'Item totals sum the moving-average values of their open and closed batches for the selected period.',
+        )
+      : ''}
     ${expiryReport.rows.length
       ? panel(
           'Expiring batches',
@@ -18339,6 +18419,8 @@ function inventoryScreen() {
             <label class="field"><span>BOM</span><select name="bomId">${boms.map((bom) => `<option value="${esc(bom.id)}">${esc(bom.name)}</option>`).join('')}</select></label>
             <label class="field"><span>Production quantity</span><input name="outputQty" inputmode="decimal" value="${esc(fmtQty(boms[0]?.outputQty ?? 0))}" required></label>
             <label class="field"><span>Wastage quantity</span><input name="wastageQty" inputmode="decimal" placeholder="0" aria-label="Wastage quantity"></label>
+            <label class="field"><span>Labour cost</span><input name="labourCost" inputmode="decimal" placeholder="0.00"></label>
+            <label class="field"><span>Overhead cost</span><input name="overheadCost" inputmode="decimal" placeholder="0.00"></label>
             <label class="field"><span>Components from</span><select name="componentGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
             <label class="field"><span>Finished goods to</span><select name="outputGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
             <label class="field"><span>Output batch (if tracked)</span><input name="outputBatchNo" maxlength="30" placeholder="e.g. LOT-25"></label>
@@ -18354,7 +18436,7 @@ function inventoryScreen() {
               </table>`
             : '<p class="muted">No production entries yet. Consumption and finished goods appear in stock reports.</p>'}`
         : '<p class="muted">Create a BOM above before recording production.</p>',
-      'Production consumes components and brings finished goods in at component cost. It does not post a ledger entry or create a WIP account.',
+      'Production consumes components and brings finished goods in at component cost plus any labour and overhead entered. It does not post a ledger entry or create a WIP account.',
     )}
     ${panel(
       'Godowns',
@@ -19810,7 +19892,8 @@ function complianceScreen() {
     <input type="hidden" name="taskId" value="${esc(editing?.id ?? '')}">
     <label class="field"><span>Task</span><input name="title" maxlength="100" placeholder="e.g. File GSTR-3B for April" value="${esc(editing?.title ?? '')}"></label>
     <label class="field"><span>Category</span><select name="category">${categoryOptions}</select></label>
-    <label class="field"><span>Due date</span><input name="dueDate" type="date" value="${esc(editing?.dueDate ?? '')}"></label>
+    <label class="field"><span>Due date</span><input name="dueDate" type="date" value="${esc(editing?.dueDate ?? view.complianceDueDate ?? '')}"></label>
+    <div class="field form-actions"><button class="btn small ghost" type="button" data-action="suggest-compliance-date">Suggest next due date</button></div>
     <label class="field"><span>Notes</span><input name="notes" maxlength="200" placeholder="Optional working note" value="${esc(editing?.notes ?? '')}"></label>
     <label class="field"><span>Filed on (optional)</span><input name="filedOn" type="date" value="${esc(editing?.filedOn ?? '')}"></label>
     <label class="field"><span>Acknowledgement / reference</span><input name="reference" maxlength="80" placeholder="Portal reference or ARN" value="${esc(editing?.reference ?? '')}"></label>
@@ -20457,6 +20540,7 @@ function payrollScreen() {
         <label class="field"><span>Leave balance · Earned</span><input name="leaveEL" inputmode="decimal" value="${esc(editing?.leave?.EL ?? 0)}"></label>
         <label class="field"><span>Date of joining</span><input name="dateOfJoining" type="date" value="${esc(editing?.dateOfJoining ?? '')}"></label>
         <label class="field"><span>Date of exit</span><input name="dateOfExit" type="date" value="${esc(editing?.dateOfExit ?? '')}"><span class="muted small">Optional. Pay is prorated by calendar days in the joining and exit months.</span></label>
+        ${editing ? '<label class="field"><span>Revision date</span><input name="revisionDate" type="date"><span class="muted small">Used only when pay amounts change; defaults to today.</span></label>' : ''}
         <label class="field gst-check">
           <input type="checkbox" name="active"${editing && editing.active === false ? '' : ' checked'}>
           <span>Include in payroll runs</span>
@@ -20573,7 +20657,7 @@ function payrollScreen() {
           : '<p class="muted small">No active employees.</p>'}
         <label class="field"><span>Attendance CSV</span><input type="file" accept=".csv,text/csv" data-csv-target="attendance-csv"></label>
         <textarea id="attendance-csv" class="backup-box import-box" rows="4" placeholder="Employee,PaidDays\nAsha Menon,26"></textarea>
-        <div class="form-actions"><button class="btn small" type="button" data-action="load-attendance">Load attendance</button></div>
+        <div class="form-actions"><button class="btn small" type="button" data-action="load-attendance">Load attendance</button><button class="btn small ghost" type="button" data-action="fill-attendance-template">Fill employee template</button></div>
       </div>
       <div class="field form-actions"><button class="btn small" type="submit">Run payroll and post journal</button></div>
       <p id="payroll-run-error" class="form-error" role="alert"></p>
@@ -24381,6 +24465,7 @@ async function handleSubmit(event) {
       ifsc: data.get('ifsc'),
       dateOfJoining: data.get('dateOfJoining'),
       dateOfExit: data.get('dateOfExit'),
+      revisionDate: data.get('revisionDate'),
       active: data.get('active') === 'on',
       pay,
       leave: {
@@ -26430,6 +26515,17 @@ async function handleClick(event) {
       break;
     }
 
+    case 'fill-attendance-template': {
+      const active = company();
+      if (!active) break;
+      const textarea = document.getElementById('attendance-csv');
+      if (!textarea) break;
+      const employees = (active.payroll?.employees ?? []).filter((employee) => employee.active);
+      textarea.value = `Employee,PaidDays\n${employees.map((employee) => `${employee.name},`).join('\n')}`;
+      setFlash('Employee names filled. Enter paid days, then load the attendance.');
+      break;
+    }
+
     case 'load-attendance': {
       if (!can('voucher.write')) {
         requirePermission('voucher.write');
@@ -26468,6 +26564,13 @@ async function handleClick(event) {
         break;
       }
       view.complianceTaskId = trigger.dataset.id;
+      render();
+      break;
+    }
+
+    case 'suggest-compliance-date': {
+      const category = document.querySelector('#compliance-task-form [name="category"]')?.value ?? 'Other';
+      view.complianceDueDate = suggestedComplianceDueDate(category);
       render();
       break;
     }
@@ -27151,7 +27254,13 @@ async function handleClick(event) {
       }
       const active = company();
       if (!active) break;
-      const result = setOrderStatus(active, trigger.dataset.id, trigger.dataset.status);
+      let reason = '';
+      if (trigger.dataset.status !== 'Open') {
+        const entered = window.prompt('Reason for closing or cancelling this order (optional):', '');
+        if (entered === null) break;
+        reason = entered;
+      }
+      const result = setOrderStatus(active, trigger.dataset.id, trigger.dataset.status, reason);
       if (result.ok) {
         logAudit(
           'order.status',

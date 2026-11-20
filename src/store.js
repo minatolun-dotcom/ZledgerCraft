@@ -1158,6 +1158,19 @@ export function isValidGstin(value) {
   return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(String(value ?? '').trim().toUpperCase());
 }
 
+/** Verifies the GSTIN's final base-36 check character. */
+export function gstinChecksumValid(value) {
+  const code = String(value ?? '').trim().toUpperCase();
+  if (!isValidGstin(code)) return false;
+  const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let sum = 0;
+  for (let index = 0; index < 14; index += 1) {
+    const product = alphabet.indexOf(code[index]) * (index % 2 === 0 ? 1 : 2);
+    sum += Math.floor(product / 36) + (product % 36);
+  }
+  return alphabet[(36 - (sum % 36)) % 36] === code[14];
+}
+
 export function gstRateLabel(rate, cess = 0) {
   const base = Number(rate) === 0 ? 'Nil / Exempt' : `${Number(rate)}%`;
   return Number(cess) > 0 ? `${base} + ${Number(cess)}% cess` : base;
@@ -2208,6 +2221,8 @@ export function updateEmployee(company, employeeId, input = {}) {
   }
   const checked = employeePayEntries(company, input.pay);
   if (checked.error) return { ok: false, error: checked.error };
+  const revisionDate = String(input.revisionDate ?? '').trim();
+  if (revisionDate && !isValidIsoDate(revisionDate)) return { ok: false, error: 'Enter a valid revision date.' };
   const bank = employeeBankFields(input);
   if (bank.error) return { ok: false, error: bank.error };
   employee.name = name;
@@ -2215,7 +2230,7 @@ export function updateEmployee(company, employeeId, input = {}) {
   const payChanged = JSON.stringify(paySnapshot(employee.pay)) !== JSON.stringify(paySnapshot(checked.pay));
   employee.pay = checked.pay;
   if (payChanged) {
-    employee.revisions = [...(employee.revisions ?? []), { date: todayIso(), pay: paySnapshot(checked.pay) }].slice(-100);
+    employee.revisions = [...(employee.revisions ?? []), { date: revisionDate || todayIso(), pay: paySnapshot(checked.pay) }].slice(-100);
   }
   employee.leave = normalizeLeaveBalances(input.leave);
   const optional = { code: 20, designation: 60 };
@@ -4338,8 +4353,8 @@ function validateStockItemInput(company, input, ignoreId) {
     return { ok: false, error: 'Opening rate must be zero or more.' };
   }
   const hsn = String(input.hsn ?? '').trim().toUpperCase();
-  if (hsn && !/^[0-9A-Z]{4,8}$/.test(hsn)) {
-    return { ok: false, error: 'HSN/SAC must be 4–8 letters or digits.' };
+  if (hsn && !/^[0-9]{4}([0-9]{2}){0,2}$/.test(hsn)) {
+    return { ok: false, error: 'HSN/SAC must be 4, 6 or 8 digits.' };
   }
   const reorderLevel = parseQty(input.reorderLevel ?? 0);
   if (reorderLevel === null || reorderLevel < 0) {
@@ -4833,6 +4848,19 @@ export function normalizeStockCounts(company) {
 
 const COMPLIANCE_CATEGORIES = new Set(['GST', 'TDS', 'Payroll', 'Other']);
 
+/** Suggested next monthly due date: GST 20th, TDS and payroll 7th, other 30 days. */
+export function suggestedComplianceDueDate(category, from = todayIso()) {
+  const base = isValidIsoDate(String(from ?? '')) ? new Date(`${from}T00:00:00Z`) : new Date();
+  if (category === 'Other') {
+    const later = new Date(base);
+    later.setUTCDate(later.getUTCDate() + 30);
+    return later.toISOString().slice(0, 10);
+  }
+  const due = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 1));
+  due.setUTCDate(category === 'GST' ? 20 : 7);
+  return due.toISOString().slice(0, 10);
+}
+
 function complianceTaskInput(input = {}) {
   const title = String(input.title ?? '').trim().slice(0, 100);
   if (!title) return { error: 'Enter a compliance task title.' };
@@ -5123,7 +5151,7 @@ export function convertQuotationToOrder(company, quotationId) {
   return { ok: true, quotation, order: result.order };
 }
 
-export function setOrderStatus(company, orderId, status) {
+export function setOrderStatus(company, orderId, status, reason = '') {
   const order = (company.orders ?? []).find((entry) => entry.id === orderId);
   if (!order) return { ok: false, error: 'Order not found.' };
   if (!['Open', 'Closed', 'Cancelled'].includes(status)) {
@@ -5131,6 +5159,15 @@ export function setOrderStatus(company, orderId, status) {
   }
   order.status = status;
   delete order.closedByFulfilment;
+  if (status === 'Open') {
+    delete order.closeReason;
+    delete order.closedAt;
+  } else {
+    const note = String(reason ?? '').trim().slice(0, 200);
+    if (note) order.closeReason = note;
+    else delete order.closeReason;
+    order.closedAt = new Date().toISOString();
+  }
   return { ok: true, order };
 }
 
@@ -5234,6 +5271,11 @@ export function addManufacture(company, input) {
   if (wastageQty === null || wastageQty < 0) {
     return { ok: false, error: 'Wastage quantity must be zero or more.' };
   }
+  const labourCost = parseAmount(input.labourCost ?? 0);
+  const overheadCost = parseAmount(input.overheadCost ?? 0);
+  if (labourCost === null || labourCost < 0 || overheadCost === null || overheadCost < 0) {
+    return { ok: false, error: 'Labour and overhead cost must be zero or more.' };
+  }
   const componentGodown = (company.godowns ?? []).find((godown) => godown.id === input.componentGodownId);
   const outputGodown = (company.godowns ?? []).find((godown) => godown.id === input.outputGodownId);
   if (!componentGodown || !outputGodown) return { ok: false, error: 'Choose both the component and output godown.' };
@@ -5274,6 +5316,8 @@ export function addManufacture(company, input) {
     outputItemId: output.id,
     outputQty,
     ...(wastageQty ? { wastageQty } : {}),
+    ...(labourCost > 0 ? { labourCost: round2(labourCost) } : {}),
+    ...(overheadCost > 0 ? { overheadCost: round2(overheadCost) } : {}),
     componentGodownId: componentGodown.id,
     outputGodownId: outputGodown.id,
     components,
@@ -6019,7 +6063,7 @@ function validateImportedCompany(company) {
         return `Company "${name}": stock item "${item.name}" opening batches do not add up to its opening quantity.`;
       }
     }
-    if (item.hsn !== undefined && !/^[0-9A-Z]{4,8}$/.test(String(item.hsn))) {
+    if (item.hsn !== undefined && !/^[0-9]{4}([0-9]{2}){0,2}$/.test(String(item.hsn))) {
       return `Company "${name}": stock item "${item.name}" has an invalid HSN/SAC.`;
     }
     stockItemIds.add(item.id);

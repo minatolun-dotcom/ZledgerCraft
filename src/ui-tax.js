@@ -7,6 +7,7 @@ import {
   gstRateLabel,
   gstTaxLedgers,
   round2,
+  suggestedComplianceDueDate,
   todayIso,
   withholdingTaxLedgers,
 } from './store.js';
@@ -552,7 +553,8 @@ export function complianceScreen() {
     <input type="hidden" name="taskId" value="${esc(editing?.id ?? '')}">
     <label class="field"><span>Task</span><input name="title" maxlength="100" placeholder="e.g. File GSTR-3B for April" value="${esc(editing?.title ?? '')}"></label>
     <label class="field"><span>Category</span><select name="category">${categoryOptions}</select></label>
-    <label class="field"><span>Due date</span><input name="dueDate" type="date" value="${esc(editing?.dueDate ?? '')}"></label>
+    <label class="field"><span>Due date</span><input name="dueDate" type="date" value="${esc(editing?.dueDate ?? view.complianceDueDate ?? '')}"></label>
+    <div class="field form-actions"><button class="btn small ghost" type="button" data-action="suggest-compliance-date">Suggest next due date</button></div>
     <label class="field"><span>Notes</span><input name="notes" maxlength="200" placeholder="Optional working note" value="${esc(editing?.notes ?? '')}"></label>
     <label class="field"><span>Filed on (optional)</span><input name="filedOn" type="date" value="${esc(editing?.filedOn ?? '')}"></label>
     <label class="field"><span>Acknowledgement / reference</span><input name="reference" maxlength="80" placeholder="Portal reference or ARN" value="${esc(editing?.reference ?? '')}"></label>

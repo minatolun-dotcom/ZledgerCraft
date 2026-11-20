@@ -5,6 +5,7 @@ import {
   booksStart,
   groupById,
   gstStateName,
+  gstinChecksumValid,
   isValidIsoDate,
   orderRemainingItems,
   primaryGroupOf,
@@ -1912,6 +1913,8 @@ function applyStockEvent(states, event) {
       cost = round2(cost + value);
       add(line.stockItemId, { inQty: 0, inValue: 0, outQty: round3(line.qty), outValue: value });
     }
+    const conversionCost = round2(Number(manufacture.labourCost ?? 0) + Number(manufacture.overheadCost ?? 0));
+    cost = round2(cost + conversionCost);
     const output = states.get(manufacture.outputItemId);
     if (output) {
       const qty = round3(manufacture.outputQty);
@@ -2337,10 +2340,19 @@ export function batchStockSummary(company, filters = {}) {
   }
 
   rows.sort((a, b) => a.name.localeCompare(b.name) || a.batchNo.localeCompare(b.batchNo));
+  const byItem = new Map();
+  for (const row of rows) {
+    const entry = byItem.get(row.itemId) ?? { itemId: row.itemId, name: row.name, unit: row.unit, batches: 0, closingQty: 0, closingValue: 0 };
+    entry.batches += 1;
+    entry.closingQty = round3(entry.closingQty + row.closingQty);
+    entry.closingValue = round2(entry.closingValue + row.closingValue);
+    byItem.set(row.itemId, entry);
+  }
   return {
     from,
     to,
     rows,
+    items: [...byItem.values()].sort((a, b) => a.name.localeCompare(b.name)),
     totals: {
       closingQty: round3(rows.reduce((sum, row) => sum + row.closingQty, 0)),
       closingValue: round2(rows.reduce((sum, row) => sum + row.closingValue, 0)),
@@ -3533,6 +3545,11 @@ export function eInvoiceRegister(company, filters = {}) {
     if (!lines.length) warnings.push('No stock lines; a single service line is assumed.');
     if (lines.some((line) => !line.hsn)) warnings.push('HSN / SAC is missing on one or more lines.');
     if (lines.some((line) => line.unit === 'OTH')) warnings.push('A stock unit has no UQC mapping; OTH is used.');
+    if (seller.gstin && !gstinChecksumValid(seller.gstin)) warnings.push('Seller GSTIN checksum does not match.');
+    if (document.partyGstin && !gstinChecksumValid(document.partyGstin)) warnings.push('Buyer GSTIN checksum does not match.');
+    if (document.partyGstin && document.placeOfSupply && document.partyGstin.slice(0, 2) !== document.placeOfSupply) {
+      warnings.push('Buyer GSTIN state does not match the place of supply.');
+    }
     return {
       ...document,
       voucherId: document.id,

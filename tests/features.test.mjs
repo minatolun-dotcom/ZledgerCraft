@@ -13,12 +13,14 @@ import {
   deleteRecurringVoucher,
   exportState,
   findLedgerByName,
+  gstinChecksumValid,
   importState,
   postDueRecurringVouchers,
   postRecurringVoucher,
   saveGstSettings,
   saveTdsSettings,
   setNextVoucherNumber,
+  suggestedComplianceDueDate,
   updateCompany,
   updateGroup,
   updateLedger,
@@ -113,6 +115,13 @@ function tradingFixture() {
 
   return { company, cash, bank, capital, sales, purchases, rent, sharma, gupta };
 }
+
+test('GSTIN checksum and suggested compliance dates are validated', () => {
+  assert.equal(gstinChecksumValid('27AABCU9603R1ZN'), true);
+  assert.equal(gstinChecksumValid('27AABCU9603R1ZM'), false);
+  assert.equal(suggestedComplianceDueDate('GST', '2026-11-20'), '2026-12-20');
+  assert.equal(suggestedComplianceDueDate('TDS', '2026-11-20'), '2026-12-07');
+});
 
 test('credit and debit notes are first-class voucher types', () => {
   assert.ok(VOUCHER_TYPES.CreditNote);

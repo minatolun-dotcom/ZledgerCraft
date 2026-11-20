@@ -453,8 +453,9 @@ disabled.
   (Open/Closed/Cancelled), filters and a Create voucher action that prefills the
   remaining quantity and links it to the order. Further vouchers can fulfil the
   balance; the order closes only when every line is fulfilled, and deleting a
-  linked voucher recalculates fulfilment. Orders do not post to the ledger or
-  move stock.
+  linked voucher recalculates fulfilment. Closing or cancelling records an
+  optional reason, and overdue delivery dates are flagged. Orders do not post
+  to the ledger or move stock.
 - Quotations with party, validity date and item lines, kept in their own
   sequence. An open quotation can be converted to a linked sales order; it
   does not create a voucher or move stock by itself.
@@ -468,9 +469,9 @@ disabled.
   components while finished-good quantity stays as entered. Component
   availability is checked first.
 - Production preserves total stock value: components leave at weighted-average
-  cost and finished goods enter at the same total component cost. It is a
-  quantity/cost working paper, not a WIP journal; labour and overheads are not
-  added and no ledger entry is posted.
+  cost plus optional labour and overhead amounts, and finished goods enter at
+  that total. It is a quantity/cost working paper, not a WIP journal, and no
+  ledger entry is posted.
 - Stock is valued operationally: it does not post stock value into the P&L or
   balance sheet, which stay driven by ledger balances only.
 

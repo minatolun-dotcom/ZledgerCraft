@@ -103,11 +103,11 @@ export function ordersScreen() {
       return `<tr>
         <td><strong>${prefix}-${order.no}</strong><div class="muted small">${esc(dateLabel(order.date))}</div></td>
         <td>${esc(party?.name ?? 'Unknown party')}<div class="muted small">${order.type}</div></td>
-        <td>${order.deliveryDate ? esc(dateLabel(order.deliveryDate)) : '<span class="muted">—</span>'}</td>
+        <td>${order.deliveryDate ? `${esc(dateLabel(order.deliveryDate))}${order.status === 'Open' && order.deliveryDate < todayIso() ? '<div class="muted small">Overdue</div>' : ''}` : '<span class="muted">—</span>'}</td>
         <td>${lines.length ? itemCell : '<span class="muted">No items</span>'}</td>
         <td class="num">${qtyCell}</td>
         <td class="num">${money(order.total)}</td>
-        <td><span class="badge${tone ? ` ${tone}` : ''}">${esc(order.status)}</span>${order.status === 'Open' && partiallyFulfilled ? '<div class="muted small">Partially fulfilled</div>' : ''}</td>
+        <td><span class="badge${tone ? ` ${tone}` : ''}">${esc(order.status)}</span>${order.status === 'Open' && partiallyFulfilled ? '<div class="muted small">Partially fulfilled</div>' : ''}${order.closeReason ? `<div class="muted small">${esc(order.closeReason)}</div>` : ''}</td>
         <td class="row-actions">${actions}</td>
       </tr>`;
     })
@@ -496,6 +496,16 @@ export function inventoryScreen() {
     )
     .join('');
 
+  const batchItemRows = batchReport.items
+    .map((row) => `<tr>
+      <td><strong>${esc(row.name)}</strong></td>
+      <td class="num">${row.batches}</td>
+      <td class="num">${fmtQty(row.closingQty)} ${esc(row.unit)}</td>
+      <td class="num">${money(row.closingValue)}</td>
+      <td class="num">${row.closingQty ? money(row.closingValue / row.closingQty) : '—'}</td>
+    </tr>`)
+    .join('');
+
   const transferRows = transfers
     .map((transfer) => {
       const source = godowns.find((entry) => entry.id === transfer.fromGodownId)?.name ?? '—';
@@ -744,6 +754,16 @@ export function inventoryScreen() {
           'Batch values use a per-batch moving average: purchases add their receipt rate and issues consume the batch average. Expiry is the latest date entered on a batch line.',
         )
       : ''}
+    ${batchReport.items.length
+      ? panel(
+          'Batch value by item',
+          `<table class="data-table compact">
+            <thead><tr><th>Item</th><th class="num">Batches</th><th class="num">Closing quantity</th><th class="num">Closing value</th><th class="num">Average rate</th></tr></thead>
+            <tbody>${batchItemRows}</tbody>
+          </table>`,
+          'Item totals sum the moving-average values of their open and closed batches for the selected period.',
+        )
+      : ''}
     ${expiryReport.rows.length
       ? panel(
           'Expiring batches',
@@ -809,6 +829,8 @@ export function inventoryScreen() {
             <label class="field"><span>BOM</span><select name="bomId">${boms.map((bom) => `<option value="${esc(bom.id)}">${esc(bom.name)}</option>`).join('')}</select></label>
             <label class="field"><span>Production quantity</span><input name="outputQty" inputmode="decimal" value="${esc(fmtQty(boms[0]?.outputQty ?? 0))}" required></label>
             <label class="field"><span>Wastage quantity</span><input name="wastageQty" inputmode="decimal" placeholder="0" aria-label="Wastage quantity"></label>
+            <label class="field"><span>Labour cost</span><input name="labourCost" inputmode="decimal" placeholder="0.00"></label>
+            <label class="field"><span>Overhead cost</span><input name="overheadCost" inputmode="decimal" placeholder="0.00"></label>
             <label class="field"><span>Components from</span><select name="componentGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
             <label class="field"><span>Finished goods to</span><select name="outputGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
             <label class="field"><span>Output batch (if tracked)</span><input name="outputBatchNo" maxlength="30" placeholder="e.g. LOT-25"></label>
@@ -824,7 +846,7 @@ export function inventoryScreen() {
               </table>`
             : '<p class="muted">No production entries yet. Consumption and finished goods appear in stock reports.</p>'}`
         : '<p class="muted">Create a BOM above before recording production.</p>',
-      'Production consumes components and brings finished goods in at component cost. It does not post a ledger entry or create a WIP account.',
+      'Production consumes components and brings finished goods in at component cost plus any labour and overhead entered. It does not post a ledger entry or create a WIP account.',
     )}
     ${panel(
       'Godowns',

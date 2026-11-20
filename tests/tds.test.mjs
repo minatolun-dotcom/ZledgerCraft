@@ -15,6 +15,7 @@ import {
   importState,
   saveGstSettings,
   saveTdsSettings,
+  updateTdsSection,
   updateVoucher,
   withholdingTaxLedgers,
 } from '../src/store.js';
@@ -380,6 +381,34 @@ test('stock items reconcile with the TDS/TCS base', () => {
   assert.equal(result.ok, true, result.error);
   assert.equal(result.voucher.total, 1010);
   assert.equal(result.voucher.tds.amount, 10);
+});
+
+test('sections can be edited without rewriting posted deductions', () => {
+  const { company, supplier, purchases } = fixture();
+  const voucher = tdsPurchase(company, { supplier, purchases, base: 10000 });
+  const original = section(company, '194J');
+  assert.equal(voucher.tds.rate, original.rate);
+  assert.equal(voucher.tds.amount, 1000);
+
+  const edited = updateTdsSection(company, original.id, {
+    label: 'Professional fees revised',
+    rate: 5,
+    threshold: 30000,
+  });
+  assert.equal(edited.ok, true, edited.error);
+  assert.equal(edited.section.label, 'Professional fees revised');
+  assert.equal(edited.section.rate, 5);
+  assert.equal(edited.section.threshold, 30000);
+  assert.equal(edited.section.code, '194J', 'the section code stays fixed');
+  assert.equal(voucher.tds.rate, 10, 'a posted voucher keeps its saved rate');
+  assert.equal(voucher.tds.amount, 1000);
+
+  assert.equal(updateTdsSection(company, original.id, { rate: 101 }).ok, false);
+  assert.equal(updateTdsSection(company, original.id, { threshold: -1 }).ok, false);
+  assert.equal(updateTdsSection(company, 'missing', { rate: 5 }).ok, false);
+  const relabelled = updateTdsSection(company, original.id, { label: '' });
+  assert.equal(relabelled.ok, true, relabelled.error);
+  assert.equal(relabelled.section.label, '194J');
 });
 
 test('TDS/TCS settings, sections, vouchers and challans survive a backup', () => {

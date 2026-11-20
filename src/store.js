@@ -1483,6 +1483,23 @@ export function addTdsSection(company, input = {}) {
   return { ok: true, section };
 }
 
+export function updateTdsSection(company, sectionId, input = {}) {
+  const section = (company.tds?.sections ?? []).find((entry) => entry.id === sectionId);
+  if (!section) return { ok: false, error: 'TDS/TCS section not found.' };
+  const rate = parseAmount(input.rate === undefined ? section.rate : input.rate);
+  if (rate === null || rate < 0 || rate > 100) {
+    return { ok: false, error: 'Section rate must be between 0% and 100%.' };
+  }
+  const threshold = parseAmount(input.threshold === undefined ? section.threshold ?? 0 : input.threshold);
+  if (threshold === null || threshold < 0) {
+    return { ok: false, error: 'Threshold must be zero or more.' };
+  }
+  section.label = String(input.label ?? '').trim().slice(0, 60) || section.code;
+  section.rate = rate;
+  section.threshold = threshold;
+  return { ok: true, section };
+}
+
 export function deleteTdsSection(company, sectionId) {
   const section = (company.tds?.sections ?? []).find((entry) => entry.id === sectionId);
   if (!section) return { ok: false, error: 'TDS/TCS section not found.' };

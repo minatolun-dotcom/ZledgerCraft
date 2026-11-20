@@ -344,6 +344,17 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 36: editable TDS/TCS sections
+
+- A TDS/TCS section's description, rate and threshold can be edited in place,
+  with the 0–100% rate bound and non-negative threshold rule. Kind and code stay
+  fixed, and posted vouchers keep their saved rate/label snapshot.
+- The section master gains Edit and Cancel actions with a prefilled form; an
+  empty description falls back to the section code.
+- Verification: edit, posted-voucher snapshot, invalid rate/threshold and
+  missing-section cases; 278 tests (277 pass, 1 skipped) and a 926.8 kB build
+  pass.
+
 ### 2026-11-20 — Phase 35: HSN summary by unit
 
 - The GSTR-1 HSN/SAC summary now groups stock lines by HSN/SAC and unit quantity

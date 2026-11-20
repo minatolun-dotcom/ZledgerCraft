@@ -111,6 +111,7 @@ import {
   updateGroup,
   updateLedger,
   updateStockItem,
+  updateTdsSection,
   updateBudget,
   updateCostCategory,
   updateCostCentre,
@@ -3021,26 +3022,31 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = addTdsSection(active, {
+    const editingSectionId = view.editingTdsSectionId;
+    const payload = {
       kind: data.get('kind'),
       code: data.get('code'),
       label: data.get('label'),
       rate: data.get('rate'),
       threshold: data.get('threshold') || 0,
-    });
+    };
+    const result = editingSectionId
+      ? updateTdsSection(active, editingSectionId, payload)
+      : addTdsSection(active, payload);
     if (!result.ok) {
       showFormError(result.error, 'tds-section-error');
       return;
     }
     logAudit(
-      'tds.section',
-      `Added ${result.section.kind} section ${result.section.code} at ${result.section.rate}%.`,
+      editingSectionId ? 'tds.section.update' : 'tds.section',
+      `${editingSectionId ? 'Updated' : 'Added'} ${result.section.kind} section ${result.section.code} at ${result.section.rate}%.`,
       active,
       `${result.section.kind} ${result.section.code}`,
     );
     persist();
-    setFlash(`${result.section.kind} section ${result.section.code} added.`);
-    render();
+    setFlash(`${result.section.kind} section ${result.section.code} ${editingSectionId ? 'saved' : 'added'}.`);
+    if (editingSectionId) navigate('tds');
+    else render();
     return;
   }
 
@@ -3850,6 +3856,12 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'edit-tds-section':
+      navigate('tds', { editingTdsSectionId: trigger.dataset.id });
+      break;
+    case 'cancel-tds-section-edit':
+      navigate('tds');
+      break;
     case 'delete-tds-section': {
       if (!can('master.delete')) {
         requirePermission('master.delete');

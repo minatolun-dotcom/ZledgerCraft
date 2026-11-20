@@ -640,6 +640,9 @@ export function tdsScreen() {
       : 'TDS/TCS is off. Vouchers cannot deduct tax until settings are saved with it enabled.',
   );
 
+  const editingSection = view.editingTdsSectionId
+    ? sections.find((section) => section.id === view.editingTdsSectionId) ?? null
+    : null;
   const sectionRows = sections
     .map((section) => {
       const used = active.vouchers.filter((voucher) => voucher.tds?.sectionId === section.id).length;
@@ -651,6 +654,7 @@ export function tdsScreen() {
         <td class="num">${section.threshold ? money(section.threshold) : '—'}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
+          <button class="btn small" type="button" data-action="edit-tds-section" data-id="${esc(section.id)}">Edit</button>
           <button class="btn small danger" type="button" data-action="delete-tds-section" data-id="${esc(section.id)}"
             ${used > 0 ? 'disabled' : ''}>Delete</button>
         </td>
@@ -661,17 +665,19 @@ export function tdsScreen() {
   const sectionsPanel = panel(
     `Section master <span class="count">${sections.length}</span>`,
     `<form id="tds-section-form" class="inline-form" novalidate>
-      <select name="kind" aria-label="Section kind">
-        <option value="TDS"${kind === 'TDS' ? ' selected' : ''}>TDS</option>
-        <option value="TCS"${kind === 'TCS' ? ' selected' : ''}>TCS</option>
+      <select name="kind" aria-label="Section kind"${editingSection ? ' disabled' : ''}>
+        <option value="TDS"${(editingSection?.kind ?? kind) === 'TDS' ? ' selected' : ''}>TDS</option>
+        <option value="TCS"${(editingSection?.kind ?? kind) === 'TCS' ? ' selected' : ''}>TCS</option>
       </select>
-      <input name="code" maxlength="12" placeholder="Section code" aria-label="Section code" required>
-      <input name="label" maxlength="60" placeholder="Description (optional)" aria-label="Section description">
-      <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="Section rate" required>
-      <input name="threshold" inputmode="decimal" placeholder="Threshold" aria-label="Section threshold">
-      <button class="btn small" type="submit">Add section</button>
+      <input name="code" maxlength="12" placeholder="Section code" aria-label="Section code" value="${esc(editingSection?.code ?? '')}"${editingSection ? ' disabled' : ''} required>
+      <input name="label" maxlength="60" placeholder="Description (optional)" aria-label="Section description" value="${esc(editingSection?.label ?? '')}">
+      <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="Section rate" value="${esc(editingSection?.rate ?? '')}" required>
+      <input name="threshold" inputmode="decimal" placeholder="Threshold" aria-label="Section threshold" value="${esc(editingSection?.threshold ?? '')}">
+      <button class="btn small" type="submit">${editingSection ? 'Save section' : 'Add section'}</button>
+      ${editingSection ? '<button class="btn small ghost" type="button" data-action="cancel-tds-section-edit">Cancel</button>' : ''}
       <p id="tds-section-error" class="form-error" role="alert"></p>
     </form>
+    <p class="muted small">Editing a section changes future deductions only; posted vouchers keep their saved section rate.</p>
     <div class="table-scroll" tabindex="0"><table class="data-table compact tds-report-table">
       <thead><tr><th>Kind</th><th>Code</th><th>Description</th><th class="num">Rate</th><th class="num">Threshold</th><th class="num">Vouchers</th><th></th></tr></thead>
       <tbody>${sectionRows}</tbody>

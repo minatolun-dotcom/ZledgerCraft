@@ -3826,6 +3826,23 @@ function addTdsSection(company, input = {}) {
   return { ok: true, section };
 }
 
+function updateTdsSection(company, sectionId, input = {}) {
+  const section = (company.tds?.sections ?? []).find((entry) => entry.id === sectionId);
+  if (!section) return { ok: false, error: 'TDS/TCS section not found.' };
+  const rate = parseAmount(input.rate === undefined ? section.rate : input.rate);
+  if (rate === null || rate < 0 || rate > 100) {
+    return { ok: false, error: 'Section rate must be between 0% and 100%.' };
+  }
+  const threshold = parseAmount(input.threshold === undefined ? section.threshold ?? 0 : input.threshold);
+  if (threshold === null || threshold < 0) {
+    return { ok: false, error: 'Threshold must be zero or more.' };
+  }
+  section.label = String(input.label ?? '').trim().slice(0, 60) || section.code;
+  section.rate = rate;
+  section.threshold = threshold;
+  return { ok: true, section };
+}
+
 function deleteTdsSection(company, sectionId) {
   const section = (company.tds?.sections ?? []).find((entry) => entry.id === sectionId);
   if (!section) return { ok: false, error: 'TDS/TCS section not found.' };
@@ -16962,6 +16979,9 @@ function tdsScreen() {
       : 'TDS/TCS is off. Vouchers cannot deduct tax until settings are saved with it enabled.',
   );
 
+  const editingSection = view.editingTdsSectionId
+    ? sections.find((section) => section.id === view.editingTdsSectionId) ?? null
+    : null;
   const sectionRows = sections
     .map((section) => {
       const used = active.vouchers.filter((voucher) => voucher.tds?.sectionId === section.id).length;
@@ -16973,6 +16993,7 @@ function tdsScreen() {
         <td class="num">${section.threshold ? money(section.threshold) : '—'}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
+          <button class="btn small" type="button" data-action="edit-tds-section" data-id="${esc(section.id)}">Edit</button>
           <button class="btn small danger" type="button" data-action="delete-tds-section" data-id="${esc(section.id)}"
             ${used > 0 ? 'disabled' : ''}>Delete</button>
         </td>
@@ -16983,17 +17004,19 @@ function tdsScreen() {
   const sectionsPanel = panel(
     `Section master <span class="count">${sections.length}</span>`,
     `<form id="tds-section-form" class="inline-form" novalidate>
-      <select name="kind" aria-label="Section kind">
-        <option value="TDS"${kind === 'TDS' ? ' selected' : ''}>TDS</option>
-        <option value="TCS"${kind === 'TCS' ? ' selected' : ''}>TCS</option>
+      <select name="kind" aria-label="Section kind"${editingSection ? ' disabled' : ''}>
+        <option value="TDS"${(editingSection?.kind ?? kind) === 'TDS' ? ' selected' : ''}>TDS</option>
+        <option value="TCS"${(editingSection?.kind ?? kind) === 'TCS' ? ' selected' : ''}>TCS</option>
       </select>
-      <input name="code" maxlength="12" placeholder="Section code" aria-label="Section code" required>
-      <input name="label" maxlength="60" placeholder="Description (optional)" aria-label="Section description">
-      <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="Section rate" required>
-      <input name="threshold" inputmode="decimal" placeholder="Threshold" aria-label="Section threshold">
-      <button class="btn small" type="submit">Add section</button>
+      <input name="code" maxlength="12" placeholder="Section code" aria-label="Section code" value="${esc(editingSection?.code ?? '')}"${editingSection ? ' disabled' : ''} required>
+      <input name="label" maxlength="60" placeholder="Description (optional)" aria-label="Section description" value="${esc(editingSection?.label ?? '')}">
+      <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="Section rate" value="${esc(editingSection?.rate ?? '')}" required>
+      <input name="threshold" inputmode="decimal" placeholder="Threshold" aria-label="Section threshold" value="${esc(editingSection?.threshold ?? '')}">
+      <button class="btn small" type="submit">${editingSection ? 'Save section' : 'Add section'}</button>
+      ${editingSection ? '<button class="btn small ghost" type="button" data-action="cancel-tds-section-edit">Cancel</button>' : ''}
       <p id="tds-section-error" class="form-error" role="alert"></p>
     </form>
+    <p class="muted small">Editing a section changes future deductions only; posted vouchers keep their saved section rate.</p>
     <div class="table-scroll" tabindex="0"><table class="data-table compact tds-report-table">
       <thead><tr><th>Kind</th><th>Code</th><th>Description</th><th class="num">Rate</th><th class="num">Threshold</th><th class="num">Vouchers</th><th></th></tr></thead>
       <tbody>${sectionRows}</tbody>
@@ -20720,26 +20743,31 @@ async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = addTdsSection(active, {
+    const editingSectionId = view.editingTdsSectionId;
+    const payload = {
       kind: data.get('kind'),
       code: data.get('code'),
       label: data.get('label'),
       rate: data.get('rate'),
       threshold: data.get('threshold') || 0,
-    });
+    };
+    const result = editingSectionId
+      ? updateTdsSection(active, editingSectionId, payload)
+      : addTdsSection(active, payload);
     if (!result.ok) {
       showFormError(result.error, 'tds-section-error');
       return;
     }
     logAudit(
-      'tds.section',
-      `Added ${result.section.kind} section ${result.section.code} at ${result.section.rate}%.`,
+      editingSectionId ? 'tds.section.update' : 'tds.section',
+      `${editingSectionId ? 'Updated' : 'Added'} ${result.section.kind} section ${result.section.code} at ${result.section.rate}%.`,
       active,
       `${result.section.kind} ${result.section.code}`,
     );
     persist();
-    setFlash(`${result.section.kind} section ${result.section.code} added.`);
-    render();
+    setFlash(`${result.section.kind} section ${result.section.code} ${editingSectionId ? 'saved' : 'added'}.`);
+    if (editingSectionId) navigate('tds');
+    else render();
     return;
   }
 
@@ -21549,6 +21577,12 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'edit-tds-section':
+      navigate('tds', { editingTdsSectionId: trigger.dataset.id });
+      break;
+    case 'cancel-tds-section-edit':
+      navigate('tds');
+      break;
     case 'delete-tds-section': {
       if (!can('master.delete')) {
         requirePermission('master.delete');

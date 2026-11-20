@@ -330,7 +330,9 @@ disabled.
   creates or reuses CGST, SGST, IGST and Cess ledgers under Duties & Taxes.
 - TDS/TCS registration with a TAN and a section master (kind, code, description,
   rate and threshold; seeded with common 194C/194J/194I/194H and two TCS
-  sections). Enabling it creates or reuses TDS Payable and TCS Payable ledgers.
+  sections). A section's description, rate and threshold can be edited without
+  changing its kind or code, and posted deductions keep their saved rate.
+  Enabling it creates or reuses TDS Payable and TCS Payable ledgers.
 - Payroll with a pay-head master (earning or deduction, posting ledger and an
   optional PF/ESI/PT tag) and an employee master (code, designation, PAN and
   joining/exit dates). Enabling payroll creates or reuses the Salaries and

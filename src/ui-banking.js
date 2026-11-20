@@ -204,6 +204,8 @@ export function postDatedScreen() {
     status: current.status,
     bankLedgerId: current.bankLedgerId,
     party: current.party,
+    numberFrom: current.numberFrom,
+    numberTo: current.numberTo,
   });
   const canWrite = can('voucher.write');
   const statusOptions = ['All', 'Post-dated', 'Due', 'Cleared', 'Stopped', 'Cancelled']
@@ -233,6 +235,14 @@ export function postDatedScreen() {
         <td>${esc(row.party)}</td>
         <td>${esc(voucherLabel(row.type))} ${row.no}<div class="muted small">voucher ${esc(dateLabel(row.voucherDate))}</div></td>
         <td><span class="badge ${row.status === 'Post-dated' ? 'attention' : row.status === 'Due' ? 'overdue' : ''}">${esc(row.status)}</span><div class="muted small">${esc(timing)}</div>
+          ${row.statusHistory.length
+            ? `<details><summary class="muted small">${row.statusHistory.length} status change${row.statusHistory.length === 1 ? '' : 's'}</summary><div class="muted small">${row.statusHistory
+                .slice()
+                .reverse()
+                .slice(0, 8)
+                .map((entry) => `${esc(entry.status)} · ${esc(new Date(entry.at).toLocaleString('en-IN'))}`)
+                .join('<br>')}</div></details>`
+            : ''}
           ${canWrite
             ? `<div class="row-actions">${row.manualStatus
                 ? `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="" data-id="${esc(row.voucherId)}">Restore automatic</button>`
@@ -255,6 +265,8 @@ export function postDatedScreen() {
       <label class="field inline-field"><span>Status</span><select name="status">${statusOptions}</select></label>
       <label class="field inline-field"><span>Bank</span><select name="bankLedgerId">${bankOptions}</select></label>
       <label class="field inline-field"><span>Party</span><input name="party" maxlength="80" placeholder="Any party" value="${esc(current.party ?? '')}"></label>
+      <label class="field inline-field"><span>Cheque no. from</span><input name="numberFrom" maxlength="30" placeholder="Any" value="${esc(current.numberFrom ?? '')}"></label>
+      <label class="field inline-field"><span>to</span><input name="numberTo" maxlength="30" placeholder="Any" value="${esc(current.numberTo ?? '')}"></label>
       <button class="btn small" type="submit">Apply</button>
     </form>
     <div class="ratio-grid">
@@ -269,7 +281,7 @@ export function postDatedScreen() {
           <tbody>${rows}</tbody>
         </table></div>`
       : '<p class="muted">No cheque or DD instruments in this period. Add instrument details on a payment, receipt or contra voucher.</p>'}`,
-    'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation unless the instrument was marked cleared, stopped or cancelled manually. Bank and party filters narrow the same register without changing status logic.',
+    'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation unless the instrument was marked cleared, stopped or cancelled manually. Bank, party and cheque-number range filters narrow the same register without changing status logic; manual status changes keep a short history.',
   );
 }
 

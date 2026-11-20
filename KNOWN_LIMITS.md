@@ -88,10 +88,10 @@ README. When a new limit is introduced, add it here in the same change.
 | KL-34 | Reconciliation does not post adjustments | Matched/unmatched is a separate layer. An unmatched line can post a Journal against a chosen adjustment ledger, after which the line is matched. There is no bulk adjustment wizard or automatic category suggestion. |
 | KL-35 | Statement balance validation is optional | An imported statement can carry opening and closing balances, and reconciliation shows whether opening plus movement equals closing. The fields are optional, and the check proves only that the file is internally complete, not that it matches the bank or the book balance. |
 | KL-36 | Manual instrument status is a flag | A cheque/DD can be marked cleared, stopped or cancelled manually, or restored to the automatic post-dated/due/reconciliation status. These are flags only: they do not post entries, alter the voucher, or notify a bank. |
-| KL-37 | One instrument per voucher | A voucher can carry one cheque/DD. There are no cheque books, multiple instruments, split payments by cheque, or instrument history. |
+| KL-37 | One instrument per voucher | A voucher can carry one cheque/DD. Manual cleared/stopped/cancelled status changes keep up to 20 history entries, but there are no cheque books, multiple instruments, split payments by cheque or full issued/instrument lifecycle history. |
 | KL-38 | Cheque print is a browser preview | Only cheque payments can be printed. Alignment depends on the browser and printer; there are no MICR, bank-specific stationery presets, overlay calibration or cheque-number pre-printing. |
 | KL-39 | Instrument printing is a browser preview | Cheques, DD payments and receipt instruments have print previews (cheque, DD advice, deposit slip). They are not bank-issued formats or validated receipts, alignment is printer-dependent, and contra instruments have no separate advice. |
-| KL-40 | Register scope | Cheque / DD register covers post-dated, due, cleared, stopped and cancelled instruments and can be filtered by bank or party text. There is no separate issued-cheque-book, instrument history or fixed party ledger picker. |
+| KL-40 | Register scope | Cheque / DD register covers post-dated, due, cleared, stopped and cancelled instruments and can be filtered by bank, party text or cheque-number range, so a cheque-book range can be reviewed. There is no separate cheque-book master, full instrument history or fixed party ledger picker. |
 
 ## Inventory and manufacturing
 

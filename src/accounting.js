@@ -751,6 +751,15 @@ export function amountInWords(value) {
 }
 
 /** Cheque/DD instruments with reconciliation-aware status. */
+function compareInstrumentNumber(a, b) {
+  const left = Number(String(a).trim());
+  const right = Number(String(b).trim());
+  if (Number.isFinite(left) && Number.isFinite(right) && String(a).trim() && String(b).trim()) {
+    return left - right;
+  }
+  return String(a).trim().localeCompare(String(b).trim(), undefined, { numeric: true });
+}
+
 export function postDatedRegister(company, filters = {}) {
   const { from, to } = dateRange(company, filters);
   const asOn = filters.asOn || new Date().toISOString().slice(0, 10);
@@ -792,12 +801,15 @@ export function postDatedRegister(company, filters = {}) {
         amount: round2(voucher.total),
         status,
         manualStatus,
+        statusHistory: Array.isArray(instrument.statusHistory) ? instrument.statusHistory : [],
         daysFromAsOn: gapDays,
       };
     })
     .filter((row) => !filters.status || filters.status === 'All' || row.status === filters.status)
     .filter((row) => !filters.bankLedgerId || row.bankLedgerId === filters.bankLedgerId)
     .filter((row) => !filters.party || row.party.toLowerCase().includes(String(filters.party).toLowerCase()))
+    .filter((row) => !filters.numberFrom || compareInstrumentNumber(row.number, filters.numberFrom) >= 0)
+    .filter((row) => !filters.numberTo || compareInstrumentNumber(row.number, filters.numberTo) <= 0)
     .sort(
       (a, b) =>
         b.instrumentDate.localeCompare(a.instrumentDate) ||

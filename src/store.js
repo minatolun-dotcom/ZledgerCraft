@@ -454,12 +454,24 @@ export function normalizeInstruments(company) {
     const status = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
       ? instrument.status
       : null;
+    const statusHistory = Array.isArray(instrument.statusHistory)
+      ? instrument.statusHistory
+          .filter(
+            (entry) =>
+              entry &&
+              ['Automatic', 'Cleared', 'Stopped', 'Cancelled'].includes(entry.status) &&
+              !Number.isNaN(Date.parse(String(entry.at ?? ''))),
+          )
+          .map((entry) => ({ status: entry.status, at: String(entry.at) }))
+          .slice(-20)
+      : [];
     voucher.instrument = {
       kind: instrument.kind,
       number,
       date,
       bankLedgerId,
       ...(status ? { status } : {}),
+      ...(statusHistory.length ? { statusHistory } : {}),
     };
   }
   return company;
@@ -471,6 +483,14 @@ export function setInstrumentStatus(company, voucherId, status = '') {
   if (!voucher?.instrument) return { ok: false, error: 'Cheque/DD details not found on that voucher.' };
   const allowed = ['', 'Cleared', 'Stopped', 'Cancelled'];
   if (!allowed.includes(status)) return { ok: false, error: 'Unknown cheque/DD status.' };
+  const next = status || 'Automatic';
+  const previous = voucher.instrument.status || 'Automatic';
+  if (next !== previous) {
+    voucher.instrument.statusHistory = [
+      ...(Array.isArray(voucher.instrument.statusHistory) ? voucher.instrument.statusHistory : []),
+      { status: next, at: new Date().toISOString() },
+    ].slice(-20);
+  }
   if (status) voucher.instrument.status = status;
   else delete voucher.instrument.status;
   voucher.updatedAt = new Date().toISOString();
@@ -4249,6 +4269,7 @@ export function updateVoucher(company, voucherId, input) {
   }
 
   const previousInstrumentStatus = voucher.instrument?.status;
+  const previousInstrumentHistory = voucher.instrument?.statusHistory;
   const settled = allocationsAgainst(company, voucherId);
   if (settled.size > 0) {
     if (type !== 'Sales' && type !== 'Purchase') {
@@ -4294,6 +4315,7 @@ export function updateVoucher(company, voucherId, input) {
   if (checked.instrument) {
     voucher.instrument = checked.instrument;
     if (previousInstrumentStatus) voucher.instrument.status = previousInstrumentStatus;
+    if (Array.isArray(previousInstrumentHistory)) voucher.instrument.statusHistory = previousInstrumentHistory;
   } else delete voucher.instrument;
   if (checked.gst) voucher.gst = checked.gst;
   else delete voucher.gst;

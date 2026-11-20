@@ -68,6 +68,9 @@ test('a payment stores valid cheque details', () => {
   assert.equal(postDatedRegister(company, { asOn: '2026-05-31', bankLedgerId: 'other' }).count, 0);
   assert.equal(postDatedRegister(company, { asOn: '2026-05-31', party: 'office' }).count, 1);
   assert.equal(postDatedRegister(company, { asOn: '2026-05-31', party: 'customer' }).count, 0);
+  assert.equal(postDatedRegister(company, { asOn: '2026-05-31', numberFrom: '100234', numberTo: '100234' }).count, 1);
+  assert.equal(postDatedRegister(company, { asOn: '2026-05-31', numberFrom: '100235' }).count, 0);
+  assert.equal(postDatedRegister(company, { asOn: '2026-05-31', numberTo: '100233' }).count, 0);
 });
 
 test('cheque details need a supported voucher, number, date and bank line', () => {
@@ -156,6 +159,9 @@ test('instruments can be marked cleared, stopped or cancelled manually', () => {
   const stopped = setInstrumentStatus(company, created.voucher.id, 'Stopped');
   assert.equal(stopped.ok, true, stopped.error);
   assert.equal(created.voucher.instrument.status, 'Stopped');
+  assert.deepEqual(created.voucher.instrument.statusHistory.map((entry) => entry.status), ['Stopped']);
+  assert.equal(setInstrumentStatus(company, created.voucher.id, 'Stopped').ok, true);
+  assert.equal(created.voucher.instrument.statusHistory.length, 1, 'setting the same status does not duplicate history');
   let report = postDatedRegister(company, { asOn: '2026-05-20' });
   assert.equal(report.rows[0].status, 'Stopped');
   assert.equal(report.rows[0].manualStatus, 'Stopped');
@@ -174,6 +180,7 @@ test('instruments can be marked cleared, stopped or cancelled manually', () => {
   });
   assert.equal(edited.ok, true, edited.error);
   assert.equal(edited.voucher.instrument.status, 'Stopped', 'editing the voucher keeps a manual status');
+  assert.equal(edited.voucher.instrument.statusHistory.length, 1, 'editing keeps the status history');
 
   assert.equal(setInstrumentStatus(company, created.voucher.id, 'Cancelled').ok, true);
   report = postDatedRegister(company, { asOn: '2026-05-20' });
@@ -186,7 +193,12 @@ test('instruments can be marked cleared, stopped or cancelled manually', () => {
   assert.equal(report.rows[0].manualStatus, '');
 
   assert.equal(setInstrumentStatus(company, created.voucher.id, 'Cleared').ok, true);
-  assert.equal(postDatedRegister(company, { asOn: '2026-05-20' }).rows[0].status, 'Cleared');
+  report = postDatedRegister(company, { asOn: '2026-05-20' });
+  assert.equal(report.rows[0].status, 'Cleared');
+  assert.deepEqual(
+    report.rows[0].statusHistory.map((entry) => entry.status),
+    ['Stopped', 'Cancelled', 'Automatic', 'Cleared'],
+  );
   assert.equal(setInstrumentStatus(company, created.voucher.id, 'Bounced').ok, false);
   assert.equal(setInstrumentStatus(company, 'missing', 'Stopped').ok, false);
 });
@@ -207,6 +219,10 @@ test('manual instrument statuses survive a backup round trip', () => {
   const restored = importState(exportState(state));
   assert.equal(restored.ok, true, restored.error);
   assert.equal(restored.state.companies[0].vouchers[0].instrument.status, 'Cancelled');
+  assert.deepEqual(
+    restored.state.companies[0].vouchers[0].instrument.statusHistory.map((entry) => entry.status),
+    ['Cancelled'],
+  );
 });
 
 test('clearing instrument details removes them on alteration', () => {

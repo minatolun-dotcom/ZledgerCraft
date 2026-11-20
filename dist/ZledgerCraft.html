@@ -1686,6 +1686,20 @@ kbd {
   width: 100%;
 }
 
+.order-row,
+.transfer-row {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.inline-pair {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.inline-pair input {
+  min-width: 0;
+}
+
 .inline-form {
   display: flex;
   flex-wrap: wrap;
@@ -5942,21 +5956,55 @@ function addOrder(company, input) {
   const deliveryDate = String(input.deliveryDate ?? '').trim();
   if (deliveryDate && !isValidIsoDate(deliveryDate)) return { ok: false, error: 'Enter a valid delivery date.' };
   if (deliveryDate && deliveryDate < date) return { ok: false, error: 'The delivery date cannot be before the order date.' };
-  const item = (company.stockItems ?? []).find((entry) => entry.id === input.stockItemId);
-  if (!item) return { ok: false, error: 'Choose a stock item for the order.' };
-  const qty = parseQty(input.qty);
-  if (qty === null || qty <= 0) return { ok: false, error: 'Order quantity must be greater than zero.' };
-  const rate = parseAmount(input.rate);
-  if (rate === null || rate < 0) return { ok: false, error: 'Order rate must be zero or more.' };
-  const godownId = String(input.godownId ?? '').trim() || defaultGodownId(company);
-  if (!(company.godowns ?? []).some((godown) => godown.id === godownId)) {
-    return { ok: false, error: 'Choose a godown for the order.' };
+  const requested = Array.isArray(input.items)
+    ? input.items
+    : [{
+        stockItemId: input.stockItemId,
+        qty: input.qty,
+        rate: input.rate,
+        godownId: input.godownId,
+        batchNo: input.batchNo,
+        expiryDate: input.expiryDate,
+      }];
+  if (!requested.length) return { ok: false, error: 'Add at least one item to the order.' };
+  if (requested.length > 50) return { ok: false, error: 'An order can carry at most 50 item lines.' };
+  const lines = [];
+  let total = 0;
+  for (const raw of requested) {
+    const item = (company.stockItems ?? []).find((entry) => entry.id === raw?.stockItemId);
+    if (!item) return { ok: false, error: 'Choose a stock item for every order line.' };
+    const qty = parseQty(raw?.qty);
+    if (qty === null || qty <= 0) {
+      return { ok: false, error: `Order quantity for "${item.name}" must be greater than zero.` };
+    }
+    const rate = parseAmount(raw?.rate);
+    if (rate === null || rate < 0) {
+      return { ok: false, error: `Order rate for "${item.name}" must be zero or more.` };
+    }
+    const godownId = String(raw?.godownId ?? '').trim() || defaultGodownId(company);
+    if (!(company.godowns ?? []).some((godown) => godown.id === godownId)) {
+      return { ok: false, error: `Choose a godown for "${item.name}".` };
+    }
+    const batchNo = String(raw?.batchNo ?? '').trim().slice(0, 30);
+    if (item.batchTracking && !batchNo) {
+      return { ok: false, error: `Batch is required for "${item.name}".` };
+    }
+    const expiryDate = String(raw?.expiryDate ?? '').trim();
+    if (expiryDate && !isValidIsoDate(expiryDate)) {
+      return { ok: false, error: `Enter a valid batch expiry date for "${item.name}".` };
+    }
+    const amount = round2(qty * rate);
+    total = round2(total + amount);
+    lines.push({
+      stockItemId: item.id,
+      qty,
+      rate,
+      amount,
+      godownId,
+      ...(item.batchTracking && batchNo ? { batchNo } : {}),
+      ...(item.batchTracking && expiryDate ? { expiryDate } : {}),
+    });
   }
-  const batchNo = String(input.batchNo ?? '').trim().slice(0, 30);
-  if (item.batchTracking && !batchNo) return { ok: false, error: `Batch is required for "${item.name}".` };
-  const expiryDate = String(input.expiryDate ?? '').trim();
-  if (expiryDate && !isValidIsoDate(expiryDate)) return { ok: false, error: 'Enter a valid batch expiry date.' };
-  const total = round2(qty * rate);
   if (total <= 0) return { ok: false, error: 'The order value must be greater than zero.' };
   company.orders = company.orders ?? [];
   company.counters = company.counters ?? {};
@@ -5970,15 +6018,7 @@ function addOrder(company, input) {
     date,
     partyLedgerId: party.id,
     deliveryDate: deliveryDate || null,
-    items: [{
-      stockItemId: item.id,
-      qty,
-      rate,
-      amount: total,
-      godownId,
-      ...(item.batchTracking && batchNo ? { batchNo } : {}),
-      ...(item.batchTracking && expiryDate ? { expiryDate } : {}),
-    }],
+    items: lines,
     total,
     status: 'Open',
     narration: String(input.narration ?? '').trim().slice(0, 400),
@@ -14860,9 +14900,19 @@ function ordersScreen() {
 
   const rows = orders
     .map((order) => {
-      const line = order.items?.[0];
-      const item = items.get(line?.stockItemId);
-      const unit = units.get(item?.unitId)?.symbol ?? '';
+      const lines = order.items ?? [];
+      const itemCell = lines
+        .map((line) => {
+          const item = items.get(line.stockItemId);
+          return `${esc(item?.name ?? 'Unknown item')}${line.batchNo ? `<div class="muted small">Batch ${esc(line.batchNo)}</div>` : ''}`;
+        })
+        .join('<br>');
+      const qtyCell = lines
+        .map((line) => {
+          const unit = units.get(items.get(line.stockItemId)?.unitId)?.symbol ?? '';
+          return `${fmtQty(line.qty)} ${esc(unit)}`.trim();
+        })
+        .join('<br>');
       const party = parties.get(order.partyLedgerId);
       const prefix = order.type === 'Sales' ? 'SO' : 'PO';
       const actions = [
@@ -14885,8 +14935,8 @@ function ordersScreen() {
         <td><strong>${prefix}-${order.no}</strong><div class="muted small">${esc(dateLabel(order.date))}</div></td>
         <td>${esc(party?.name ?? 'Unknown party')}<div class="muted small">${order.type}</div></td>
         <td>${order.deliveryDate ? esc(dateLabel(order.deliveryDate)) : '<span class="muted">—</span>'}</td>
-        <td>${esc(item?.name ?? 'Unknown item')}${line?.batchNo ? `<div class="muted small">Batch ${esc(line.batchNo)}</div>` : ''}</td>
-        <td class="num">${fmtQty(line?.qty ?? 0)} ${esc(unit)}</td>
+        <td>${lines.length ? itemCell : '<span class="muted">No items</span>'}</td>
+        <td class="num">${qtyCell}</td>
         <td class="num">${money(order.total)}</td>
         <td><span class="badge${tone ? ` ${tone}` : ''}">${esc(order.status)}</span></td>
         <td class="row-actions">${actions}</td>
@@ -14922,18 +14972,33 @@ function ordersScreen() {
       <label class="field"><span>Order date</span><input name="date" type="date" value="${esc(to <= todayIso() ? to : todayIso())}" min="${esc(booksStart(active))}" required></label>
       <label class="field"><span>Party</span><select name="partyLedgerId">${allPartyLedgerOptions(active, '')}</select></label>
       <label class="field"><span>Expected delivery</span><input name="deliveryDate" type="date"></label>
-      <label class="field"><span>Item</span><select name="stockItemId">${stockItemSelectOptions(active, '')}</select></label>
-      <label class="field"><span>Godown</span><select name="godownId">${godownSelectOptions(active, '')}</select></label>
-      <label class="field"><span>Batch (if tracked)</span><input name="batchNo" maxlength="30" placeholder="e.g. LOT-24"></label>
-      <label class="field"><span>Expiry (if tracked)</span><input name="expiryDate" type="date"></label>
-      <label class="field"><span>Quantity</span><input name="qty" inputmode="decimal" placeholder="0" required></label>
-      <label class="field"><span>Rate</span><input name="rate" inputmode="decimal" placeholder="0.00" required></label>
+      <div class="bom-components">
+        <span class="muted small">Order lines</span>
+        <div id="order-lines">${orderItemRow(active)}</div>
+        <button class="btn small" type="button" data-action="add-order-line">Add item</button>
+      </div>
       <label class="field"><span>Narration</span><input name="narration" maxlength="400" placeholder="Optional note"></label>
       <div class="field form-actions"><button class="btn primary" type="submit">Record order</button></div>
       <p id="order-error" class="form-error" role="alert"></p>
     </form>`,
-    'One item per order for now; create another order for additional lines.',
+    'Each order can carry several item lines. Create voucher copies them all and closes the order.',
   )}`;
+}
+
+function orderItemRow(active) {
+  return `<div class="bom-row order-row">
+    <label class="field"><span>Item</span><select name="orderItemId">${stockItemSelectOptions(active, '')}</select></label>
+    <label class="field"><span>Godown</span><select name="orderGodownId">${godownSelectOptions(active, '')}</select></label>
+    <label class="field"><span>Batch / expiry</span>
+      <span class="inline-pair">
+        <input name="orderBatchNo" maxlength="30" placeholder="Batch" aria-label="Batch">
+        <input name="orderExpiryDate" type="date" aria-label="Expiry">
+      </span>
+    </label>
+    <label class="field"><span>Quantity</span><input name="orderQty" inputmode="decimal" placeholder="0" aria-label="Order quantity"></label>
+    <label class="field"><span>Rate</span><input name="orderRate" inputmode="decimal" placeholder="0.00" aria-label="Order rate"></label>
+    <button class="btn small ghost" type="button" data-action="remove-order-line">Remove</button>
+  </div>`;
 }
 
 function stockTransferItemRow(active) {
@@ -19886,17 +19951,20 @@ async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
+    const items = [...form.querySelectorAll('#order-lines .order-row')].map((row) => ({
+      stockItemId: row.querySelector('[name="orderItemId"]')?.value ?? '',
+      godownId: row.querySelector('[name="orderGodownId"]')?.value ?? '',
+      batchNo: row.querySelector('[name="orderBatchNo"]')?.value ?? '',
+      expiryDate: row.querySelector('[name="orderExpiryDate"]')?.value ?? '',
+      qty: row.querySelector('[name="orderQty"]')?.value ?? '',
+      rate: row.querySelector('[name="orderRate"]')?.value ?? '',
+    }));
     const result = addOrder(active, {
       type: data.get('type'),
       date: data.get('date'),
       partyLedgerId: data.get('partyLedgerId'),
       deliveryDate: data.get('deliveryDate'),
-      stockItemId: data.get('stockItemId'),
-      godownId: data.get('godownId'),
-      batchNo: data.get('batchNo'),
-      expiryDate: data.get('expiryDate'),
-      qty: data.get('qty'),
-      rate: data.get('rate'),
+      items,
       narration: data.get('narration'),
     });
     if (!result.ok) {
@@ -22208,6 +22276,15 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'add-order-line': {
+      const container = document.getElementById('order-lines');
+      const active = company();
+      if (container && active) container.insertAdjacentHTML('beforeend', orderItemRow(active));
+      break;
+    }
+    case 'remove-order-line':
+      trigger.closest('.order-row')?.remove();
+      break;
     case 'add-stock-transfer-line': {
       const container = document.getElementById('stock-transfer-lines');
       const active = company();

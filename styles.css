@@ -1678,6 +1678,20 @@ kbd {
   width: 100%;
 }
 
+.order-row,
+.transfer-row {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.inline-pair {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.inline-pair input {
+  min-width: 0;
+}
+
 .inline-form {
   display: flex;
   flex-wrap: wrap;

@@ -659,6 +659,51 @@ test('orders record sales and purchase commitments without moving stock', () => 
   assert.equal(deleteOrder(company, purchase.order.id).ok, true);
 });
 
+test('an order can carry several item lines and validates each one', () => {
+  const { company, item } = inventoryFixture();
+  const customer = addLedger(company, {
+    name: 'Multi Line Customer',
+    groupId: company.groups.find((group) => group.key === 'sundryDebtors').id,
+    opening: 0,
+  }).ledger;
+  const unit = company.units.find((entry) => entry.symbol === 'Nos');
+  const sock = addStockItem(company, {
+    name: 'Order Sock',
+    stockGroupId: company.stockGroups[0].id,
+    unitId: unit.id,
+    openingQty: 5,
+    openingRate: 40,
+  }).item;
+
+  const bad = addOrder(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    partyLedgerId: customer.id,
+    items: [
+      { stockItemId: item.id, qty: 1, rate: 100 },
+      { stockItemId: sock.id, qty: 0, rate: 40 },
+    ],
+  });
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /Order Sock/);
+  assert.equal((company.orders ?? []).length, 0, 'a bad line writes nothing');
+
+  const order = addOrder(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    partyLedgerId: customer.id,
+    items: [
+      { stockItemId: item.id, qty: 2, rate: 100 },
+      { stockItemId: sock.id, qty: 3, rate: 40 },
+    ],
+  });
+  assert.equal(order.ok, true, order.error);
+  assert.equal(order.order.items.length, 2);
+  assert.equal(order.order.items[0].amount, 200);
+  assert.equal(order.order.items[1].amount, 120);
+  assert.equal(order.order.total, 320);
+});
+
 test('a voucher created from an order links it, closes it and reopens it on delete', () => {
   const { company, item } = inventoryFixture();
   const customer = addLedger(company, {

@@ -3613,21 +3613,55 @@ export function addOrder(company, input) {
   const deliveryDate = String(input.deliveryDate ?? '').trim();
   if (deliveryDate && !isValidIsoDate(deliveryDate)) return { ok: false, error: 'Enter a valid delivery date.' };
   if (deliveryDate && deliveryDate < date) return { ok: false, error: 'The delivery date cannot be before the order date.' };
-  const item = (company.stockItems ?? []).find((entry) => entry.id === input.stockItemId);
-  if (!item) return { ok: false, error: 'Choose a stock item for the order.' };
-  const qty = parseQty(input.qty);
-  if (qty === null || qty <= 0) return { ok: false, error: 'Order quantity must be greater than zero.' };
-  const rate = parseAmount(input.rate);
-  if (rate === null || rate < 0) return { ok: false, error: 'Order rate must be zero or more.' };
-  const godownId = String(input.godownId ?? '').trim() || defaultGodownId(company);
-  if (!(company.godowns ?? []).some((godown) => godown.id === godownId)) {
-    return { ok: false, error: 'Choose a godown for the order.' };
+  const requested = Array.isArray(input.items)
+    ? input.items
+    : [{
+        stockItemId: input.stockItemId,
+        qty: input.qty,
+        rate: input.rate,
+        godownId: input.godownId,
+        batchNo: input.batchNo,
+        expiryDate: input.expiryDate,
+      }];
+  if (!requested.length) return { ok: false, error: 'Add at least one item to the order.' };
+  if (requested.length > 50) return { ok: false, error: 'An order can carry at most 50 item lines.' };
+  const lines = [];
+  let total = 0;
+  for (const raw of requested) {
+    const item = (company.stockItems ?? []).find((entry) => entry.id === raw?.stockItemId);
+    if (!item) return { ok: false, error: 'Choose a stock item for every order line.' };
+    const qty = parseQty(raw?.qty);
+    if (qty === null || qty <= 0) {
+      return { ok: false, error: `Order quantity for "${item.name}" must be greater than zero.` };
+    }
+    const rate = parseAmount(raw?.rate);
+    if (rate === null || rate < 0) {
+      return { ok: false, error: `Order rate for "${item.name}" must be zero or more.` };
+    }
+    const godownId = String(raw?.godownId ?? '').trim() || defaultGodownId(company);
+    if (!(company.godowns ?? []).some((godown) => godown.id === godownId)) {
+      return { ok: false, error: `Choose a godown for "${item.name}".` };
+    }
+    const batchNo = String(raw?.batchNo ?? '').trim().slice(0, 30);
+    if (item.batchTracking && !batchNo) {
+      return { ok: false, error: `Batch is required for "${item.name}".` };
+    }
+    const expiryDate = String(raw?.expiryDate ?? '').trim();
+    if (expiryDate && !isValidIsoDate(expiryDate)) {
+      return { ok: false, error: `Enter a valid batch expiry date for "${item.name}".` };
+    }
+    const amount = round2(qty * rate);
+    total = round2(total + amount);
+    lines.push({
+      stockItemId: item.id,
+      qty,
+      rate,
+      amount,
+      godownId,
+      ...(item.batchTracking && batchNo ? { batchNo } : {}),
+      ...(item.batchTracking && expiryDate ? { expiryDate } : {}),
+    });
   }
-  const batchNo = String(input.batchNo ?? '').trim().slice(0, 30);
-  if (item.batchTracking && !batchNo) return { ok: false, error: `Batch is required for "${item.name}".` };
-  const expiryDate = String(input.expiryDate ?? '').trim();
-  if (expiryDate && !isValidIsoDate(expiryDate)) return { ok: false, error: 'Enter a valid batch expiry date.' };
-  const total = round2(qty * rate);
   if (total <= 0) return { ok: false, error: 'The order value must be greater than zero.' };
   company.orders = company.orders ?? [];
   company.counters = company.counters ?? {};
@@ -3641,15 +3675,7 @@ export function addOrder(company, input) {
     date,
     partyLedgerId: party.id,
     deliveryDate: deliveryDate || null,
-    items: [{
-      stockItemId: item.id,
-      qty,
-      rate,
-      amount: total,
-      godownId,
-      ...(item.batchTracking && batchNo ? { batchNo } : {}),
-      ...(item.batchTracking && expiryDate ? { expiryDate } : {}),
-    }],
+    items: lines,
     total,
     status: 'Open',
     narration: String(input.narration ?? '').trim().slice(0, 400),

@@ -344,6 +344,18 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 23: multi-line orders
+
+- Sales and purchase orders now carry up to 50 item lines instead of one, each
+  with its own item, godown, batch, expiry, quantity and rate. The order total
+  is the sum of the line amounts.
+- Every line is validated before anything is written, so a missing item, zero
+  quantity, invalid rate, godown, batch or expiry rejects the whole order.
+- The order form has add/remove line rows, the register lists every item and
+  quantity, and Create voucher copies all lines into the prefilled voucher.
+- Verification: line validation, line amounts/total and a single-item
+  compatibility test; 263 tests (262 pass, 1 skipped) and a 895.4 kB build pass.
+
 ### 2026-11-20 — Phase 22: order-to-voucher linking
 
 - A voucher created from an order now stores `orderId`, closes the order when

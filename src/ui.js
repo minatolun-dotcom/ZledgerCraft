@@ -208,6 +208,7 @@ import {
 } from './ui-reports.js';
 import {
   ordersScreen,
+  orderItemRow,
   bomComponentRow,
   stockTransferItemRow,
   inventoryScreen,
@@ -2658,17 +2659,20 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
+    const items = [...form.querySelectorAll('#order-lines .order-row')].map((row) => ({
+      stockItemId: row.querySelector('[name="orderItemId"]')?.value ?? '',
+      godownId: row.querySelector('[name="orderGodownId"]')?.value ?? '',
+      batchNo: row.querySelector('[name="orderBatchNo"]')?.value ?? '',
+      expiryDate: row.querySelector('[name="orderExpiryDate"]')?.value ?? '',
+      qty: row.querySelector('[name="orderQty"]')?.value ?? '',
+      rate: row.querySelector('[name="orderRate"]')?.value ?? '',
+    }));
     const result = addOrder(active, {
       type: data.get('type'),
       date: data.get('date'),
       partyLedgerId: data.get('partyLedgerId'),
       deliveryDate: data.get('deliveryDate'),
-      stockItemId: data.get('stockItemId'),
-      godownId: data.get('godownId'),
-      batchNo: data.get('batchNo'),
-      expiryDate: data.get('expiryDate'),
-      qty: data.get('qty'),
-      rate: data.get('rate'),
+      items,
       narration: data.get('narration'),
     });
     if (!result.ok) {
@@ -4980,6 +4984,15 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'add-order-line': {
+      const container = document.getElementById('order-lines');
+      const active = company();
+      if (container && active) container.insertAdjacentHTML('beforeend', orderItemRow(active));
+      break;
+    }
+    case 'remove-order-line':
+      trigger.closest('.order-row')?.remove();
+      break;
     case 'add-stock-transfer-line': {
       const container = document.getElementById('stock-transfer-lines');
       const active = company();

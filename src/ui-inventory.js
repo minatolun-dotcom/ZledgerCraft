@@ -48,9 +48,19 @@ export function ordersScreen() {
 
   const rows = orders
     .map((order) => {
-      const line = order.items?.[0];
-      const item = items.get(line?.stockItemId);
-      const unit = units.get(item?.unitId)?.symbol ?? '';
+      const lines = order.items ?? [];
+      const itemCell = lines
+        .map((line) => {
+          const item = items.get(line.stockItemId);
+          return `${esc(item?.name ?? 'Unknown item')}${line.batchNo ? `<div class="muted small">Batch ${esc(line.batchNo)}</div>` : ''}`;
+        })
+        .join('<br>');
+      const qtyCell = lines
+        .map((line) => {
+          const unit = units.get(items.get(line.stockItemId)?.unitId)?.symbol ?? '';
+          return `${fmtQty(line.qty)} ${esc(unit)}`.trim();
+        })
+        .join('<br>');
       const party = parties.get(order.partyLedgerId);
       const prefix = order.type === 'Sales' ? 'SO' : 'PO';
       const actions = [
@@ -73,8 +83,8 @@ export function ordersScreen() {
         <td><strong>${prefix}-${order.no}</strong><div class="muted small">${esc(dateLabel(order.date))}</div></td>
         <td>${esc(party?.name ?? 'Unknown party')}<div class="muted small">${order.type}</div></td>
         <td>${order.deliveryDate ? esc(dateLabel(order.deliveryDate)) : '<span class="muted">—</span>'}</td>
-        <td>${esc(item?.name ?? 'Unknown item')}${line?.batchNo ? `<div class="muted small">Batch ${esc(line.batchNo)}</div>` : ''}</td>
-        <td class="num">${fmtQty(line?.qty ?? 0)} ${esc(unit)}</td>
+        <td>${lines.length ? itemCell : '<span class="muted">No items</span>'}</td>
+        <td class="num">${qtyCell}</td>
         <td class="num">${money(order.total)}</td>
         <td><span class="badge${tone ? ` ${tone}` : ''}">${esc(order.status)}</span></td>
         <td class="row-actions">${actions}</td>
@@ -110,18 +120,33 @@ export function ordersScreen() {
       <label class="field"><span>Order date</span><input name="date" type="date" value="${esc(to <= todayIso() ? to : todayIso())}" min="${esc(booksStart(active))}" required></label>
       <label class="field"><span>Party</span><select name="partyLedgerId">${allPartyLedgerOptions(active, '')}</select></label>
       <label class="field"><span>Expected delivery</span><input name="deliveryDate" type="date"></label>
-      <label class="field"><span>Item</span><select name="stockItemId">${stockItemSelectOptions(active, '')}</select></label>
-      <label class="field"><span>Godown</span><select name="godownId">${godownSelectOptions(active, '')}</select></label>
-      <label class="field"><span>Batch (if tracked)</span><input name="batchNo" maxlength="30" placeholder="e.g. LOT-24"></label>
-      <label class="field"><span>Expiry (if tracked)</span><input name="expiryDate" type="date"></label>
-      <label class="field"><span>Quantity</span><input name="qty" inputmode="decimal" placeholder="0" required></label>
-      <label class="field"><span>Rate</span><input name="rate" inputmode="decimal" placeholder="0.00" required></label>
+      <div class="bom-components">
+        <span class="muted small">Order lines</span>
+        <div id="order-lines">${orderItemRow(active)}</div>
+        <button class="btn small" type="button" data-action="add-order-line">Add item</button>
+      </div>
       <label class="field"><span>Narration</span><input name="narration" maxlength="400" placeholder="Optional note"></label>
       <div class="field form-actions"><button class="btn primary" type="submit">Record order</button></div>
       <p id="order-error" class="form-error" role="alert"></p>
     </form>`,
-    'One item per order for now; create another order for additional lines.',
+    'Each order can carry several item lines. Create voucher copies them all and closes the order.',
   )}`;
+}
+
+export function orderItemRow(active) {
+  return `<div class="bom-row order-row">
+    <label class="field"><span>Item</span><select name="orderItemId">${stockItemSelectOptions(active, '')}</select></label>
+    <label class="field"><span>Godown</span><select name="orderGodownId">${godownSelectOptions(active, '')}</select></label>
+    <label class="field"><span>Batch / expiry</span>
+      <span class="inline-pair">
+        <input name="orderBatchNo" maxlength="30" placeholder="Batch" aria-label="Batch">
+        <input name="orderExpiryDate" type="date" aria-label="Expiry">
+      </span>
+    </label>
+    <label class="field"><span>Quantity</span><input name="orderQty" inputmode="decimal" placeholder="0" aria-label="Order quantity"></label>
+    <label class="field"><span>Rate</span><input name="orderRate" inputmode="decimal" placeholder="0.00" aria-label="Order rate"></label>
+    <button class="btn small ghost" type="button" data-action="remove-order-line">Remove</button>
+  </div>`;
 }
 
 export function stockTransferItemRow(active) {

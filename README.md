@@ -405,11 +405,11 @@ disabled.
   weighted-average cost; Godown balances with transfer-aware quantities; Batch
   balances with expiry and value at item average cost; and a per-item movement
   report with running balances.
-- Sales and purchase orders with party, delivery date, item, godown, batch,
-  quantity, rate, status (Open/Closed/Cancelled), filters and a Create voucher
-  action that prefills the matching invoice, links it to the order and closes
-  it. Deleting that voucher reopens the order. Orders do not post to the ledger
-  or move stock.
+- Sales and purchase orders with party, delivery date, up to 50 item lines
+  (each with godown, batch, expiry, quantity and rate), status
+  (Open/Closed/Cancelled), filters and a Create voucher action that prefills the
+  matching invoice, links it to the order and closes it. Deleting that voucher
+  reopens the order. Orders do not post to the ledger or move stock.
 - BOM recipes with a finished item, output quantity and up to twenty component
   items. Production consumes components in proportion to the output quantity
   from a chosen godown and brings finished goods into a chosen godown, with an

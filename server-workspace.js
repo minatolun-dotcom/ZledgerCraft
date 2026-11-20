@@ -1,13 +1,13 @@
 // ZledgerCraft - relational workspace storage.
-// Companies, account groups, ledgers, vouchers and stock items are canonical
-// rows. Every other company collection is stored as one ordered record row with
-// searchable hints, while the complete record JSON preserves fields the engine
-// has not promoted to columns yet. Expiring leases provide advisory-but-enforced
-// record ownership.
+// Companies, account groups, financial years, ledgers, vouchers and stock items
+// are canonical rows. Every other company collection is stored as one ordered
+// record row with searchable hints, while the complete record JSON preserves
+// fields the engine has not promoted to columns yet. Expiring leases provide
+// advisory-but-enforced record ownership.
 import { createHash, randomBytes } from 'node:crypto';
 import { deepEqual, mergeWorkspaceStates, repairVoucherNumbers } from './server-merge.js';
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const HISTORY_LIMIT = 20;
 // Header fields that are useful as typed columns. The complete JSON is still
 // kept for compatibility, but these values are removed from it when present.
@@ -34,6 +34,11 @@ const PROMOTED_GROUP_FIELDS = [
   ['nature', 'nature'],
   ['group_key', 'key'],
 ];
+const PROMOTED_YEAR_FIELDS = [
+  ['start_date', 'start'],
+  ['end_date', 'end'],
+  ['closed', 'closed'],
+];
 const PROMOTED_COMPANY_COLUMNS = [['created_at', 'TEXT']];
 const PROMOTED_STOCK_COLUMNS = [['created_at', 'TEXT']];
 const PROMOTED_LEDGER_COLUMNS = [
@@ -51,11 +56,10 @@ const PROMOTED_LEDGER_COLUMNS = [
 const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 const MAX_LEASE_MS = 10 * 60 * 1000;
 
-// Top-level company arrays stored in company_records. Account groups and stock
-// items have their own tables because they are queried by parent, group, unit
-// and HSN independently.
+// Top-level company arrays stored in company_records. Account groups, financial
+// years and stock items have their own tables because they are queried by
+// parent, dates, group, unit and HSN independently.
 const RECORD_COLLECTIONS = [
-  'years',
   'costCategories',
   'costCentres',
   'budgets',
@@ -147,6 +151,23 @@ function groupRows(rows) {
   return byCompany;
 }
 
+function yearRows(rows) {
+  const byCompany = new Map();
+  for (const row of rows) {
+    if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
+    const data = JSON.parse(row.data);
+    byCompany.get(row.company_id).push({
+      ...data,
+      id: row.id,
+      start: row.start_date ?? data.start,
+      end: row.end_date ?? data.end,
+      closed:
+        row.closed === null || row.closed === undefined ? Boolean(data.closed) : Boolean(row.closed),
+    });
+  }
+  return byCompany;
+}
+
 function stockRows(rows) {
   const byCompany = new Map();
   for (const row of rows) {
@@ -193,6 +214,7 @@ function stateFromRows({
   vouchers,
   lines,
   groups = [],
+  years = [],
   records = [],
   stockItems = [],
 }) {
@@ -208,6 +230,7 @@ function stateFromRows({
   const vouchersByCompany = new Map();
   const linesByVoucher = new Map();
   const groupsByCompany = groupRows(groups);
+  const yearsByCompany = yearRows(years);
   const recordsByCompany = collectionRows(records);
   const stockByCompany = stockRows(stockItems);
 
@@ -275,6 +298,8 @@ function stateFromRows({
     }
     const storedGroups = groupsByCompany.get(row.id);
     if (storedGroups) company.groups = storedGroups;
+    const storedYears = yearsByCompany.get(row.id);
+    if (storedYears) company.years = storedYears;
     const storedStockItems = stockByCompany.get(row.id);
     if (storedStockItems) company.stockItems = storedStockItems;
     company.ledgers = ledgersByCompany.get(row.id) ?? [];
@@ -311,6 +336,7 @@ export function readWorkspaceSnapshot(db) {
       log: select('SELECT data FROM workspace_log ORDER BY position'),
       companies: select('SELECT * FROM companies ORDER BY position'),
       groups: optionalRows(db, 'SELECT * FROM account_groups ORDER BY company_id, position'),
+      years: optionalRows(db, 'SELECT * FROM financial_years ORDER BY company_id, position'),
       ledgers: select('SELECT * FROM ledgers ORDER BY position'),
       vouchers: select('SELECT * FROM vouchers ORDER BY position'),
       lines: select('SELECT * FROM voucher_lines ORDER BY position'),
@@ -378,6 +404,16 @@ export class WorkspaceStore {
         parent_id TEXT,
         nature TEXT,
         group_key TEXT,
+        data TEXT NOT NULL,
+        PRIMARY KEY (company_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS financial_years (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        start_date TEXT,
+        end_date TEXT,
+        closed INTEGER NOT NULL DEFAULT 0,
         data TEXT NOT NULL,
         PRIMARY KEY (company_id, id)
       );
@@ -459,6 +495,8 @@ export class WorkspaceStore {
       );
       CREATE INDEX IF NOT EXISTS account_groups_company ON account_groups(company_id, position);
       CREATE INDEX IF NOT EXISTS account_groups_parent ON account_groups(company_id, parent_id);
+      CREATE INDEX IF NOT EXISTS financial_years_company ON financial_years(company_id, position);
+      CREATE INDEX IF NOT EXISTS financial_years_dates ON financial_years(company_id, start_date, end_date);
       CREATE INDEX IF NOT EXISTS ledgers_company ON ledgers(company_id, position);
       CREATE INDEX IF NOT EXISTS vouchers_company ON vouchers(company_id, position);
       CREATE INDEX IF NOT EXISTS voucher_lines_voucher ON voucher_lines(voucher_id, position);
@@ -486,6 +524,7 @@ export class WorkspaceStore {
     this.log = this.db.prepare('SELECT data FROM workspace_log ORDER BY position');
     this.companies = this.db.prepare('SELECT * FROM companies ORDER BY position');
     this.groups = this.db.prepare('SELECT * FROM account_groups ORDER BY company_id, position');
+    this.years = this.db.prepare('SELECT * FROM financial_years ORDER BY company_id, position');
     this.ledgers = this.db.prepare('SELECT * FROM ledgers ORDER BY position');
     this.vouchers = this.db.prepare('SELECT * FROM vouchers ORDER BY position');
     this.lines = this.db.prepare('SELECT * FROM voucher_lines ORDER BY position');
@@ -513,6 +552,11 @@ export class WorkspaceStore {
       INSERT INTO account_groups
         (company_id, id, position, name, parent_id, nature, group_key, data)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.insertYear = this.db.prepare(`
+      INSERT INTO financial_years
+        (company_id, id, position, start_date, end_date, closed, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     this.insertLedger = this.db.prepare(`
       INSERT INTO ledgers
@@ -545,6 +589,7 @@ export class WorkspaceStore {
     this.clearRevisions = this.db.prepare('DELETE FROM workspace_revisions');
     this.clearCompanies = this.db.prepare('DELETE FROM companies');
     this.clearGroups = this.db.prepare('DELETE FROM account_groups');
+    this.clearYears = this.db.prepare('DELETE FROM financial_years');
     this.clearRecords = this.db.prepare('DELETE FROM company_records');
     this.clearStockItems = this.db.prepare('DELETE FROM stock_items');
     this.clearUsers = this.db.prepare('DELETE FROM workspace_users');
@@ -612,6 +657,7 @@ export class WorkspaceStore {
       log: this.log.all(),
       companies: this.companies.all(),
       groups: this.groups.all(),
+      years: this.years.all(),
       ledgers: this.ledgers.all(),
       vouchers: this.vouchers.all(),
       lines: this.lines.all(),
@@ -706,6 +752,7 @@ export class WorkspaceStore {
       this.clearRecords.run();
       this.clearStockItems.run();
       this.clearGroups.run();
+      this.clearYears.run();
       this.clearCompanies.run();
       this.clearUsers.run();
       this.clearLog.run();
@@ -727,6 +774,7 @@ export class WorkspaceStore {
       this.clearRecords.run();
       this.clearStockItems.run();
       this.clearGroups.run();
+      this.clearYears.run();
       this.clearCompanies.run();
       this.clearUsers.run();
       this.clearLog.run();
@@ -763,6 +811,8 @@ export class WorkspaceStore {
         }
         const hasGroups = Array.isArray(company.groups) && company.groups.length > 0;
         if (hasGroups) delete companyData.groups;
+        const hasYears = Array.isArray(company.years) && company.years.length > 0;
+        if (hasYears) delete companyData.years;
         const hasStockItems = Array.isArray(company.stockItems) && company.stockItems.length > 0;
         if (hasStockItems) delete companyData.stockItems;
         this.insertCompany.run(
@@ -789,6 +839,22 @@ export class WorkspaceStore {
               text(group.nature) || null,
               text(group.key) || null,
               JSON.stringify(groupData),
+            );
+          }
+        }
+        if (hasYears) {
+          for (const [position, year] of company.years.entries()) {
+            const yearData = { ...year };
+            delete yearData.id;
+            for (const [, field] of PROMOTED_YEAR_FIELDS) delete yearData[field];
+            this.insertYear.run(
+              text(company.id),
+              text(year.id) || `years-${position}`,
+              position,
+              text(year.start) || null,
+              text(year.end) || null,
+              year.closed ? 1 : 0,
+              JSON.stringify(yearData),
             );
           }
         }

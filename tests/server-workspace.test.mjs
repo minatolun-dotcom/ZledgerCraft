@@ -148,6 +148,19 @@ test('normalized storage migrates the legacy workspace and round-trips every cor
   assert.equal(group.name, 'Sundry Debtors');
   assert.equal(group.parent_id, 'assets');
   assert.equal(JSON.parse(group.data).name, undefined);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM financial_years').get().count, 2);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'years'").get().count,
+    0,
+  );
+  const year = db.prepare('SELECT * FROM financial_years WHERE id = ?').get('year1');
+  assert.equal(year.start_date, '2026-04-01');
+  assert.equal(year.end_date, '2027-03-31');
+  assert.equal(year.closed, 0);
+  const yearJson = JSON.parse(year.data);
+  for (const field of ['id', 'start', 'end', 'closed']) {
+    assert.equal(yearJson[field], undefined, `${field} should not remain in financial year JSON`);
+  }
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stock_items').get().count, 1);
   const stockItem = db.prepare('SELECT * FROM stock_items WHERE id = ?').get('item1');
   assert.equal(stockItem.name, 'Widget');
@@ -301,15 +314,17 @@ test('schema version 1 workspaces migrate their JSON collections into rows', () 
   }
   db.prepare('DELETE FROM company_records').run();
   db.prepare('DELETE FROM account_groups').run();
+  db.prepare('DELETE FROM financial_years').run();
   db.prepare('DELETE FROM stock_items').run();
   db.prepare('UPDATE workspace_meta SET schema_version = 1').run();
 
   const upgraded = new WorkspaceStore(db);
   assert.equal(
     db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version,
-    5,
+    6,
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM account_groups').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM financial_years').get().count, 2);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stock_items').get().count, 1);
   assert.deepEqual(upgraded.read().state, expected);
 });
@@ -331,7 +346,7 @@ test('schema version 2 promotes ledger JSON fields into typed columns', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 2').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 5);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 6);
   const row = db.prepare('SELECT * FROM ledgers WHERE id = ?').get('led1');
   assert.equal(row.opening, 0);
   assert.equal(row.opening_type, 'Dr');
@@ -358,7 +373,7 @@ test('schema version 3 promotes company and stock item JSON fields into typed co
   db.prepare('UPDATE workspace_meta SET schema_version = 3').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 5);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 6);
   const company = db.prepare('SELECT * FROM companies WHERE id = ?').get('co1');
   assert.equal(company.created_at, '2026-03-01T00:00:00.000Z');
   assert.equal(JSON.parse(company.data).name, undefined);
@@ -392,7 +407,7 @@ test('schema version 4 moves account groups out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 4').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 5);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 6);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'groups'").get().count,
     0,
@@ -409,7 +424,38 @@ test('schema version 4 moves account groups out of collection rows', () => {
   assert.deepEqual(upgraded.read().state, expected);
 });
 
-test('normalized writes keep promoted company, group, stock item and ledger columns in sync', () => {
+test('schema version 5 moves financial years out of collection rows', () => {
+  const original = fixture();
+  const { db, store } = legacyStore(original);
+  store.migrateLegacy();
+  const expected = store.read().state;
+  const year = original.companies[0].years[0];
+  db.prepare("DELETE FROM financial_years WHERE company_id = 'co1'").run();
+  db.prepare(
+    `INSERT INTO company_records
+       (company_id, collection, id, position, name, parent_id, reference_id, amount, data)
+     VALUES (?, 'years', ?, 0, NULL, NULL, NULL, NULL, ?)`,
+  ).run('co1', year.id, JSON.stringify(year));
+  db.prepare('UPDATE workspace_meta SET schema_version = 5').run();
+
+  const upgraded = new WorkspaceStore(db);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 6);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'years'").get().count,
+    0,
+  );
+  const row = db.prepare('SELECT * FROM financial_years WHERE id = ?').get('year1');
+  assert.equal(row.start_date, '2026-04-01');
+  assert.equal(row.end_date, '2027-03-31');
+  assert.equal(row.closed, 0);
+  const data = JSON.parse(row.data);
+  for (const field of ['id', 'start', 'end', 'closed']) {
+    assert.equal(data[field], undefined, `${field} should not remain in financial year JSON`);
+  }
+  assert.deepEqual(upgraded.read().state, expected);
+});
+
+test('normalized writes keep promoted company, group, year, stock item and ledger columns in sync', () => {
   const { db, store } = legacyStore(fixture());
   store.migrateLegacy();
   const before = store.read();
@@ -423,6 +469,7 @@ test('normalized writes keep promoted company, group, stock item and ledger colu
     nature: 'assets',
     key: 'tradeDebtors',
   });
+  Object.assign(next.companies[0].years[0], { closed: true });
   Object.assign(next.companies[0].stockItems[0], {
     name: 'Gadget',
     hsn: '5678',
@@ -449,6 +496,11 @@ test('normalized writes keep promoted company, group, stock item and ledger colu
   for (const field of ['id', 'name', 'fyStart', 'fyEnd', 'yearId', 'createdAt']) {
     assert.equal(companyJson[field], undefined, `${field} should not remain in company JSON`);
   }
+  const year = db.prepare('SELECT * FROM financial_years WHERE id = ?').get('year1');
+  assert.equal(year.start_date, '2026-04-01');
+  assert.equal(year.end_date, '2027-03-31');
+  assert.equal(year.closed, 1);
+  assert.equal(JSON.parse(year.data).closed, undefined);
   const group = db.prepare('SELECT * FROM account_groups WHERE id = ?').get('grp1');
   assert.equal(group.name, 'Trade Debtors');
   assert.equal(group.parent_id, 'assets');

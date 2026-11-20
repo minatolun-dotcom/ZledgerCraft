@@ -98,6 +98,7 @@ import {
   selectYear,
   setBankMatch,
   setCurrentUser,
+  setNextVoucherNumber,
   setOrderStatus,
   signedOpening,
   todayIso,
@@ -352,6 +353,7 @@ export function gatewayScreen() {
           <button type="button" class="link-row" data-screen="registers"><span>Sales &amp; purchase registers</span><kbd>R</kbd></button>
           <button type="button" class="link-row" data-screen="outstanding"><span>Receivables &amp; payables</span><kbd>O</kbd></button>
           <button type="button" class="link-row" data-screen="billRegister"><span>Bill-wise register</span><span class="muted small">Bills</span></button>
+          <button type="button" class="link-row" data-screen="exceptions"><span>Exception register</span><span class="muted small">Checks</span></button>
           <button type="button" class="link-row" data-screen="partyStatement"><span>Party statement</span><span class="muted small">Account</span></button>
           <button type="button" class="link-row" data-screen="groupSummary"><span>Group Summary</span><kbd>G</kbd></button>
           <button type="button" class="link-row" data-screen="yearComparison"><span>Year comparison</span><span class="muted small">FY</span></button>
@@ -966,6 +968,14 @@ export function mastersScreen() {
           <input name="opening" inputmode="decimal" placeholder="0.00"
             value="${editingLedger ? esc(String(editingLedger.opening)) : ''}">
         </label>
+        <label class="field">
+          <span>Credit limit (optional)</span>
+          <input name="creditLimit" inputmode="decimal" placeholder="0.00" value="${editingLedger?.creditLimit !== undefined ? esc(String(editingLedger.creditLimit)) : ''}">
+        </label>
+        <label class="field">
+          <span>Interest % p.a. (optional)</span>
+          <input name="interestRate" inputmode="decimal" placeholder="e.g. 12" value="${editingLedger?.interestRate !== undefined ? esc(String(editingLedger.interestRate)) : ''}">
+        </label>
         <label class="field narrow">
           <span>Dr / Cr</span>
           <select name="openingType">
@@ -1051,6 +1061,23 @@ export function mastersScreen() {
     ${costCentreMastersPanel(active)}
     ${budgetMastersPanel(active)}
     ${currencyMastersPanel(active)}
+    ${panel(
+      'Document numbering',
+      `<form id="document-number-form" class="filter-bar" novalidate>
+        <label class="field inline-field"><span>Voucher type</span><select name="type">${Object.entries(VOUCHER_TYPES).map(([type, meta]) => `<option value="${esc(type)}">${esc(meta.label)}</option>`).join('')}</select></label>
+        <label class="field inline-field"><span>Next number</span><input name="next" inputmode="numeric" min="1" max="999999" placeholder="1"></label>
+        <button class="btn small" type="submit">Set next number</button>
+        <p id="document-number-error" class="form-error" role="alert"></p>
+      </form>
+      <table class="data-table compact">
+        <thead><tr><th>Voucher type</th><th class="num">Last used</th><th class="num">Next</th></tr></thead>
+        <tbody>${Object.entries(VOUCHER_TYPES).map(([type, meta]) => {
+          const last = Number(active.counters?.[type]) || 0;
+          return `<tr><td>${esc(meta.label)}</td><td class="num">${last || '—'}</td><td class="num">${last + 1}</td></tr>`;
+        }).join('')}</tbody>
+      </table>`,
+      'Changing the next number only affects new vouchers. Existing document numbers are not renumbered.',
+    )}
     ${panel(
       `Ledger masters <span class="count">${active.ledgers.length}</span>`,
       `<table class="data-table compact">

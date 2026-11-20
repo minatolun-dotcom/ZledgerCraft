@@ -28,6 +28,7 @@ import {
   exportState,
   findLedgerByName,
   importState,
+  orderRemainingItems,
   setOrderStatus,
   stockBatchesOnHand,
   stockOnHand,
@@ -40,6 +41,7 @@ import {
   expiringBatches,
   godownStockSummary,
   statistics,
+  stockAgeing,
   stockMovements,
   stockSummary,
   trialBalance,
@@ -442,6 +444,20 @@ test('stock summary values purchases, sales and returns at average cost', () => 
   assert.equal(row.closingValue, 1470);
   assert.equal(row.averageRate, 105);
   assert.equal(report.totals.closingValue, 1470);
+});
+
+test('stock ageing buckets remaining stock by FIFO receipt date', () => {
+  const { company, item, purchase, sale } = inventoryFixture();
+  purchase('2026-04-20', 5, 100);
+  sale('2026-05-10', 4, 150);
+  const report = stockAgeing(company, { asOn: '2026-05-20' });
+  const row = report.rows.find((entry) => entry.itemId === item.id);
+  assert.equal(row.closingQty, 11);
+  assert.equal(row.buckets['31-60'], 6, 'the remaining opening layer is 49 days old');
+  assert.equal(row.buckets['0-30'], 5, 'the later purchase layer is 30 days old');
+  assert.equal(row.oldestDate, '2026-04-01');
+  assert.equal(report.totals.closingQty, 11);
+  assert.equal(report.totals.buckets['31-60'], 6);
 });
 
 test('statistics summarises closing stock and items with no issues', () => {
@@ -859,6 +875,59 @@ test('orders record sales and purchase commitments without moving stock', () => 
   assert.equal(purchase.ok, true, purchase.error);
   assert.equal(purchase.order.no, 1, 'purchase orders have their own sequence');
   assert.equal(deleteOrder(company, purchase.order.id).ok, true);
+});
+
+test('an order tracks partial fulfilment across linked vouchers', () => {
+  const { company, item } = inventoryFixture();
+  const customer = addLedger(company, {
+    name: 'Partial Customer',
+    groupId: company.groups.find((group) => group.key === 'sundryDebtors').id,
+    opening: 0,
+  }).ledger;
+  const sales = findLedgerByName(company, 'Sales');
+  const order = addOrder(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    partyLedgerId: customer.id,
+    stockItemId: item.id,
+    qty: 5,
+    rate: 100,
+  }).order;
+
+  const first = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-06',
+    orderId: order.id,
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 200 },
+      { ledgerId: sales.id, side: 'Cr', amount: 200 },
+    ],
+    items: [{ stockItemId: item.id, qty: 2, rate: 100 }],
+  });
+  assert.equal(first.ok, true, first.error);
+  assert.equal(order.status, 'Open');
+  assert.equal(order.items[0].fulfilledQty, 2);
+  assert.deepEqual(orderRemainingItems(order).map((line) => line.qty), [3]);
+
+  const second = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-07',
+    orderId: order.id,
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 300 },
+      { ledgerId: sales.id, side: 'Cr', amount: 300 },
+    ],
+    items: [{ stockItemId: item.id, qty: 3, rate: 100 }],
+  });
+  assert.equal(second.ok, true, second.error);
+  assert.equal(order.status, 'Closed');
+  assert.equal(order.closedByFulfilment, true);
+  assert.deepEqual(orderRemainingItems(order), []);
+
+  assert.equal(deleteVoucher(company, second.voucher.id), true);
+  assert.equal(order.status, 'Open');
+  assert.equal(order.items[0].fulfilledQty, 2);
+  assert.equal(order.closedByFulfilment, undefined);
 });
 
 test('an order can carry several item lines and validates each one', () => {

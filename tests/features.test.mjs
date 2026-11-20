@@ -14,6 +14,7 @@ import {
   importState,
   saveGstSettings,
   saveTdsSettings,
+  setNextVoucherNumber,
   updateCompany,
   updateGroup,
   updateLedger,
@@ -130,6 +131,22 @@ test('credit and debit notes are first-class voucher types', () => {
   assert.equal(pnl.netProfit, 350);
   assert.equal(ledgerTotals(company).get(sharma.id).closing, 300);
   assert.equal(ledgerTotals(company).get(sales.id).closing, -900);
+});
+
+test('the next voucher number can be set above the last used number', () => {
+  const { company, sales, sharma } = tradingFixture();
+  assert.equal(setNextVoucherNumber(company, 'Sales', 50).ok, true);
+  const next = voucher(company, 'Sales', [
+    { ledgerId: sharma.id, side: 'Dr', amount: 100 },
+    { ledgerId: sales.id, side: 'Cr', amount: 100 },
+  ], '2026-04-10');
+  assert.equal(next.no, 50);
+  assert.equal(company.counters.Sales, 50);
+
+  const backwards = setNextVoucherNumber(company, 'Sales', 10);
+  assert.equal(backwards.ok, false);
+  assert.match(backwards.error, /above the last used number, 50/);
+  assert.equal(setNextVoucherNumber(company, 'Unknown', 1).ok, false);
 });
 
 test('vouchers can be altered and keep numbering unless the type changes', () => {

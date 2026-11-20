@@ -4,6 +4,7 @@ import {
   booksStart,
   dateLabel,
   defaultGodownId,
+  orderRemainingItems,
   round2,
   stockBatchesOnHand,
   stockOnHand,
@@ -13,6 +14,7 @@ import {
   batchStockSummary,
   expiringBatches,
   godownStockSummary,
+  stockAgeing,
   stockMovements,
   stockSummary,
 } from './accounting.js';
@@ -52,6 +54,8 @@ export function ordersScreen() {
   const rows = orders
     .map((order) => {
       const lines = order.items ?? [];
+      const remaining = orderRemainingItems(order);
+      const partiallyFulfilled = lines.some((line) => Number(line.fulfilledQty ?? 0) > 0.0005);
       const itemCell = lines
         .map((line) => {
           const item = items.get(line.stockItemId);
@@ -61,13 +65,14 @@ export function ordersScreen() {
       const qtyCell = lines
         .map((line) => {
           const unit = units.get(items.get(line.stockItemId)?.unitId)?.symbol ?? '';
-          return `${fmtQty(line.qty)} ${esc(unit)}`.trim();
+          const done = Number(line.fulfilledQty ?? 0);
+          return `${fmtQty(line.qty)} ${esc(unit)}${done > 0.0005 ? `<div class="muted small">${fmtQty(done)} fulfilled</div>` : ''}`.trim();
         })
         .join('<br>');
       const party = parties.get(order.partyLedgerId);
       const prefix = order.type === 'Sales' ? 'SO' : 'PO';
       const actions = [
-        order.status === 'Open'
+        order.status === 'Open' && remaining.length
           ? `<button class="btn small" type="button" data-action="order-to-voucher" data-id="${esc(order.id)}">Create voucher</button>`
           : '',
         order.status === 'Open'
@@ -89,7 +94,7 @@ export function ordersScreen() {
         <td>${lines.length ? itemCell : '<span class="muted">No items</span>'}</td>
         <td class="num">${qtyCell}</td>
         <td class="num">${money(order.total)}</td>
-        <td><span class="badge${tone ? ` ${tone}` : ''}">${esc(order.status)}</span></td>
+        <td><span class="badge${tone ? ` ${tone}` : ''}">${esc(order.status)}</span>${order.status === 'Open' && partiallyFulfilled ? '<div class="muted small">Partially fulfilled</div>' : ''}</td>
         <td class="row-actions">${actions}</td>
       </tr>`;
     })
@@ -188,6 +193,7 @@ export function inventoryScreen() {
   const godownReport = godownStockSummary(active, { from, to });
   const batchReport = batchStockSummary(active, { from, to });
   const expiryReport = expiringBatches(active, { asOn: to, days: 90 });
+  const ageingReport = stockAgeing(active, { asOn: to });
   const transfers = [...(active.stockTransfers ?? [])].sort(
     (a, b) => b.date.localeCompare(a.date) || b.no - a.no,
   );
@@ -445,6 +451,17 @@ export function inventoryScreen() {
     })
     .join('');
 
+  const ageingRows = ageingReport.rows
+    .filter((row) => row.closingQty > 0.0005)
+    .map((row) => `<tr>
+      <td><strong>${esc(row.name)}</strong></td>
+      <td>${esc(row.unit)}</td>
+      <td class="num">${fmtQty(row.closingQty)}</td>
+      ${ageingReport.bucketKeys.map((key) => `<td class="num">${row.buckets[key] ? fmtQty(row.buckets[key]) : '—'}</td>`).join('')}
+      <td>${row.oldestDate ? esc(dateLabel(row.oldestDate)) : '—'}</td>
+    </tr>`)
+    .join('');
+
   const expiryRows = expiryReport.rows
     .map(
       (row) => `<tr>
@@ -533,6 +550,17 @@ export function inventoryScreen() {
         : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,
       'Click an item to see its voucher-wise movement.',
     )}
+    ${ageingRows
+      ? panel(
+          'Stock ageing',
+          `<table class="data-table compact">
+            <thead><tr><th>Item</th><th>Unit</th><th class="num">Closing qty</th>${ageingReport.bucketKeys.map((key) => `<th class="num">${key} days</th>`).join('')}<th>Oldest layer</th></tr></thead>
+            <tbody>${ageingRows}</tbody>
+            <tfoot><tr><td colspan="2">Quantity</td><td class="num">${fmtQty(ageingReport.totals.closingQty)}</td>${ageingReport.bucketKeys.map((key) => `<td class="num">${fmtQty(ageingReport.totals.buckets[key])}</td>`).join('')}<td></td></tr></tfoot>
+          </table>`,
+          'Ageing is an approximate FIFO view of receipts and issues up to the report date. Opening stock is the oldest layer, transfers are ignored and batch-level costing is not used.',
+        )
+      : ''}
     ${panel(
       'Stock counts',
       `${countDraftForm}

@@ -344,6 +344,22 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 46: operational depth bundle
+
+- Inventory: approximate FIFO stock ageing by receipt bucket, and partial order
+  fulfilment across multiple linked vouchers with remaining-quantity prefill.
+- Receivables: optional party credit limits, over-limit and available-credit
+  display, a printable payment reminder, and a simple overdue-interest working
+  paper at each party's stored annual rate.
+- Reporting: current-versus-previous-period P&L and an exception register for
+  negative stock, over-limit customers, receivables over 90 days and late open
+  orders.
+- Masters: next-number control per voucher type without renumbering existing
+  vouchers, plus credit-limit and interest-rate fields on ledgers.
+- Verification: stock-age buckets, partial fulfilment/reopen, credit limit and
+  over-limit, overdue interest, next-number validation, full suite 291 tests
+  (290 pass, 1 skipped) and a 1,006.5 kB build.
+
 ### 2026-11-20 — Phase 45: compliance calendar
 
 - A new Compliance calendar screen keeps user-managed GST, TDS, payroll and

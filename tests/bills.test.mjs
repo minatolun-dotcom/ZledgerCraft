@@ -8,9 +8,10 @@ import {
   exportState,
   findLedgerByName,
   importState,
+  updateLedger,
   updateVoucher,
 } from '../src/store.js';
-import { outstanding, stockSummary } from '../src/accounting.js';
+import { interestWorkingPaper, outstanding, stockSummary } from '../src/accounting.js';
 
 function groupKeyFor(company, key) {
   return company.groups.find((group) => group.key === key).id;
@@ -71,6 +72,36 @@ test('a sales bill keeps its reference and due date', () => {
   assert.equal(bill.overdueDays, 56);
   assert.equal(bill.bucket, '31-60');
   assert.equal(report.buckets['31-60'], 1000);
+});
+
+test('a party credit limit is tracked against open receivables', () => {
+  const { company, customer, sales } = billsFixture();
+  assert.equal(updateLedger(company, customer.id, { creditLimit: '-1' }).ok, false);
+  assert.equal(updateLedger(company, customer.id, { creditLimit: '750' }).ok, true);
+  sale(company, customer, sales, 1000, '2026-04-05', { ref: 'INV-LIMIT' });
+
+  const report = outstanding(company, { asOn: '2026-04-30' });
+  const party = report.parties[0];
+  assert.equal(party.creditLimit, 750);
+  assert.equal(party.available, -250);
+  assert.equal(party.overLimit, true);
+
+  assert.equal(updateLedger(company, customer.id, { creditLimit: '' }).ok, true);
+  assert.equal(outstanding(company, { asOn: '2026-04-30' }).parties[0].creditLimit, 0);
+});
+
+test('overdue interest is computed as a simple working paper', () => {
+  const { company, customer, sales } = billsFixture();
+  assert.equal(updateLedger(company, customer.id, { interestRate: '101' }).ok, false);
+  assert.equal(updateLedger(company, customer.id, { interestRate: '12' }).ok, true);
+  sale(company, customer, sales, 1000, '2026-04-05', { ref: 'INV-INT', dueDate: '2026-04-15' });
+
+  const report = interestWorkingPaper(company, { asOn: '2026-04-25' });
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].overdueDays, 10);
+  assert.equal(report.rows[0].interest, 3.29);
+  assert.equal(report.totals.interest, 3.29);
+  assert.equal(company.vouchers.length, 1, 'the working paper posts nothing');
 });
 
 test('an explicit receipt allocation settles only the chosen bill', () => {

@@ -424,11 +424,16 @@ disabled.
   register. Batch-tracked items are counted lot by lot, with an unlisted-lot row
   for stock found outside the shown batches. Counts are working papers and do
   not move stock or post an adjustment.
+- Stock ageing buckets closing quantities by approximate FIFO receipt age
+  (0–30, 31–60, 61–90, 91–180 and over 180 days), with the oldest remaining
+  layer per item. Opening stock is the oldest layer and transfers are ignored.
 - Sales and purchase orders with party, delivery date, up to 50 item lines
   (each with godown, batch, expiry, quantity and rate), status
   (Open/Closed/Cancelled), filters and a Create voucher action that prefills the
-  matching invoice, links it to the order and closes it. Deleting that voucher
-  reopens the order. Orders do not post to the ledger or move stock.
+  remaining quantity and links it to the order. Further vouchers can fulfil the
+  balance; the order closes only when every line is fulfilled, and deleting a
+  linked voucher recalculates fulfilment. Orders do not post to the ledger or
+  move stock.
 - BOM recipes with a finished item, output quantity and up to twenty component
   items. Production consumes components in proportion to the output quantity
   from a chosen godown and brings finished goods into a chosen godown, with an
@@ -444,6 +449,9 @@ disabled.
 - Day Book, with type and date filters and paging (100/250/500 rows or all);
   CSV/Excel exports include the whole filtered period, not just the visible page.
 - Ledger statement with opening balance, running balance and closing balance.
+- Ledger masters can carry an optional credit limit and annual interest rate.
+  Document numbering sets the next number for each voucher type without
+  renumbering existing documents.
 - Trial Balance, Trading/P&L Account and Balance Sheet, each with an as-on date.
 - Cash Book / Bank Book, per ledger or combined.
 - Bank Reconciliation for any ledger under Bank Accounts: import a statement
@@ -514,6 +522,15 @@ disabled.
   separate status-as-on date: original, settled and outstanding amounts, status,
   overdue days, totals and drill-down to the voucher or the party statement.
   Fully settled bills remain listed.
+- Party credit limits, a printable payment reminder per customer, and a simple
+  overdue-interest working paper at each party's stored annual rate. These are
+  informational; no interest or reminder charge is posted.
+- Comparative P&L: current period against the immediately preceding period of
+  the same length, with change by direct income, expenses, gross profit,
+  indirect income, expenses and net profit.
+- Exception register as on a date: negative stock, customers over their credit
+  limit, receivable bills overdue more than 90 days and open orders past their
+  expected delivery date.
 - Party statement for a customer or supplier: the normal ledger statement with
   bill references and allocation detail, followed by every bill up to the report
   date with original, settled, outstanding and overdue status.
@@ -674,7 +691,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 
 | TallyPrime area | Status |
 | --- | --- |
-| Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, dated stock counts with book/counted differences and batch-level count lines, sales/purchase orders, BOM recipes and production; no multi-level BOM, wastage, job work, count adjustments, batch-wise costing, WIP accounting or stock posting to the financial statements |
+| Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, stock ageing, dated stock counts with book/counted differences and batch-level count lines, partially fulfilled sales/purchase orders, BOM recipes and production; no multi-level BOM, wastage, job work, count adjustments, batch-wise costing, WIP accounting or stock posting to the financial statements |
 | GST registration, rates and tax on vouchers | Partial — GSTIN and home state, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and invoice-level tax on four voucher types; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way drafts with saved Part B details and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, validity tracking, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
@@ -683,7 +700,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque/DD advice and receipt deposit-slip previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no magnetic-ink cheque stationery presets or bank-issued advice formats |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary and break-up; no merging categories, split allocations or unallocated reconciliation |
 | Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance and over-budget status; no phased, revised, approval or cost-centre budgets |
-| Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting and an unrealised forex revaluation report; no realised gain/loss posting, foreign inventory/bill allocations or interest calculation |
+| Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting, an unrealised forex revaluation report and a simple overdue-interest working paper; no realised gain/loss posting, foreign inventory/bill allocations or interest posting |
 | Multiple financial years per company, year-end closing and carry-forward | Covered — year selector, close/reopen and automatic next year; no closing journal is written because balances are cumulative |
 | Bill-wise entry and allocation | Covered — bill refs, due dates, explicit/FIFO settlements, ageing, bill-wise register and party statement with bill detail; no bill-wise opening allocation or bill interest |
 | User roles, TallyVault, edit log, cloud sync | Partial — local profiles plus password-backed LAN accounts or Neon Auth, owner/accountant/viewer roles, company-level server scoping, TOTP MFA in SQLite mode, hash-chained server audit, append-only app audit, SQLite or Neon Postgres workspace with conservative and scoped merge; Neon Auth mode has no MFA and uses Postgres profiles/sessions; no vault encryption |

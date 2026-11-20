@@ -40,6 +40,7 @@ import {
   autoMatchBank,
   allocationsAgainst,
   approvalRequiredForAmount,
+  orderRemainingItems,
   approvePendingVoucher,
   billLabel,
   clearBankStatement,
@@ -110,6 +111,7 @@ import {
   setCurrentUser,
   setComplianceTaskStatus,
   setEwayPartB,
+  setNextVoucherNumber,
   setInstrumentStatus,
   setOrderStatus,
   signedOpening,
@@ -210,6 +212,7 @@ import {
   cashBankScreen,
   registersScreen,
   outstandingScreen,
+  exceptionsScreen,
   partyLedgerList,
   billStatusBadge,
   billRegisterScreen,
@@ -1389,19 +1392,28 @@ export function orderToVoucher(orderId) {
     setFlash(`Add a ${type === 'Sales' ? 'Sales' : 'Purchases'} ledger before converting this order.`, 'warn');
     return;
   }
+  const remaining = orderRemainingItems(order);
+  if (!remaining.length) {
+    setFlash('This order is already fully fulfilled.', 'warn');
+    return;
+  }
+  const total = round2(remaining.reduce((sum, line) => sum + line.amount, 0));
   prepareDraft(type);
   draft.orderId = order.id;
   draft.date = order.date;
   draft.lines = type === 'Sales'
     ? [
-        { ledgerId: party.id, side: 'Dr', amount: order.total },
-        { ledgerId: controlId, side: 'Cr', amount: order.total },
+        { ledgerId: party.id, side: 'Dr', amount: total },
+        { ledgerId: controlId, side: 'Cr', amount: total },
       ]
     : [
-        { ledgerId: controlId, side: 'Dr', amount: order.total },
-        { ledgerId: party.id, side: 'Cr', amount: order.total },
+        { ledgerId: controlId, side: 'Dr', amount: total },
+        { ledgerId: party.id, side: 'Cr', amount: total },
       ];
-  draft.items = order.items.map((line) => ({ ...line }));
+  draft.items = remaining.map((line) => ({ ...line }));
+  if (remaining.length !== (order.items ?? []).length) {
+    setFlash('Prefilled with the remaining quantity on this order.', 'ok');
+  }
   draft.narration = `Against ${order.type === 'Sales' ? 'SO' : 'PO'}-${order.no}${order.narration ? ` · ${order.narration}` : ''}`;
   navigate('voucherNew', { type });
   setFlash(`Prefilled a ${type.toLowerCase()} voucher from ${order.type === 'Sales' ? 'SO' : 'PO'}-${order.no}. Review and accept it.`);
@@ -2130,6 +2142,8 @@ export function screenHtml() {
       return registersScreen();
     case 'outstanding':
       return outstandingScreen();
+    case 'exceptions':
+      return exceptionsScreen();
     case 'billRegister':
       return billRegisterScreen();
     case 'partyStatement':
@@ -2593,6 +2607,25 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'document-number-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const type = String(data.get('type') ?? '');
+    const result = setNextVoucherNumber(active, type, data.get('next'));
+    if (!result.ok) {
+      showFormError(result.error, 'document-number-error');
+      return;
+    }
+    logAudit('numbering.update', `Set the next ${type} voucher number to ${result.next}.`, active, type);
+    persist();
+    setFlash(`Next ${type} voucher number set to ${result.next}.`);
+    navigate('masters');
+    return;
+  }
+
   if (form.id === 'ledger-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -2641,6 +2674,13 @@ export async function handleSubmit(event) {
     persist();
     setFlash(`Group "${result.group.name}" ${editingId ? 'updated' : 'created'}.`);
     navigate('masters');
+    return;
+  }
+
+  if (form.id === 'exceptions-form') {
+    const data = new FormData(form);
+    filters.exceptions = { asOn: data.get('asOn') || '' };
+    render();
     return;
   }
 
@@ -5098,6 +5138,18 @@ async function handleClick(event) {
       setFlash(`Downloaded e-invoice draft for ${row.ref}. Nothing was transmitted.`);
       break;
     }
+    case 'payment-reminder': {
+      view.reminderPartyId = trigger.dataset.id;
+      render();
+      break;
+    }
+
+    case 'close-payment-reminder': {
+      view.reminderPartyId = null;
+      render();
+      break;
+    }
+
     case 'edit-compliance-task': {
       if (!can('master.write')) {
         requirePermission('master.write');

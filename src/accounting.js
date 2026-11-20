@@ -1337,7 +1337,17 @@ export function outstanding(company, filters = {}) {
     if (openTotal < EPSILON && advance < EPSILON) continue;
 
     advances = round2(advances + advance);
-    parties.push({ ledgerId: ledger.id, name: ledger.name, outstanding: openTotal, advance, bills: openBills });
+    const creditLimit = round2(ledger.creditLimit ?? 0);
+    parties.push({
+      ledgerId: ledger.id,
+      name: ledger.name,
+      outstanding: openTotal,
+      advance,
+      creditLimit,
+      available: creditLimit ? round2(creditLimit - openTotal) : 0,
+      overLimit: creditLimit > 0 && openTotal > creditLimit + 0.005,
+      bills: openBills,
+    });
   }
 
   parties.sort((a, b) => a.name.localeCompare(b.name));
@@ -1352,6 +1362,45 @@ export function outstanding(company, filters = {}) {
     advances,
     net: round2(total - advances),
     count: parties.length,
+  };
+}
+
+/** Simple overdue interest working paper; it never posts a journal. */
+export function interestWorkingPaper(company, filters = {}) {
+  const asOn = filters.asOn || company.fyEnd;
+  const side = filters.side === 'payable' ? 'payable' : 'receivable';
+  const report = outstanding(company, { side, asOn });
+  const ledgers = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
+  const rows = [];
+  for (const party of report.parties) {
+    const rate = round2(ledgers.get(party.ledgerId)?.interestRate ?? 0);
+    if (rate <= 0) continue;
+    for (const bill of party.bills) {
+      if (!bill.overdue || !bill.dueDate) continue;
+      const days = Math.max(0, Number(bill.overdueDays) || 0);
+      const interest = round2((bill.amount * rate * days) / 36500);
+      if (interest <= 0) continue;
+      rows.push({
+        partyId: party.ledgerId,
+        party: party.name,
+        bill: bill.ref,
+        dueDate: bill.dueDate,
+        overdueDays: days,
+        amount: bill.amount,
+        rate,
+        interest,
+      });
+    }
+  }
+  rows.sort((a, b) => a.party.localeCompare(b.party) || a.dueDate.localeCompare(b.dueDate));
+  return {
+    asOn,
+    side,
+    rows,
+    totals: {
+      principal: round2(rows.reduce((sum, row) => sum + row.amount, 0)),
+      interest: round2(rows.reduce((sum, row) => sum + row.interest, 0)),
+    },
   };
 }
 
@@ -1994,6 +2043,87 @@ export function batchStockSummary(company, filters = {}) {
 
   rows.sort((a, b) => a.name.localeCompare(b.name) || a.batchNo.localeCompare(b.batchNo));
   return { from, to, rows, totals: { closingQty: round3(rows.reduce((sum, row) => sum + row.closingQty, 0)) } };
+}
+
+function consumeAgeLayers(layers, qty) {
+  let left = round3(qty);
+  while (left > 0 && layers.length) {
+    const layer = layers[0];
+    const used = Math.min(left, layer.qty);
+    layer.qty = round3(layer.qty - used);
+    left = round3(left - used);
+    if (layer.qty <= 0.0005) layers.shift();
+  }
+}
+
+/**
+ * Approximate closing-stock age using a FIFO walk of receipts and issues.
+ * Transfers are ignored because they do not change total quantity; opening
+ * stock is treated as the oldest layer.
+ */
+export function stockAgeing(company, filters = {}) {
+  const asOn = filters.asOn || company.fyEnd;
+  const summary = stockSummary(company, { from: booksStart(company), to: asOn });
+  const layers = new Map();
+  const layersFor = (itemId) => {
+    if (!layers.has(itemId)) layers.set(itemId, []);
+    return layers.get(itemId);
+  };
+  const records = new Map((company.stockItems ?? []).map((item) => [item.id, item]));
+  for (const item of company.stockItems ?? []) {
+    const qty = round3(item.openingQty ?? 0);
+    if (qty > 0) layersFor(item.id).push({ date: booksStart(company), qty });
+  }
+
+  for (const event of stockMovementEvents(company, asOn)) {
+    if (event.kind === 'voucher') {
+      const direction = STOCK_IN_TYPES.has(event.voucher.type) ? 1 : -1;
+      for (const line of event.voucher.items ?? []) {
+        if (!records.has(line.stockItemId)) continue;
+        const qty = round3(line.qty);
+        if (direction > 0) layersFor(line.stockItemId).push({ date: event.date, qty });
+        else consumeAgeLayers(layersFor(line.stockItemId), qty);
+      }
+    } else if (event.kind === 'manufacture') {
+      const manufacture = event.manufacture;
+      for (const line of manufacture.components ?? []) {
+        if (records.has(line.stockItemId)) consumeAgeLayers(layersFor(line.stockItemId), round3(line.qty));
+      }
+      if (records.has(manufacture.outputItemId)) {
+        layersFor(manufacture.outputItemId).push({ date: event.date, qty: round3(manufacture.outputQty) });
+      }
+    }
+  }
+
+  const bucketKeys = ['0-30', '31-60', '61-90', '91-180', 'Over 180'];
+  const rows = summary.rows.map((row) => {
+    const remaining = (layers.get(row.itemId) ?? []).filter((layer) => layer.qty > 0.0005);
+    const buckets = Object.fromEntries(bucketKeys.map((key) => [key, 0]));
+    for (const layer of remaining) {
+      const days = Math.max(0, batchDaysBetween(layer.date, asOn));
+      const key = days <= 30 ? '0-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : days <= 180 ? '91-180' : 'Over 180';
+      buckets[key] = round3(buckets[key] + layer.qty);
+    }
+    return {
+      itemId: row.itemId,
+      name: row.name,
+      unit: row.unit,
+      closingQty: row.closingQty,
+      closingValue: row.closingValue,
+      oldestDate: remaining[0]?.date ?? null,
+      buckets,
+    };
+  });
+  return {
+    asOn,
+    rows,
+    bucketKeys,
+    totals: {
+      closingQty: round3(rows.reduce((sum, row) => sum + row.closingQty, 0)),
+      closingValue: round2(rows.reduce((sum, row) => sum + row.closingValue, 0)),
+      buckets: Object.fromEntries(bucketKeys.map((key) => [key, round3(rows.reduce((sum, row) => sum + row.buckets[key], 0))])),
+    },
+  };
 }
 
 function batchDaysBetween(from, to) {

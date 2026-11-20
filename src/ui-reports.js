@@ -6,6 +6,7 @@ import {
   dateLabel,
   ledgerOptions,
   round2,
+  todayIso,
 } from './store.js';
 import {
   AGE_BUCKETS,
@@ -18,6 +19,7 @@ import {
   groupSummary,
   groupVouchers,
   inGroupKey,
+  interestWorkingPaper,
   ledgerStatement,
   ledgerTotals,
   outstanding,
@@ -220,11 +222,89 @@ export function trialScreen() {
   );
 }
 
+function isoShiftDay(iso, days) {
+  return new Date(Date.UTC(
+    Number(iso.slice(0, 4)),
+    Number(iso.slice(5, 7)) - 1,
+    Number(iso.slice(8, 10)) + days,
+  )).toISOString().slice(0, 10);
+}
+
+function previousPeriod(from, to) {
+  const days = Math.max(
+    1,
+    Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1,
+  );
+  const priorTo = isoShiftDay(from, -1);
+  return { from: isoShiftDay(priorTo, -(days - 1)), to: priorTo };
+}
+
+export function exceptionsScreen() {
+  if (!company()) return emptyCompanyScreen('Exception register');
+  const active = company();
+  const asOn = filters.exceptions?.asOn || todayIso();
+  const stock = stockSummary(active, { from: active.fyStart, to: asOn });
+  const receivables = outstanding(active, { side: 'receivable', asOn });
+  const negativeStock = stock.rows.filter((row) => row.closingQty < -0.0005);
+  const overLimit = receivables.parties.filter((party) => party.overLimit);
+  const oldBills = receivables.parties.flatMap((party) =>
+    party.bills.filter((bill) => bill.overdue && bill.overdueDays > 90).map((bill) => ({ ...bill, party: party.name })),
+  );
+  const staleOrders = (active.orders ?? []).filter(
+    (order) => order.status === 'Open' && order.deliveryDate && order.deliveryDate < asOn,
+  );
+  const countCards = [
+    ['Negative stock', negativeStock.length, 'Items with a negative closing quantity'],
+    ['Over credit limit', overLimit.length, 'Customers above their stored limit'],
+    ['Bills over 90 days', oldBills.length, 'Receivable bills overdue by more than 90 days'],
+    ['Late open orders', staleOrders.length, 'Open orders past the expected delivery date'],
+  ];
+
+  const empty = '<p class="muted small">None.</p>';
+  return panel(
+    'Exception register',
+    `<form id="exceptions-form" class="filter-bar">
+      <label class="field inline-field"><span>As on</span><input name="asOn" type="date" value="${esc(asOn)}"></label>
+      <button class="btn small" type="submit">Apply</button>
+    </form>
+    <div class="ratio-grid">${countCards
+      .map(([label, count, note]) => `<div class="ratio-card"><span class="ratio-label">${esc(label)}</span><strong class="${count ? 'neg' : ''}">${count}</strong><span class="muted small">${esc(note)}</span></div>`)
+      .join('')}</div>
+    <h3 class="section-title">Negative stock</h3>
+    ${negativeStock.length
+      ? `<table class="data-table compact"><thead><tr><th>Item</th><th>Unit</th><th class="num">Closing qty</th><th class="num">Value</th></tr></thead><tbody>${negativeStock.map((row) => `<tr><td>${esc(row.name)}</td><td>${esc(row.unit)}</td><td class="num neg">${row.closingQty}</td><td class="num">${money(row.closingValue)}</td></tr>`).join('')}</tbody></table>`
+      : empty}
+    <h3 class="section-title">Credit limits</h3>
+    ${overLimit.length
+      ? `<table class="data-table compact"><thead><tr><th>Customer</th><th class="num">Outstanding</th><th class="num">Limit</th><th class="num">Over by</th></tr></thead><tbody>${overLimit.map((party) => `<tr><td>${esc(party.name)}</td><td class="num">${money(party.outstanding)}</td><td class="num">${money(party.creditLimit)}</td><td class="num neg">${money(-party.available)}</td></tr>`).join('')}</tbody></table>`
+      : empty}
+    <h3 class="section-title">Receivable bills over 90 days</h3>
+    ${oldBills.length
+      ? `<table class="data-table compact"><thead><tr><th>Customer</th><th>Bill</th><th>Due date</th><th class="num">Overdue days</th><th class="num">Amount</th></tr></thead><tbody>${oldBills.map((bill) => `<tr><td>${esc(bill.party)}</td><td>${esc(bill.ref)}</td><td>${esc(dateLabel(bill.dueDate))}</td><td class="num">${bill.overdueDays}</td><td class="num">${money(bill.amount)}</td></tr>`).join('')}</tbody></table>`
+      : empty}
+    <h3 class="section-title">Late open orders</h3>
+    ${staleOrders.length
+      ? `<table class="data-table compact"><thead><tr><th>Order</th><th>Party</th><th>Expected delivery</th><th class="num">Value</th></tr></thead><tbody>${staleOrders.map((order) => `<tr><td>${order.type === 'Sales' ? 'SO' : 'PO'}-${order.no}</td><td>${esc((active.ledgers ?? []).find((ledger) => ledger.id === order.partyLedgerId)?.name ?? 'Unknown party')}</td><td>${esc(dateLabel(order.deliveryDate))}</td><td class="num">${money(order.total)}</td></tr>`).join('')}</tbody></table>`
+      : empty}`,
+    'One screen for operational exceptions. Each list is informational; use the underlying report or form to correct it.',
+  );
+}
+
 export function pnlScreen() {
   if (!company()) return emptyCompanyScreen('Profit & Loss');
   const active = company();
   const { from, to } = reportPeriod(active);
   const report = profitAndLoss(active, { from, to });
+  const prior = previousPeriod(report.from, report.to);
+  const priorReport = profitAndLoss(active, prior);
+  const compareRows = [
+    ['Direct income', report.direct.incomeTotal, priorReport.direct.incomeTotal],
+    ['Direct expenses', report.direct.expenseTotal, priorReport.direct.expenseTotal],
+    ['Gross profit', report.grossProfit, priorReport.grossProfit],
+    ['Indirect income', report.indirect.incomeTotal, priorReport.indirect.incomeTotal],
+    ['Indirect expenses', report.indirect.expenseTotal, priorReport.indirect.expenseTotal],
+    ['Net profit', report.netProfit, priorReport.netProfit],
+  ];
   const primaryName = (key) => active.groups.find((group) => group.key === key)?.name ?? key;
 
   const side = (sections) =>
@@ -286,6 +366,17 @@ export function pnlScreen() {
         Net ${report.netProfit >= 0 ? 'profit' : 'loss'}: ${money(Math.abs(report.netProfit))}
       </p>`,
       `For the period ${esc(dateLabel(report.from))} to ${esc(dateLabel(report.to))}${report.includeOpening ? '' : ' · opening balances excluded'}`,
+    )}
+    ${panel(
+      'Comparative P&L',
+      `<table class="data-table compact">
+        <thead><tr><th>Line</th><th class="num">Current</th><th class="num">Previous</th><th class="num">Change</th></tr></thead>
+        <tbody>${compareRows.map(([label, current, previous]) => {
+          const change = round2(current - previous);
+          return `<tr><td>${esc(label)}</td><td class="num">${money(current)}</td><td class="num">${money(previous)}</td><td class="num ${change < 0 ? 'neg' : ''}">${change > 0 ? '+' : ''}${money(change)}</td></tr>`;
+        }).join('')}</tbody>
+      </table>`,
+      `Previous period: ${esc(dateLabel(prior.from))} to ${esc(dateLabel(prior.to))}. A positive change is not always favourable; compare expense and profit lines separately.`,
     )}`;
 }
 
@@ -447,7 +538,7 @@ export function outstandingScreen() {
   const partyRows = report.parties
     .map(
       (party) => `<tr>
-        <td><strong>${esc(party.name)}</strong></td>
+        <td><strong>${esc(party.name)}</strong>${party.overLimit ? ' <span class="badge overdue">Over limit</span>' : ''}</td>
         ${AGE_BUCKETS.map(
           (bucket) => `<td class="num">${cell(
             party.bills.filter((bill) => bill.bucket === bucket.key).reduce((sum, bill) => sum + bill.amount, 0),
@@ -455,9 +546,43 @@ export function outstandingScreen() {
         ).join('')}
         <td class="num">${money(party.outstanding)}</td>
         <td class="num">${cell(party.advance)}</td>
+        <td class="num">${party.creditLimit ? money(party.creditLimit) : '<span class="muted">—</span>'}</td>
+        <td class="num ${party.available < 0 ? 'neg' : ''}">${party.creditLimit ? money(party.available) : '<span class="muted">—</span>'}</td>
+        <td>${side === 'receivable' ? `<button class="btn small ghost" type="button" data-action="payment-reminder" data-id="${esc(party.ledgerId)}">Reminder</button>` : ''}</td>
       </tr>`,
     )
     .join('');
+  const reminderParty = side === 'receivable' && view.reminderPartyId
+    ? report.parties.find((party) => party.ledgerId === view.reminderPartyId) ?? null
+    : null;
+  const reminderBills = reminderParty
+    ? reminderParty.bills.filter((bill) => bill.overdue)
+    : [];
+  const interest = interestWorkingPaper(active, { side, asOn });
+  const interestRows = interest.rows
+    .map((row) => `<tr><td>${esc(row.party)}</td><td>${esc(row.bill)}</td><td>${esc(dateLabel(row.dueDate))}</td><td class="num">${row.overdueDays}</td><td class="num">${money(row.amount)}</td><td class="num">${row.rate}%</td><td class="num">${money(row.interest)}</td></tr>`)
+    .join('');
+  const reminderPanel = reminderParty
+    ? panel(
+        `Payment reminder · ${esc(reminderParty.name)}`,
+        `<div class="print-area">
+          <p class="muted">${esc(active.name)} · ${esc(dateLabel(asOn))}</p>
+          <p>To,<br><strong>${esc(reminderParty.name)}</strong></p>
+          <p>Our records show ${money(reminderParty.outstanding)} outstanding${reminderParty.overLimit ? `, above the credit limit of ${money(reminderParty.creditLimit)}` : ''}. The following bills are overdue:</p>
+          ${reminderBills.length
+            ? `<table class="data-table compact">
+                <thead><tr><th>Bill</th><th>Due date</th><th class="num">Overdue days</th><th class="num">Amount</th></tr></thead>
+                <tbody>${reminderBills.map((bill) => `<tr><td>${esc(bill.ref)}</td><td>${esc(dateLabel(bill.dueDate))}</td><td class="num">${bill.overdueDays}</td><td class="num">${money(bill.amount)}</td></tr>`).join('')}</tbody>
+              </table>`
+            : '<p class="muted">No bills are past their due date; this is a balance reminder.</p>'}
+          <p>Please arrange payment at your earliest convenience and share the payment reference.</p>
+        </div>
+        <div class="form-actions">
+          <button class="btn primary" type="button" data-action="print-report">Print reminder</button>
+          <button class="btn ghost" type="button" data-action="close-payment-reminder">Close</button>
+        </div>`,
+      )
+    : '';
 
   const billRows = report.parties
     .flatMap((party) =>
@@ -490,9 +615,9 @@ export function outstandingScreen() {
       </form>
       ${report.parties.length
         ? `<table class="data-table">
-            <thead><tr><th>${partyLabel}</th>${AGE_BUCKETS.map((bucket) => `<th class="num">${esc(bucket.label)}</th>`).join('')}<th class="num">Outstanding</th><th class="num">Advance</th></tr></thead>
+            <thead><tr><th>${partyLabel}</th>${AGE_BUCKETS.map((bucket) => `<th class="num">${esc(bucket.label)}</th>`).join('')}<th class="num">Outstanding</th><th class="num">Advance</th><th class="num">Limit</th><th class="num">Available</th><th></th></tr></thead>
             <tbody>${partyRows}</tbody>
-            <tfoot><tr><td>Total</td>${AGE_BUCKETS.map((bucket) => `<td class="num">${money(report.buckets[bucket.key])}</td>`).join('')}<td class="num">${money(report.total)}</td><td class="num">${money(report.advances)}</td></tr></tfoot>
+            <tfoot><tr><td>Total</td>${AGE_BUCKETS.map((bucket) => `<td class="num">${money(report.buckets[bucket.key])}</td>`).join('')}<td class="num">${money(report.total)}</td><td class="num">${money(report.advances)}</td><td colspan="3"></td></tr></tfoot>
           </table>`
         : `<p class="muted">No open ${side === 'receivable' ? 'receivables' : 'payables'} as on ${esc(dateLabel(asOn))}.</p>`}`,
       `As on ${esc(dateLabel(asOn))} · ${report.count} part${report.count === 1 ? 'y' : 'ies'} · net ${money(report.net)}`,
@@ -504,6 +629,18 @@ export function outstandingScreen() {
             <thead><tr><th>${partyLabel}</th><th>Bill</th><th>Bill date</th><th>Due date</th><th class="num">Age / overdue (days)</th><th>Bucket</th><th class="num">Amount</th></tr></thead>
             <tbody>${billRows}</tbody>
           </table>`,
+        )
+      : ''}
+    ${reminderPanel}
+    ${interest.rows.length
+      ? panel(
+          side === 'receivable' ? 'Interest receivable working paper' : 'Interest payable working paper',
+          `<table class="data-table compact">
+            <thead><tr><th>${partyLabel}</th><th>Bill</th><th>Due date</th><th class="num">Overdue days</th><th class="num">Principal</th><th class="num">Rate</th><th class="num">Simple interest</th></tr></thead>
+            <tbody>${interestRows}</tbody>
+            <tfoot><tr><td colspan="4">Total</td><td class="num">${money(interest.totals.principal)}</td><td></td><td class="num">${money(interest.totals.interest)}</td></tr></tfoot>
+          </table>`,
+          'Simple interest on overdue bill balances at each party\'s stored annual rate. This is a working paper; no interest is posted to the ledger.',
         )
       : ''}`;
 }

@@ -2767,6 +2767,10 @@ export function addLedger(company, input) {
   const openingType = input.openingType === 'Cr' ? 'Cr' : 'Dr';
   const party = ledgerTaxDetails(input);
   if (party.error) return { ok: false, error: party.error };
+  const credit = ledgerCreditLimit(input);
+  if (credit.error) return { ok: false, error: credit.error };
+  const interest = ledgerInterestRate(input);
+  if (interest.error) return { ok: false, error: interest.error };
 
   const ledger = {
     id: uid('led'),
@@ -2775,13 +2779,39 @@ export function addLedger(company, input) {
     opening: round2(opening),
     openingType,
     ...party.details,
+    ...(credit.limit !== null ? { creditLimit: credit.limit } : {}),
+    ...(interest.rate !== null ? { interestRate: interest.rate } : {}),
     createdAt: new Date().toISOString(),
   };
   company.ledgers.push(ledger);
   return { ok: true, ledger };
 }
 
+function ledgerCreditLimit(input = {}, existing = null) {
+  if (input.creditLimit === undefined) {
+    return { limit: existing?.creditLimit ?? null };
+  }
+  const raw = String(input.creditLimit ?? '').trim();
+  if (!raw) return { limit: null };
+  const value = parseAmount(raw);
+  if (value === null || value < 0 || value > 999999999999) {
+    return { error: 'Credit limit must be a number of zero or more.' };
+  }
+  return { limit: round2(value) };
+}
+
 /** Optional party GSTIN/state and PAN used for GST and TDS reporting. */
+function ledgerInterestRate(input = {}, existing = null) {
+  if (input.interestRate === undefined) return { rate: existing?.interestRate ?? null };
+  const raw = String(input.interestRate ?? '').trim();
+  if (!raw) return { rate: null };
+  const value = parseAmount(raw);
+  if (value === null || value < 0 || value > 100) {
+    return { error: 'Interest rate must be a percentage from 0 to 100.' };
+  }
+  return { rate: round2(value) };
+}
+
 function ledgerTaxDetails(input = {}, existing = null) {
   const details = {};
   if (input.pan !== undefined) {
@@ -3314,13 +3344,29 @@ function orderLinkFor(company, type, orderId) {
       error: `${label} is a ${order.type.toLowerCase()} order and cannot be linked to a ${type.toLowerCase()} voucher.`,
     };
   }
-  if ((company.vouchers ?? []).some((voucher) => voucher.orderId === orderId)) {
-    return { ok: false, error: `${label} is already linked to another voucher.` };
-  }
   if (order.status !== 'Open') {
     return { ok: false, error: `${label} is ${order.status.toLowerCase()}; only an open order can be linked.` };
   }
   return { ok: true, order };
+}
+
+export function setNextVoucherNumber(company, type, nextValue) {
+  if (!VOUCHER_TYPES[type]) return { ok: false, error: 'Choose a valid voucher type.' };
+  const next = Number(nextValue);
+  if (!Number.isInteger(next) || next < 1 || next > 999999) {
+    return { ok: false, error: 'Next number must be a whole number from 1 to 999,999.' };
+  }
+  const last = Math.max(
+    0,
+    ...(company.vouchers ?? []).filter((voucher) => voucher.type === type).map((voucher) => Number(voucher.no) || 0),
+    ...(company.pendingVouchers ?? []).filter((voucher) => voucher.type === type).map((voucher) => Number(voucher.no) || 0),
+  );
+  if (next <= last) {
+    return { ok: false, error: `The next ${VOUCHER_TYPES[type].label ?? type} number must be above the last used number, ${last}.` };
+  }
+  company.counters = company.counters ?? {};
+  company.counters[type] = next - 1;
+  return { ok: true, next };
 }
 
 export function addVoucher(company, input) {
@@ -3374,7 +3420,7 @@ export function addVoucher(company, input) {
   if (input.submittedBy) voucher.submittedBy = input.submittedBy;
   if (input.approval) voucher.approval = input.approval;
   company.vouchers.push(voucher);
-  if (orderLink.order) orderLink.order.status = 'Closed';
+  if (orderLink.order) refreshOrderFulfilment(company, orderLink.order);
   return { ok: true, voucher };
 }
 
@@ -3587,6 +3633,10 @@ export function updateVoucher(company, voucherId, input) {
   if (checked.tds) voucher.tds = checked.tds;
   else delete voucher.tds;
   voucher.updatedAt = new Date().toISOString();
+  if (voucher.orderId) {
+    const linkedOrder = (company.orders ?? []).find((order) => order.id === voucher.orderId);
+    if (linkedOrder) refreshOrderFulfilment(company, linkedOrder);
+  }
   pruneBankReconciliations(company);
   return { ok: true, voucher };
 }
@@ -3617,7 +3667,7 @@ export function deleteVoucher(company, voucherId) {
   pruneBankReconciliations(company);
   if (company.vouchers.length !== before && existing?.orderId) {
     const order = (company.orders ?? []).find((entry) => entry.id === existing.orderId);
-    if (order && order.status === 'Closed') order.status = 'Open';
+    if (order) refreshOrderFulfilment(company, order);
   }
   return company.vouchers.length !== before;
 }
@@ -4343,6 +4393,7 @@ export function addOrder(company, input) {
       qty,
       rate,
       amount,
+      fulfilledQty: 0,
       godownId,
       ...(item.batchTracking && batchNo ? { batchNo } : {}),
       ...(item.batchTracking && expiryDate ? { expiryDate } : {}),
@@ -4371,6 +4422,47 @@ export function addOrder(company, input) {
   return { ok: true, order };
 }
 
+export function orderRemainingItems(order) {
+  return (order.items ?? [])
+    .map((line) => {
+      const qty = round3(Math.max(0, Number(line.qty) - Number(line.fulfilledQty ?? 0)));
+      return { ...line, qty, amount: round2(qty * Number(line.rate ?? 0)) };
+    })
+    .filter((line) => line.qty > 0.0005);
+}
+
+/** Recomputes an order's fulfilled quantities from every linked voucher. */
+export function refreshOrderFulfilment(company, order) {
+  if (!order || order.status === 'Cancelled') return order;
+  for (const line of order.items ?? []) line.fulfilledQty = 0;
+  const vouchers = (company.vouchers ?? []).filter((voucher) => voucher.orderId === order.id);
+  for (const voucher of vouchers) {
+    for (const item of voucher.items ?? []) {
+      let qty = round3(item.qty);
+      for (const line of order.items ?? []) {
+        if (qty <= 0.0005 || line.stockItemId !== item.stockItemId) continue;
+        if (line.batchNo && item.batchNo && line.batchNo !== item.batchNo) continue;
+        const open = round3(Number(line.qty) - Number(line.fulfilledQty ?? 0));
+        if (open <= 0.0005) continue;
+        const used = Math.min(open, qty);
+        line.fulfilledQty = round3(Number(line.fulfilledQty ?? 0) + used);
+        qty = round3(qty - used);
+      }
+    }
+  }
+  const complete = (order.items ?? []).every(
+    (line) => Number(line.fulfilledQty ?? 0) >= Number(line.qty) - 0.0005,
+  );
+  if (complete && order.status === 'Open') {
+    order.status = 'Closed';
+    order.closedByFulfilment = true;
+  } else if (!complete && order.status === 'Closed' && order.closedByFulfilment) {
+    order.status = 'Open';
+    delete order.closedByFulfilment;
+  }
+  return order;
+}
+
 export function setOrderStatus(company, orderId, status) {
   const order = (company.orders ?? []).find((entry) => entry.id === orderId);
   if (!order) return { ok: false, error: 'Order not found.' };
@@ -4378,6 +4470,7 @@ export function setOrderStatus(company, orderId, status) {
     return { ok: false, error: 'Choose a valid order status.' };
   }
   order.status = status;
+  delete order.closedByFulfilment;
   return { ok: true, order };
 }
 
@@ -4660,11 +4753,19 @@ export function updateLedger(company, ledgerId, input) {
 
   const party = ledgerTaxDetails(input, ledger);
   if (party.error) return { ok: false, error: party.error };
+  const credit = ledgerCreditLimit(input, ledger);
+  if (credit.error) return { ok: false, error: credit.error };
+  const interest = ledgerInterestRate(input, ledger);
+  if (interest.error) return { ok: false, error: interest.error };
 
   ledger.name = name;
   ledger.groupId = group.id;
   ledger.opening = round2(opening);
   ledger.openingType = input.openingType === 'Cr' ? 'Cr' : 'Dr';
+  if (credit.limit !== null) ledger.creditLimit = credit.limit;
+  else delete ledger.creditLimit;
+  if (interest.rate !== null) ledger.interestRate = interest.rate;
+  else delete ledger.interestRate;
   if (input.gstin !== undefined) {
     if (party.details.gstin) ledger.gstin = party.details.gstin;
     else delete ledger.gstin;
@@ -4880,6 +4981,18 @@ function validateImportedCompany(company) {
       return `Company "${name}" has a ledger without an id or name.`;
     }
     if (ledgerIds.has(ledger.id)) return `Company "${name}" has duplicate ledger ids.`;
+    if (ledger.creditLimit !== undefined) {
+      const limit = parseAmount(ledger.creditLimit);
+      if (limit === null || limit < 0) {
+        return `Company "${name}": ledger "${ledger.name}" has an invalid credit limit.`;
+      }
+    }
+    if (ledger.interestRate !== undefined) {
+      const rate = parseAmount(ledger.interestRate);
+      if (rate === null || rate < 0 || rate > 100) {
+        return `Company "${name}": ledger "${ledger.name}" has an invalid interest rate.`;
+      }
+    }
     if (!groupIds.has(ledger.groupId)) {
       return `Company "${name}": ledger "${ledger.name}" points at a missing group.`;
     }
@@ -5659,6 +5772,12 @@ function validateImportedCompany(company) {
       const rate = parseAmount(line.rate);
       if (qty === null || qty <= 0 || rate === null || rate < 0) {
         return `Company "${name}": order ${order.no ?? ''} has an invalid quantity or rate.`;
+      }
+      if (line.fulfilledQty !== undefined) {
+        const fulfilled = parseQty(line.fulfilledQty);
+        if (fulfilled === null || fulfilled < 0 || fulfilled > qty + 0.0005) {
+          return `Company "${name}": order ${order.no ?? ''} has an invalid fulfilled quantity.`;
+        }
       }
       total = round2(total + qty * rate);
     }

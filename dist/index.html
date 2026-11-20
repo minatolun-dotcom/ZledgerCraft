@@ -2351,6 +2351,70 @@ kbd {
   }
 }
 
+/* --- Phone layout pass: stack controls, keep tables scrollable --- */
+@media (max-width: 700px) {
+  .panel {
+    padding: 0.9rem;
+  }
+
+  .filter-bar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .filter-bar .field,
+  .filter-bar .inline-field,
+  .filter-bar .btn {
+    width: 100%;
+  }
+
+  .form-grid,
+  .pay-grid,
+  .ratio-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-actions {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .form-actions .btn {
+    flex: 1 1 140px;
+  }
+
+  .table-wrap,
+  .table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .data-table {
+    min-width: 620px;
+  }
+
+  .topbar {
+    gap: 0.5rem;
+  }
+
+  .brand {
+    font-size: 1rem;
+  }
+
+  .brand-mark {
+    width: 20px;
+    height: 20px;
+  }
+
+  .btn,
+  .link-row,
+  .nav-item {
+    min-height: 44px;
+  }
+}
+
 </style>
   </head>
   <body>
@@ -18400,6 +18464,54 @@ function importLedgerCsv(text) {
   return { ok: true, count: additions.length };
 }
 
+function importStockItemCsv(text, target = null) {
+  const active = target ?? company();
+  if (!active) return { ok: false, error: 'Open a company first.' };
+  const parsed = csvObjects(text);
+  if (!parsed.ok) return parsed;
+  if (!parsed.header.includes('name')) return { ok: false, error: 'Stock item CSV needs a Name column.' };
+  const value = (record, ...keys) => {
+    const key = keys.find((entry) => parsed.header.includes(entry));
+    return key ? String(record[key] ?? '').trim() : '';
+  };
+  const clone = JSON.parse(JSON.stringify(active));
+  const inputs = [];
+  for (const record of parsed.rows) {
+    const name = value(record, 'name', 'item');
+    if (!name) return { ok: false, error: `Row ${record.__row}: item name is required.` };
+    const groupName = value(record, 'group', 'stock group') || 'Primary';
+    const unitName = value(record, 'unit', 'uom');
+    const group = clone.stockGroups.find((entry) => entry.name.toLowerCase() === groupName.toLowerCase());
+    if (!group) return { ok: false, error: `Row ${record.__row}: stock group "${groupName}" was not found.` };
+    const unit = clone.units.find(
+      (entry) =>
+        entry.symbol.toLowerCase() === unitName.toLowerCase() ||
+        entry.name.toLowerCase() === unitName.toLowerCase(),
+    );
+    if (!unit) return { ok: false, error: `Row ${record.__row}: unit "${unitName}" was not found.` };
+    const input = {
+      name,
+      stockGroupId: group.id,
+      unitId: unit.id,
+      openingQty: value(record, 'opening', 'opening qty', 'quantity') || 0,
+      openingRate: value(record, 'rate', 'opening rate') || 0,
+      hsn: value(record, 'hsn', 'hsn/sac', 'sac'),
+      reorderLevel: value(record, 'reorder', 'reorder level') || 0,
+      sellingPrice: value(record, 'selling', 'selling price') || 0,
+      purchasePrice: value(record, 'purchase', 'purchase price') || 0,
+      batchTracking: /^(1|true|yes|y)$/i.test(value(record, 'batch', 'batch tracking')),
+    };
+    const checked = addStockItem(clone, input);
+    if (!checked.ok) return { ok: false, error: `Row ${record.__row}: ${checked.error}` };
+    inputs.push(input);
+  }
+  for (const input of inputs) {
+    const result = addStockItem(active, input);
+    if (!result.ok) return { ok: false, error: result.error };
+  }
+  return { ok: true, count: inputs.length };
+}
+
 function importVoucherCsv(text) {
   const active = company();
   if (!active) return { ok: false, error: 'Open a company first.' };
@@ -18461,6 +18573,75 @@ function parseStatementDate(raw) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
   const date = new Date(`${iso}T00:00:00Z`);
   return date.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
+function statementDateFromDigits(raw) {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  if (digits.length < 8) return null;
+  return parseStatementDate(`${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`);
+}
+
+function parseOfxStatement(text) {
+  const source = String(text ?? '');
+  const blocks = source.match(/<STMTTRN>([\s\S]*?)(?=<\/STMTTRN>|<STMTTRN>|<\/BANKTRANLIST>|$)/gi) ?? [];
+  const lines = [];
+  for (const block of blocks) {
+    const fields = {};
+    for (const match of block.matchAll(/<([A-Z0-9]+)>([^<\r\n]*)/gi)) {
+      fields[match[1].toUpperCase()] = match[2].trim();
+    }
+    const date = statementDateFromDigits(fields.DTPOSTED || fields.DTUSER);
+    const amount = parseAmount(fields.TRNAMT);
+    if (!date) return { ok: false, error: 'An OFX transaction has an invalid post date.' };
+    if (amount === null || amount === 0) return { ok: false, error: 'An OFX transaction has an invalid amount.' };
+    const description = [fields.NAME, fields.MEMO].filter(Boolean).join(' · ').slice(0, 200);
+    lines.push({
+      date,
+      description,
+      reference: String(fields.FITID || fields.CHECKNUM || '').slice(0, 100),
+      amount: round2(amount),
+    });
+  }
+  if (!lines.length) return { ok: false, error: 'No OFX transactions were found.' };
+  return { ok: true, lines };
+}
+
+function parseQifStatement(text) {
+  const blocks = String(text ?? '').split(/^\^\s*$/m);
+  const lines = [];
+  for (const block of blocks) {
+    const fields = {};
+    for (const line of block.split(/\r?\n/)) {
+      const key = line.trim().slice(0, 1).toUpperCase();
+      if (['D', 'T', 'P', 'M', 'N'].includes(key)) fields[key] = line.trim().slice(1).trim();
+    }
+    if (!fields.D && !fields.T) continue;
+    const normalizedDate = String(fields.D ?? '').replace(/'/g, '/');
+    const qifDate = normalizedDate.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+    const date = qifDate
+      ? parseStatementDate(`${qifDate[3]}-${qifDate[1].padStart(2, '0')}-${qifDate[2].padStart(2, '0')}`)
+      : parseStatementDate(normalizedDate);
+    const amount = parseAmount(fields.T);
+    if (!date) return { ok: false, error: 'A QIF transaction has an invalid date.' };
+    if (amount === null || amount === 0) return { ok: false, error: 'A QIF transaction has an invalid amount.' };
+    lines.push({
+      date,
+      description: String(fields.P || fields.M || '').slice(0, 200),
+      reference: String(fields.N || '').slice(0, 100),
+      amount: round2(amount),
+    });
+  }
+  if (!lines.length) return { ok: false, error: 'No QIF transactions were found.' };
+  return { ok: true, lines };
+}
+
+function parseBankStatement(text) {
+  const source = String(text ?? '');
+  if (/<OFX>|<STMTTRN>/i.test(source)) return parseOfxStatement(source);
+  if (/^!Type:/im.test(source) || /^D\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/m.test(source)) {
+    return parseQifStatement(source);
+  }
+  return parseBankStatementCsv(source);
 }
 
 function parseBankStatementCsv(text) {
@@ -20387,13 +20568,13 @@ function bankReconScreen() {
     ${canWrite
       ? panel(
           'Import bank statement',
-          `<p class="muted">CSV columns: <code>Date, Description, Reference, Debit, Credit</code>. Dates accept YYYY-MM-DD or DD/MM/YYYY. Debit is money out; credit is money in. Importing replaces the current statement and its matches.</p>
+          `<p class="muted">Paste or choose CSV, OFX or QIF. CSV columns: <code>Date, Description, Reference, Debit, Credit</code>; dates accept YYYY-MM-DD or DD/MM/YYYY. OFX transactions use TRNAMT/DTPOSTED, and QIF uses D/T/P/N fields. Debit is money out; credit is money in. Importing replaces the current statement and its matches.</p>
           <div class="pay-grid">
             <label class="field"><span>Opening balance (optional)</span><input id="bank-opening-balance" inputmode="decimal" placeholder="0.00"></label>
             <label class="field"><span>Closing balance (optional)</span><input id="bank-closing-balance" inputmode="decimal" placeholder="0.00"></label>
           </div>
           <p class="muted small">Provide both balances to check that opening plus statement movement equals closing. This validates the statement file, not the book balance.</p>
-          <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="bank-statement-csv"></label>
+          <label class="field"><span>Statement file (CSV, OFX or QIF)</span><input type="file" accept=".csv,.ofx,.qif,text/csv,application/x-ofx,application/qif" data-csv-target="bank-statement-csv"></label>
           <textarea id="bank-statement-csv" class="backup-box import-box" rows="7" placeholder="Date,Description,Reference,Debit,Credit\n10/05/2026,Customer receipt,R1,,1000\n11/05/2026,Supplier payment,P1,500," aria-label="Bank statement CSV"></textarea>
           <div class="form-actions"><button class="btn small primary" type="button" data-action="import-bank-statement">Import statement</button></div>`,
         )
@@ -20428,6 +20609,13 @@ function importScreen() {
     <label class="field"><span>Excel workbook (.xlsx)</span><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" data-xlsx-target="ledger-csv" data-xlsx-sheet="Ledgers"></label>
     <textarea id="ledger-csv" class="backup-box import-box" rows="7" placeholder="Name,Group,Opening,Type\nSharma Traders,Sundry Debtors,0,Dr\nRent,Indirect Expenses,0,Dr" aria-label="Ledger import CSV"></textarea>
     <div class="form-actions"><button class="btn small primary" type="button" data-action="import-ledgers"${can('master.write') ? '' : ' disabled'}>Import ledgers</button></div>`,
+  )}
+  ${panel(
+    'Import stock items from CSV',
+    `<p class="muted">Header: <code>Name, Group, Unit, Opening, Rate, Reorder, Selling, Purchase, HSN, Batch</code>. Only Name and Unit are required; Group defaults to Primary. Unit matches its symbol or name. Batch accepts Yes/No. The whole file is rejected if any row fails.</p>
+    <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="stock-item-csv"></label>
+    <textarea id="stock-item-csv" class="backup-box import-box" rows="7" placeholder="Name,Group,Unit,Opening,Rate,Reorder,Selling,Purchase,HSN,Batch\nCotton Shirt,Primary,Nos,10,100,12,150,90,6109,No" aria-label="Stock item import CSV"></textarea>
+    <div class="form-actions"><button class="btn small primary" type="button" data-action="import-stock-items"${can('master.write') ? '' : ' disabled'}>Import stock items</button></div>`,
   )}
   ${panel(
     'Import vouchers from CSV or Excel',
@@ -24598,7 +24786,7 @@ async function handleClick(event) {
         break;
       }
       const text = document.getElementById('bank-statement-csv')?.value ?? '';
-      const parsed = parseBankStatementCsv(text);
+      const parsed = parseBankStatement(text);
       if (!parsed.ok) {
         setFlash(parsed.error, 'warn');
         render();
@@ -24776,6 +24964,24 @@ async function handleClick(event) {
       logAudit('ledger.import', `Imported ${result.count} ledger${result.count === 1 ? '' : 's'} from CSV.`);
       persist();
       setFlash(`Imported ${result.count} ledger${result.count === 1 ? '' : 's'}.`);
+      render();
+      break;
+    }
+    case 'import-stock-items': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const text = document.getElementById('stock-item-csv')?.value ?? '';
+      const result = importStockItemCsv(text);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit('stockItem.import', `Imported ${result.count} stock item${result.count === 1 ? '' : 's'} from CSV.`);
+      persist();
+      setFlash(`Imported ${result.count} stock item${result.count === 1 ? '' : 's'}.`);
       render();
       break;
     }

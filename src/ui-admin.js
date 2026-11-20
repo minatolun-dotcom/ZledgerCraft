@@ -4,6 +4,7 @@ import {
   VOUCHER_TYPES,
   booksStart,
   addLedger,
+  addStockItem,
   addVoucher,
   dateLabel,
   exportState,
@@ -311,6 +312,54 @@ export function importLedgerCsv(text) {
   return { ok: true, count: additions.length };
 }
 
+export function importStockItemCsv(text, target = null) {
+  const active = target ?? company();
+  if (!active) return { ok: false, error: 'Open a company first.' };
+  const parsed = csvObjects(text);
+  if (!parsed.ok) return parsed;
+  if (!parsed.header.includes('name')) return { ok: false, error: 'Stock item CSV needs a Name column.' };
+  const value = (record, ...keys) => {
+    const key = keys.find((entry) => parsed.header.includes(entry));
+    return key ? String(record[key] ?? '').trim() : '';
+  };
+  const clone = JSON.parse(JSON.stringify(active));
+  const inputs = [];
+  for (const record of parsed.rows) {
+    const name = value(record, 'name', 'item');
+    if (!name) return { ok: false, error: `Row ${record.__row}: item name is required.` };
+    const groupName = value(record, 'group', 'stock group') || 'Primary';
+    const unitName = value(record, 'unit', 'uom');
+    const group = clone.stockGroups.find((entry) => entry.name.toLowerCase() === groupName.toLowerCase());
+    if (!group) return { ok: false, error: `Row ${record.__row}: stock group "${groupName}" was not found.` };
+    const unit = clone.units.find(
+      (entry) =>
+        entry.symbol.toLowerCase() === unitName.toLowerCase() ||
+        entry.name.toLowerCase() === unitName.toLowerCase(),
+    );
+    if (!unit) return { ok: false, error: `Row ${record.__row}: unit "${unitName}" was not found.` };
+    const input = {
+      name,
+      stockGroupId: group.id,
+      unitId: unit.id,
+      openingQty: value(record, 'opening', 'opening qty', 'quantity') || 0,
+      openingRate: value(record, 'rate', 'opening rate') || 0,
+      hsn: value(record, 'hsn', 'hsn/sac', 'sac'),
+      reorderLevel: value(record, 'reorder', 'reorder level') || 0,
+      sellingPrice: value(record, 'selling', 'selling price') || 0,
+      purchasePrice: value(record, 'purchase', 'purchase price') || 0,
+      batchTracking: /^(1|true|yes|y)$/i.test(value(record, 'batch', 'batch tracking')),
+    };
+    const checked = addStockItem(clone, input);
+    if (!checked.ok) return { ok: false, error: `Row ${record.__row}: ${checked.error}` };
+    inputs.push(input);
+  }
+  for (const input of inputs) {
+    const result = addStockItem(active, input);
+    if (!result.ok) return { ok: false, error: result.error };
+  }
+  return { ok: true, count: inputs.length };
+}
+
 export function importVoucherCsv(text) {
   const active = company();
   if (!active) return { ok: false, error: 'Open a company first.' };
@@ -372,6 +421,75 @@ export function parseStatementDate(raw) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
   const date = new Date(`${iso}T00:00:00Z`);
   return date.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
+function statementDateFromDigits(raw) {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  if (digits.length < 8) return null;
+  return parseStatementDate(`${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`);
+}
+
+export function parseOfxStatement(text) {
+  const source = String(text ?? '');
+  const blocks = source.match(/<STMTTRN>([\s\S]*?)(?=<\/STMTTRN>|<STMTTRN>|<\/BANKTRANLIST>|$)/gi) ?? [];
+  const lines = [];
+  for (const block of blocks) {
+    const fields = {};
+    for (const match of block.matchAll(/<([A-Z0-9]+)>([^<\r\n]*)/gi)) {
+      fields[match[1].toUpperCase()] = match[2].trim();
+    }
+    const date = statementDateFromDigits(fields.DTPOSTED || fields.DTUSER);
+    const amount = parseAmount(fields.TRNAMT);
+    if (!date) return { ok: false, error: 'An OFX transaction has an invalid post date.' };
+    if (amount === null || amount === 0) return { ok: false, error: 'An OFX transaction has an invalid amount.' };
+    const description = [fields.NAME, fields.MEMO].filter(Boolean).join(' · ').slice(0, 200);
+    lines.push({
+      date,
+      description,
+      reference: String(fields.FITID || fields.CHECKNUM || '').slice(0, 100),
+      amount: round2(amount),
+    });
+  }
+  if (!lines.length) return { ok: false, error: 'No OFX transactions were found.' };
+  return { ok: true, lines };
+}
+
+export function parseQifStatement(text) {
+  const blocks = String(text ?? '').split(/^\^\s*$/m);
+  const lines = [];
+  for (const block of blocks) {
+    const fields = {};
+    for (const line of block.split(/\r?\n/)) {
+      const key = line.trim().slice(0, 1).toUpperCase();
+      if (['D', 'T', 'P', 'M', 'N'].includes(key)) fields[key] = line.trim().slice(1).trim();
+    }
+    if (!fields.D && !fields.T) continue;
+    const normalizedDate = String(fields.D ?? '').replace(/'/g, '/');
+    const qifDate = normalizedDate.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+    const date = qifDate
+      ? parseStatementDate(`${qifDate[3]}-${qifDate[1].padStart(2, '0')}-${qifDate[2].padStart(2, '0')}`)
+      : parseStatementDate(normalizedDate);
+    const amount = parseAmount(fields.T);
+    if (!date) return { ok: false, error: 'A QIF transaction has an invalid date.' };
+    if (amount === null || amount === 0) return { ok: false, error: 'A QIF transaction has an invalid amount.' };
+    lines.push({
+      date,
+      description: String(fields.P || fields.M || '').slice(0, 200),
+      reference: String(fields.N || '').slice(0, 100),
+      amount: round2(amount),
+    });
+  }
+  if (!lines.length) return { ok: false, error: 'No QIF transactions were found.' };
+  return { ok: true, lines };
+}
+
+export function parseBankStatement(text) {
+  const source = String(text ?? '');
+  if (/<OFX>|<STMTTRN>/i.test(source)) return parseOfxStatement(source);
+  if (/^!Type:/im.test(source) || /^D\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/m.test(source)) {
+    return parseQifStatement(source);
+  }
+  return parseBankStatementCsv(source);
 }
 
 export function parseBankStatementCsv(text) {

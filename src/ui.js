@@ -255,8 +255,10 @@ import {
   parseCsv,
   csvObjects,
   importLedgerCsv,
+  importStockItemCsv,
   importVoucherCsv,
   parseStatementDate,
+  parseBankStatement,
   parseBankStatementCsv,
   budgetsScreen,
   forexScreen,
@@ -4437,7 +4439,7 @@ async function handleClick(event) {
         break;
       }
       const text = document.getElementById('bank-statement-csv')?.value ?? '';
-      const parsed = parseBankStatementCsv(text);
+      const parsed = parseBankStatement(text);
       if (!parsed.ok) {
         setFlash(parsed.error, 'warn');
         render();
@@ -4615,6 +4617,24 @@ async function handleClick(event) {
       logAudit('ledger.import', `Imported ${result.count} ledger${result.count === 1 ? '' : 's'} from CSV.`);
       persist();
       setFlash(`Imported ${result.count} ledger${result.count === 1 ? '' : 's'}.`);
+      render();
+      break;
+    }
+    case 'import-stock-items': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const text = document.getElementById('stock-item-csv')?.value ?? '';
+      const result = importStockItemCsv(text);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit('stockItem.import', `Imported ${result.count} stock item${result.count === 1 ? '' : 's'} from CSV.`);
+      persist();
+      setFlash(`Imported ${result.count} stock item${result.count === 1 ? '' : 's'}.`);
       render();
       break;
     }

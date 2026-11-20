@@ -2337,3 +2337,67 @@ kbd {
     min-height: 44px;
   }
 }
+
+/* --- Phone layout pass: stack controls, keep tables scrollable --- */
+@media (max-width: 700px) {
+  .panel {
+    padding: 0.9rem;
+  }
+
+  .filter-bar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .filter-bar .field,
+  .filter-bar .inline-field,
+  .filter-bar .btn {
+    width: 100%;
+  }
+
+  .form-grid,
+  .pay-grid,
+  .ratio-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-actions {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .form-actions .btn {
+    flex: 1 1 140px;
+  }
+
+  .table-wrap,
+  .table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .data-table {
+    min-width: 620px;
+  }
+
+  .topbar {
+    gap: 0.5rem;
+  }
+
+  .brand {
+    font-size: 1rem;
+  }
+
+  .brand-mark {
+    width: 20px;
+    height: 20px;
+  }
+
+  .btn,
+  .link-row,
+  .nav-item {
+    min-height: 44px;
+  }
+}

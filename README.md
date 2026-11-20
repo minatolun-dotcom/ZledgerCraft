@@ -654,9 +654,10 @@ disabled.
 - Localhost server mode keeps a browser-local mirror so switching back to
   browser storage does not lose the latest state. Signed-in LAN mode disables
   that mirror and browser snapshots.
-- CSV import for ledgers (`Name,Group,Opening,Type`), multi-line balanced
+- CSV import for ledgers (`Name,Group,Opening,Type`), stock items (`Name,Group,Unit,Opening,Rate,Reorder,Selling,Purchase,HSN,Batch`), multi-line balanced
   vouchers (`Date,Type,No,Ledger,Side,Amount,Narration`) and bank statements
-  (`Date,Description,Reference,Debit,Credit`). Excel `.xlsx` workbooks can load
+  (`Date,Description,Reference,Debit,Credit`). Bank statements also accept OFX and
+  QIF files. Excel `.xlsx` workbooks can load
   ledgers or vouchers into the same review box: the `Ledgers`/`Vouchers` sheet
   is used when present, otherwise the first worksheet. Date-styled cells become
   YYYY-MM-DD. The workbook is converted to the same CSV text and imported
@@ -729,7 +730,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way drafts with saved Part B details and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, validity tracking, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
 | Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit and paid-days proration, bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV; no leave ledger, overtime, arrears, formula or percentage pay heads, PF/ESI/PT computation, employer contributions, ECR/returns, Form 24Q/16 or bank payment workflow |
-| Bank reconciliation and statement import | Covered — CSV statement import, optional opening/closing balance validation, auto/manual matching, adjustment posting and book balance; no OFX/QIF or live bank feeds |
+| Bank reconciliation and statement import | Covered — CSV, OFX and QIF statement import, optional opening/closing balance validation, auto/manual matching, adjustment posting and book balance; no MT940, Excel or live bank feeds |
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque/DD advice and receipt deposit-slip previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no magnetic-ink cheque stationery presets or bank-issued advice formats |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary and break-up; no merging categories, split allocations or unallocated reconciliation |
 | Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance and over-budget status; no phased, revised, approval or cost-centre budgets |

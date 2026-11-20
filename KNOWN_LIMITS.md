@@ -42,8 +42,8 @@ README. When a new limit is introduced, add it here in the same change.
 | ID | Limit | Current behaviour / consequence |
 | --- | --- | --- |
 | KL-13 | JSON backup is manual | Browser JSON backup/restore is manual; LAN mode adds scheduled SQLite snapshots and Neon mode adds Postgres JSON snapshots. There is no scheduled browser JSON export, branded PDF or Excel workbook backup. |
-| KL-14 | CSV import is deliberately narrow | Imports ledgers, balanced multi-line vouchers and bank statements only. |
-| KL-15 | Missing from CSV import | Stock items, bill allocations, cheque/DD details, cost-centre allocations, currency masters/rates, GST details, TDS/TCS details and arbitrary masters are not imported from CSV. Excel `.xlsx` ledgers/vouchers use the same CSV schema; Tally XML covers ledgers, stock groups/items and vouchers. |
+| KL-14 | CSV import is deliberately narrow | Imports ledgers, stock items, balanced multi-line vouchers and bank statements. |
+| KL-15 | Missing from CSV import | Bill allocations, cheque/DD details, cost-centre allocations, currency masters/rates, GST details, TDS/TCS details and arbitrary masters are not imported from CSV. Stock items are imported separately. Excel `.xlsx` ledgers/vouchers use the same CSV schema; Tally XML covers ledgers, stock groups/items and vouchers. |
 | KL-16 | Import is all-or-nothing | One invalid row rejects the whole file; there is no partial import wizard, mapping UI or dry-run report beyond the error. |
 | KL-17 | Restore is whole-installation | A restore replaces the active data set; there is no company-only, period-only or merge restore. |
 | KL-18 | Backup format is version 1 | No migration framework beyond tolerant normalisation. Older backups may lose unsupported fields. |
@@ -83,7 +83,7 @@ README. When a new limit is introduced, add it here in the same change.
 
 | ID | Limit | Current behaviour / consequence |
 | --- | --- | --- |
-| KL-32 | Bank statement import is CSV only | No OFX, QIF, MT940, Excel or live bank feed. |
+| KL-32 | Bank statement import is CSV only | CSV, OFX and QIF are supported. No MT940, Excel or live bank feed. |
 | KL-33 | Auto-match is narrow | Exact signed amount, one-to-one voucher, and a seven-day date window. No fuzzy narration, tolerance, split matching or many-to-one matching. |
 | KL-34 | Reconciliation does not post adjustments | Matched/unmatched is a separate layer. An unmatched line can post a Journal against a chosen adjustment ledger, after which the line is matched. There is no bulk adjustment wizard or automatic category suggestion. |
 | KL-35 | Statement balance validation is optional | An imported statement can carry opening and closing balances, and reconciliation shows whether opening plus movement equals closing. The fields are optional, and the check proves only that the file is internally complete, not that it matches the bank or the book balance. |
@@ -159,7 +159,7 @@ README. When a new limit is introduced, add it here in the same change.
 
 | ID | Limit | Current behaviour / consequence |
 | --- | --- | --- |
-| KL-52 | Desktop-first layout | Responsive enough for tablet/desktop widths, but not a mobile-first or touch-first experience. |
+| KL-52 | Desktop-first layout | A phone pass stacks filters and forms, scrolls wide tables and enlarges touch targets. It remains desktop-first, not a mobile-first or fully touch-first experience. |
 | KL-53 | India/INR assumptions | Indian numbering, rupee wording, Apr–Mar default year and en-IN formatting. Foreign currencies are supported on vouchers, but INR is always the base/reporting currency. No locale switcher, multi-language UI or alternative fiscal calendars. |
 | KL-54 | Date input display follows the browser | Stored dates are ISO, printed labels are `DD-Mon-YYYY`, but native date inputs display in the browser locale. |
 | KL-55 | Draft recovery is local-only | A new voucher draft is saved to browser storage while typing and restored when the same company and voucher type are reopened; a saved voucher clears it. Drafts are not shared across browsers/devices, are not part of the workspace backup, and editing an existing voucher does not create a draft. |

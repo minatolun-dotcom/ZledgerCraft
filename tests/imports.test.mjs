@@ -4,7 +4,11 @@ import test from 'node:test';
 import { createCompany } from '../src/store.js';
 import {
   csvObjects,
+  importStockItemCsv,
+  parseBankStatement,
   parseBankStatementCsv,
+  parseOfxStatement,
+  parseQifStatement,
   parseCsv,
   parseCsvChecked,
 } from '../src/ui-admin.js';
@@ -64,6 +68,46 @@ test('CSV rejects unclosed quotes, text after a quote and duplicate headers', ()
   const quoteInside = parseCsvChecked('Name,Group\nRao"tail,Sundry Debtors\n');
   assert.equal(quoteInside.ok, false);
   assert.match(quoteInside.error, /inside an unquoted field/);
+});
+
+test('OFX and QIF statements parse into signed bank lines', () => {
+  const ofx = parseOfxStatement(`<OFX><BANKTRANLIST>
+    <STMTTRN><TRNTYPE>CREDIT<DTPOSTED>20260410120000<TRNAMT>200.00<FITID>FIT-1<NAME>Customer receipt</STMTTRN>
+    <STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260411<TRNAMT>-50<FITID>FIT-2<NAME>Bank charge</STMTTRN>
+  </BANKTRANLIST></OFX>`);
+  assert.equal(ofx.ok, true, ofx.error);
+  assert.deepEqual(ofx.lines[0], {
+    date: '2026-04-10',
+    description: 'Customer receipt',
+    reference: 'FIT-1',
+    amount: 200,
+  });
+  assert.equal(ofx.lines[1].amount, -50);
+
+  const qif = parseQifStatement('!Type:Bank\nD4/11/2026\nT-75.50\nPBank fee\nNQ1\n^\nD4/12/2026\nT1000\nPReceipt\n^');
+  assert.equal(qif.ok, true, qif.error);
+  assert.equal(qif.lines[0].date, '2026-04-11');
+  assert.equal(qif.lines[0].amount, -75.5);
+  assert.equal(qif.lines[1].amount, 1000);
+  assert.equal(parseBankStatement('!Type:Bank\nD4/11/2026\nT-1\n^').ok, true);
+});
+
+test('stock item CSV import resolves units and is all-or-nothing', () => {
+  const company = createCompany('Import Stock Co', '2026-04-01').company;
+  const imported = importStockItemCsv(
+    'Name,Group,Unit,Opening,Rate,Reorder,Selling,Purchase,HSN,Batch\nCotton Shirt,Primary,Nos,10,100,12,150,90,6109,No',
+    company,
+  );
+  assert.equal(imported.ok, true, imported.error);
+  assert.equal(imported.count, 1);
+  assert.equal(company.stockItems.length, 1);
+  assert.equal(company.stockItems[0].name, 'Cotton Shirt');
+  assert.equal(company.stockItems[0].openingQty, 10);
+  assert.equal(company.stockItems[0].sellingPrice, 150);
+  const before = company.stockItems.length;
+  const bad = importStockItemCsv('Name,Group,Unit\nShirt,Primary,Missing', company);
+  assert.equal(bad.ok, false);
+  assert.equal(company.stockItems.length, before, 'invalid files add nothing');
 });
 
 test('bank statement fixture resolves debit/credit and quoted descriptions', () => {

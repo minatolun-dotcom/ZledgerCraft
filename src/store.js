@@ -2606,17 +2606,20 @@ export function deleteGstRate(company, rateId) {
 }
 
 function normaliseBudgetTargetType(value) {
-  return value === 'group' || value === 'ledger' || value === 'costCentre' ? value : null;
+  return value === 'group' || value === 'ledger' || value === 'costCentre' || value === 'costCategory'
+    ? value
+    : null;
 }
 
 function budgetTargetOf(company, targetType, targetId) {
   if (targetType === 'group') return (company.groups ?? []).find((group) => group.id === targetId) ?? null;
   if (targetType === 'ledger') return (company.ledgers ?? []).find((ledger) => ledger.id === targetId) ?? null;
   if (targetType === 'costCentre') return (company.costCentres ?? []).find((centre) => centre.id === targetId) ?? null;
+  if (targetType === 'costCategory') return (company.costCategories ?? []).find((category) => category.id === targetId) ?? null;
   return null;
 }
 
-/** Annual budgets by ledger, group or cost centre; one target and year per record. */
+/** Annual budgets by ledger, group, cost centre or cost category; one target and year per record. */
 export function normalizeBudgets(company) {
   const seenIds = new Set();
   const seenNames = new Set();
@@ -2667,7 +2670,7 @@ export function normalizeBudgets(company) {
 
 export function addBudget(company, input = {}) {
   const targetType = normaliseBudgetTargetType(input.targetType);
-  if (!targetType) return { ok: false, error: 'Choose a ledger, group or cost centre for the budget.' };
+  if (!targetType) return { ok: false, error: 'Choose a ledger, group, cost centre or cost category for the budget.' };
   const target = budgetTargetOf(company, targetType, input.targetId);
   if (!target) return { ok: false, error: 'Budget target not found.' };
   const year = (company.years ?? []).find((item) => item.id === input.yearId);
@@ -2840,6 +2843,10 @@ export function deleteCostCategory(company, categoryId) {
   }
   const used = (company.costCentres ?? []).filter((centre) => centre.categoryId === categoryId).length;
   if (used > 0) return { ok: false, error: `Move or delete the ${used} cost centre(s) in this category first.` };
+  const budgeted = (company.budgets ?? []).filter(
+    (budget) => budget.targetType === 'costCategory' && budget.targetId === categoryId,
+  ).length;
+  if (budgeted > 0) return { ok: false, error: `This category is used by ${budgeted} budget(s). Delete those budgets first.` };
   company.costCategories = company.costCategories.filter((item) => item.id !== categoryId);
   return { ok: true, category };
 }
@@ -2896,6 +2903,10 @@ export function deleteCostCentre(company, centreId) {
   if (used > 0) {
     return { ok: false, error: `"${centre.name}" is used on ${used} voucher line(s). Clear those allocations first.` };
   }
+  const budgeted = (company.budgets ?? []).filter(
+    (budget) => budget.targetType === 'costCentre' && budget.targetId === centreId,
+  ).length;
+  if (budgeted > 0) return { ok: false, error: `This centre is used by ${budgeted} budget(s). Delete those budgets first.` };
   company.costCentres = company.costCentres.filter((item) => item.id !== centreId);
   return { ok: true, centre };
 }

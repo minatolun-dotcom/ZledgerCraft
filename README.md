@@ -317,10 +317,11 @@ disabled.
 - Cost categories and cost centres with add, rename and delete masters, and a
   centre can be moved to another category. Categories without centres and
   centres used by vouchers are protected from deletion.
-- Annual budgets per ledger, group or cost centre for a financial year, with
-  add, edit, delete and "duplicate next year" masters. One budget per target per
-  year is enforced; editing an amount or name keeps the previous amount in a
-  short history, and cost-centre budgets measure spend tagged to that centre.
+- Annual budgets per ledger, group, cost centre or cost category for a financial
+  year, with add, edit, delete and "duplicate next year" masters. One budget per
+  target per year is enforced; editing an amount or name keeps the previous
+  amount in a short history. Cost-centre budgets measure spend tagged to that
+  centre, and a cost-category budget covers every centre in the category.
 - Foreign currencies with a code, name, symbol and dated INR exchange rates that
   can be added, edited, redated or deleted from the rate history.
   INR remains the base currency; voucher amounts can be entered in a foreign
@@ -505,9 +506,11 @@ disabled.
 - Cost centre summary by category and centre, with debit/credit/net, voucher
   counts, period filter, an unallocated-line reconciliation and click-through
   to a cost-centre break-up of voucher lines.
-- Budget vs Actual by ledger or group for a financial year and as-on date:
-  budget, actual, variance, used percentage, over-budget status and Print/CSV.
-  Actuals use period voucher movement and exclude opening balances.
+- Budget vs Actual by ledger, group, cost centre or cost category for a
+  financial year and as-on date: budget, actual, variance, used percentage,
+  over-budget status and Print/CSV. Actuals use period voucher movement and
+  exclude opening balances; a category budget and a budget for one of its
+  centres are both shown without double-counting the totals.
 - TDS/TCS register for a period: deducted or collected amounts, section and
   party summaries, quarterly totals, a threshold watch for the financial year to
   date, and a voucher list with PAN and drill-down. Tax challans can be recorded

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   addBudget,
+  addCostCategory,
   addCostCentre,
   addFinancialYear,
   addGroup,
@@ -9,6 +10,8 @@ import {
   addVoucher,
   createCompany,
   deleteBudget,
+  deleteCostCategory,
+  deleteCostCentre,
   deleteGroup,
   deleteLedger,
   duplicateBudget,
@@ -326,6 +329,96 @@ test('a budget can target a cost centre and measure tagged spend', () => {
     }).ok,
     false,
   );
+});
+
+test('a cost-category budget covers every centre in the category', () => {
+  const { company, bank, rent, salaries } = budgetFixture();
+  const category = company.costCategories[0];
+  const marketing = addCostCentre(company, { name: 'Marketing', categoryId: category.id }).centre;
+  const events = addCostCentre(company, { name: 'Events', categoryId: category.id }).centre;
+  const budget = addBudget(company, {
+    name: 'Category plan',
+    targetType: 'costCategory',
+    targetId: category.id,
+    yearId: yearId(company),
+    amount: 5000,
+  });
+  assert.equal(budget.ok, true, budget.error);
+  assert.equal(budget.budget.targetType, 'costCategory');
+
+  addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: rent.id, side: 'Dr', amount: 1200, costCentreId: marketing.id },
+      { ledgerId: bank.id, side: 'Cr', amount: 1200 },
+    ],
+  });
+  addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-11',
+    lines: [
+      { ledgerId: salaries.id, side: 'Dr', amount: 500, costCentreId: events.id },
+      { ledgerId: bank.id, side: 'Cr', amount: 500 },
+    ],
+  });
+  addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-12',
+    lines: [
+      { ledgerId: rent.id, side: 'Dr', amount: 900 },
+      { ledgerId: bank.id, side: 'Cr', amount: 900 },
+    ],
+  });
+
+  const report = budgetVsActual(company, { yearId: yearId(company), asOn: '2026-04-30' });
+  const row = report.rows.find((entry) => entry.name === 'Category plan');
+  assert.equal(row.nature, 'Cost category');
+  assert.equal(row.actual, 1700, 'both centres count and unallocated spend does not');
+  assert.equal(row.variance, 3300);
+  assert.equal(report.totalActual, 1700);
+
+  addBudget(company, {
+    name: 'Marketing plan',
+    targetType: 'costCentre',
+    targetId: marketing.id,
+    yearId: yearId(company),
+    amount: 2000,
+  });
+  const overlapped = budgetVsActual(company, { yearId: yearId(company), asOn: '2026-04-30' });
+  assert.equal(overlapped.rows.find((entry) => entry.name === 'Marketing plan').nested, true);
+  assert.equal(overlapped.totalBudget, 5000, 'the category budget is totalled once');
+
+  const centreDelete = deleteCostCentre(company, events.id);
+  assert.equal(centreDelete.ok, false);
+  assert.match(centreDelete.error, /voucher line/i);
+});
+
+test('budgeted cost masters cannot be deleted', () => {
+  const { company } = budgetFixture();
+  const category = addCostCategory(company, { name: 'Delivery' }).category;
+  addBudget(company, {
+    name: 'Category plan',
+    targetType: 'costCategory',
+    targetId: category.id,
+    yearId: yearId(company),
+    amount: 1000,
+  });
+  const categoryDelete = deleteCostCategory(company, category.id);
+  assert.equal(categoryDelete.ok, false);
+  assert.match(categoryDelete.error, /budget/i);
+
+  const centre = addCostCentre(company, { name: 'Unused centre', categoryId: category.id }).centre;
+  addBudget(company, {
+    name: 'Centre plan',
+    targetType: 'costCentre',
+    targetId: centre.id,
+    yearId: yearId(company),
+    amount: 500,
+  });
+  const centreDelete = deleteCostCentre(company, centre.id);
+  assert.equal(centreDelete.ok, false);
+  assert.match(centreDelete.error, /budget/i);
 });
 
 test('budget totals exclude a ledger budget nested inside a group budget', () => {

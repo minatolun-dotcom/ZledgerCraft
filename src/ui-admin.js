@@ -764,7 +764,7 @@ export function budgetsScreen() {
     .map((row) => {
       const used = row.usedPercent === null ? 0 : Math.max(0, Math.min(100, row.usedPercent));
       return `<tr>
-        <td><strong>${esc(row.name)}</strong><div class="muted small">${esc(row.targetType === 'group' ? 'Group' : row.targetType === 'costCentre' ? 'Cost centre' : 'Ledger')} · ${esc(row.nature)}</div></td>
+        <td><strong>${esc(row.name)}</strong><div class="muted small">${esc(row.targetType === 'group' ? 'Group' : row.targetType === 'costCentre' ? 'Cost centre' : row.targetType === 'costCategory' ? 'Cost category' : 'Ledger')} · ${esc(row.nature)}</div></td>
         <td>${esc(row.target)}</td>
         <td class="num">${money(row.amount)}</td>
         <td class="num">${money(row.actual)}</td>

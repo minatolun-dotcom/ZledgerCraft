@@ -15,6 +15,7 @@ import {
   addUser,
   addCompany,
   addComplianceTask,
+  addDeliveryNote,
   addCostCategory,
   addCostCentre,
   addEmployee,
@@ -5743,6 +5744,30 @@ async function handleClick(event) {
       if (container && active) container.insertAdjacentHTML('beforeend', orderItemRow(active));
       break;
     }
+    case 'order-delivery-note': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const result = addDeliveryNote(active, trigger.dataset.id, todayIso());
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit(
+        'delivery.create',
+        `Created ${result.note.kind === 'DeliveryNote' ? 'delivery note' : 'goods receipt'} ${result.note.no} from order ${result.note.sourceOrderNo}.`,
+        active,
+        result.note.id,
+      );
+      persist();
+      setFlash(`${result.note.kind === 'DeliveryNote' ? 'Delivery note' : 'Goods receipt'} ${result.note.no} created.`);
+      navigate('orders');
+      break;
+    }
+
     case 'convert-quotation': {
       if (!can('voucher.write')) {
         requirePermission('voucher.write');

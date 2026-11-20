@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   addBom,
+  addDeliveryNote,
   addGodown,
   addLedger,
   addManufacture,
@@ -876,6 +877,33 @@ test('orders record sales and purchase commitments without moving stock', () => 
   assert.equal(purchase.ok, true, purchase.error);
   assert.equal(purchase.order.no, 1, 'purchase orders have their own sequence');
   assert.equal(deleteOrder(company, purchase.order.id).ok, true);
+});
+
+test('a delivery note copies remaining order quantity without moving stock', () => {
+  const { company, item } = inventoryFixture();
+  const customer = addLedger(company, {
+    name: 'Delivery Customer',
+    groupId: company.groups.find((group) => group.key === 'sundryDebtors').id,
+    opening: 0,
+  }).ledger;
+  const order = addOrder(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    partyLedgerId: customer.id,
+    stockItemId: item.id,
+    qty: 3,
+    rate: 150,
+  }).order;
+  const before = stockOnHand(company, item.id, '2026-04-10');
+  const note = addDeliveryNote(company, order.id, '2026-04-10');
+  assert.equal(note.ok, true, note.error);
+  assert.equal(note.note.kind, 'DeliveryNote');
+  assert.equal(note.note.no, 1);
+  assert.equal(note.note.sourceOrderId, order.id);
+  assert.equal(note.note.items[0].qty, 3);
+  assert.equal(note.note.total, 450);
+  assert.equal(stockOnHand(company, item.id, '2026-04-10'), before);
+  assert.equal(addDeliveryNote(company, 'missing', '2026-04-10').ok, false);
 });
 
 test('a quotation converts into a sales order and keeps its own sequence', () => {

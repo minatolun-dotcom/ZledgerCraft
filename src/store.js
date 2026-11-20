@@ -2643,6 +2643,12 @@ function seedInventoryMasters(company) {
     Number(company.counters.__salesQuotation) || 0,
     ...company.orders.filter((order) => order.kind === 'Quotation').map((order) => Number(order.no) || 0),
   );
+  company.counters.__deliveryNote = Math.max(
+    Number(company.counters.__deliveryNote) || 0,
+    ...company.orders
+      .filter((order) => ['DeliveryNote', 'GoodsReceipt'].includes(order.kind))
+      .map((order) => Number(order.no) || 0),
+  );
   for (const item of company.stockItems) item.batchTracking = Boolean(item.batchTracking);
   return company;
 }
@@ -3357,8 +3363,8 @@ function orderLinkFor(company, type, orderId) {
   const order = (company.orders ?? []).find((entry) => entry.id === orderId);
   if (!order) return { ok: false, error: 'The linked order no longer exists.' };
   const label = `${order.type === 'Sales' ? 'SO' : 'PO'}-${order.no}`;
-  if (order.kind === 'Quotation') {
-    return { ok: false, error: 'A quotation must be converted to a sales order before creating a voucher.' };
+  if (order.kind) {
+    return { ok: false, error: 'A quotation or delivery document must become an order before creating a voucher.' };
   }
   if (order.type !== type) {
     return {
@@ -4523,7 +4529,7 @@ export function orderRemainingItems(order) {
 
 /** Recomputes an order's fulfilled quantities from every linked voucher. */
 export function refreshOrderFulfilment(company, order) {
-  if (!order || order.status === 'Cancelled' || order.kind === 'Quotation') return order;
+  if (!order || order.status === 'Cancelled' || order.kind) return order;
   for (const line of order.items ?? []) line.fulfilledQty = 0;
   const vouchers = (company.vouchers ?? []).filter((voucher) => voucher.orderId === order.id);
   for (const voucher of vouchers) {
@@ -4551,6 +4557,35 @@ export function refreshOrderFulfilment(company, order) {
     delete order.closedByFulfilment;
   }
   return order;
+}
+
+export function addDeliveryNote(company, orderId, date) {
+  const order = (company.orders ?? []).find((entry) => entry.id === orderId && !entry.kind);
+  if (!order) return { ok: false, error: 'Only a sales or purchase order can produce a delivery document.' };
+  const remaining = orderRemainingItems(order);
+  if (!remaining.length) return { ok: false, error: 'This order has no remaining quantity to deliver.' };
+  const noteDate = String(date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  if (!isValidIsoDate(noteDate)) return { ok: false, error: 'Enter a valid delivery-note date.' };
+  company.orders = company.orders ?? [];
+  company.counters = company.counters ?? {};
+  const sequence = (Number(company.counters.__deliveryNote) || 0) + 1;
+  company.counters.__deliveryNote = sequence;
+  const note = {
+    id: uid('dn'),
+    kind: order.type === 'Sales' ? 'DeliveryNote' : 'GoodsReceipt',
+    type: order.type,
+    no: sequence,
+    date: noteDate,
+    partyLedgerId: order.partyLedgerId,
+    sourceOrderId: order.id,
+    sourceOrderNo: order.no,
+    items: remaining.map((line) => ({ ...line, fulfilledQty: 0 })),
+    total: round2(remaining.reduce((sum, line) => sum + line.amount, 0)),
+    status: 'Open',
+    createdAt: new Date().toISOString(),
+  };
+  company.orders.push(note);
+  return { ok: true, note };
 }
 
 export function convertQuotationToOrder(company, quotationId) {

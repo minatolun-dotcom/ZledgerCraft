@@ -4986,6 +4986,12 @@ function seedInventoryMasters(company) {
     Number(company.counters.__salesQuotation) || 0,
     ...company.orders.filter((order) => order.kind === 'Quotation').map((order) => Number(order.no) || 0),
   );
+  company.counters.__deliveryNote = Math.max(
+    Number(company.counters.__deliveryNote) || 0,
+    ...company.orders
+      .filter((order) => ['DeliveryNote', 'GoodsReceipt'].includes(order.kind))
+      .map((order) => Number(order.no) || 0),
+  );
   for (const item of company.stockItems) item.batchTracking = Boolean(item.batchTracking);
   return company;
 }
@@ -5700,8 +5706,8 @@ function orderLinkFor(company, type, orderId) {
   const order = (company.orders ?? []).find((entry) => entry.id === orderId);
   if (!order) return { ok: false, error: 'The linked order no longer exists.' };
   const label = `${order.type === 'Sales' ? 'SO' : 'PO'}-${order.no}`;
-  if (order.kind === 'Quotation') {
-    return { ok: false, error: 'A quotation must be converted to a sales order before creating a voucher.' };
+  if (order.kind) {
+    return { ok: false, error: 'A quotation or delivery document must become an order before creating a voucher.' };
   }
   if (order.type !== type) {
     return {
@@ -6866,7 +6872,7 @@ function orderRemainingItems(order) {
 
 /** Recomputes an order's fulfilled quantities from every linked voucher. */
 function refreshOrderFulfilment(company, order) {
-  if (!order || order.status === 'Cancelled' || order.kind === 'Quotation') return order;
+  if (!order || order.status === 'Cancelled' || order.kind) return order;
   for (const line of order.items ?? []) line.fulfilledQty = 0;
   const vouchers = (company.vouchers ?? []).filter((voucher) => voucher.orderId === order.id);
   for (const voucher of vouchers) {
@@ -6894,6 +6900,35 @@ function refreshOrderFulfilment(company, order) {
     delete order.closedByFulfilment;
   }
   return order;
+}
+
+function addDeliveryNote(company, orderId, date) {
+  const order = (company.orders ?? []).find((entry) => entry.id === orderId && !entry.kind);
+  if (!order) return { ok: false, error: 'Only a sales or purchase order can produce a delivery document.' };
+  const remaining = orderRemainingItems(order);
+  if (!remaining.length) return { ok: false, error: 'This order has no remaining quantity to deliver.' };
+  const noteDate = String(date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  if (!isValidIsoDate(noteDate)) return { ok: false, error: 'Enter a valid delivery-note date.' };
+  company.orders = company.orders ?? [];
+  company.counters = company.counters ?? {};
+  const sequence = (Number(company.counters.__deliveryNote) || 0) + 1;
+  company.counters.__deliveryNote = sequence;
+  const note = {
+    id: uid('dn'),
+    kind: order.type === 'Sales' ? 'DeliveryNote' : 'GoodsReceipt',
+    type: order.type,
+    no: sequence,
+    date: noteDate,
+    partyLedgerId: order.partyLedgerId,
+    sourceOrderId: order.id,
+    sourceOrderNo: order.no,
+    items: remaining.map((line) => ({ ...line, fulfilledQty: 0 })),
+    total: round2(remaining.reduce((sum, line) => sum + line.amount, 0)),
+    status: 'Open',
+    createdAt: new Date().toISOString(),
+  };
+  company.orders.push(note);
+  return { ok: true, note };
 }
 
 function convertQuotationToOrder(company, quotationId) {
@@ -16698,6 +16733,9 @@ function ordersScreen() {
   const quotations = [...(active.orders ?? [])]
     .filter((order) => order.kind === 'Quotation' && order.date >= from && order.date <= to)
     .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no);
+  const deliveryNotes = [...(active.orders ?? [])]
+    .filter((order) => ['DeliveryNote', 'GoodsReceipt'].includes(order.kind) && order.date >= from && order.date <= to)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no);
   const parties = new Map((active.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
   const items = new Map((active.stockItems ?? []).map((item) => [item.id, item]));
   const units = new Map((active.units ?? []).map((unit) => [unit.id, unit]));
@@ -16728,6 +16766,9 @@ function ordersScreen() {
         order.status === 'Open' && remaining.length
           ? `<button class="btn small" type="button" data-action="order-to-voucher" data-id="${esc(order.id)}">Create voucher</button>`
           : '',
+        order.status === 'Open' && remaining.length
+          ? `<button class="btn small ghost" type="button" data-action="order-delivery-note" data-id="${esc(order.id)}">${order.type === 'Sales' ? 'Delivery note' : 'Goods receipt'}</button>`
+          : '',
         order.status === 'Open'
           ? `<button class="btn small ghost" type="button" data-action="order-status" data-id="${esc(order.id)}" data-status="Closed">Close</button>`
           : '',
@@ -16753,6 +16794,15 @@ function ordersScreen() {
     })
     .join('');
 
+  const deliveryRows = deliveryNotes
+    .map((note) => `<tr>
+      <td><strong>${note.kind === 'DeliveryNote' ? 'DN' : 'GRN'}-${note.no}</strong><div class="muted small">${esc(dateLabel(note.date))}</div></td>
+      <td>${esc(parties.get(note.partyLedgerId)?.name ?? 'Unknown party')}</td>
+      <td>${note.type === 'Sales' ? 'SO' : 'PO'}-${note.sourceOrderNo}</td>
+      <td class="num">${money(note.total)}</td>
+      <td class="row-actions"><button class="btn small danger" type="button" data-action="delete-order" data-id="${esc(note.id)}">Delete</button></td>
+    </tr>`)
+    .join('');
   const quotationRows = quotations
     .map((quotation) => `<tr>
       <td><strong>QTN-${quotation.no}</strong><div class="muted small">${esc(dateLabel(quotation.date))}</div></td>
@@ -16809,6 +16859,13 @@ function ordersScreen() {
       : '<p class="muted">No quotations in this period. Convert an open quotation into a sales order before creating a voucher.</p>'}`,
     'Quotations use sales-order item lines but do not move stock or post to the ledger. Conversion creates a linked sales order; it does not create a voucher.',
   )}
+  ${deliveryNotes.length
+    ? panel(
+        'Delivery notes and goods receipts',
+        `<table class="data-table compact"><thead><tr><th>Document</th><th>Party</th><th>Source order</th><th class="num">Value</th><th></th></tr></thead><tbody>${deliveryRows}</tbody></table>`,
+        'Non-posting dispatch documents created from the remaining quantity of an order. They do not move stock, create a voucher or record acknowledgement of receipt.',
+      )
+    : ''}
   ${panel(
     'New order',
     `<form id="order-form" class="form-grid" novalidate>
@@ -25265,6 +25322,30 @@ async function handleClick(event) {
       if (container && active) container.insertAdjacentHTML('beforeend', orderItemRow(active));
       break;
     }
+    case 'order-delivery-note': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const result = addDeliveryNote(active, trigger.dataset.id, todayIso());
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit(
+        'delivery.create',
+        `Created ${result.note.kind === 'DeliveryNote' ? 'delivery note' : 'goods receipt'} ${result.note.no} from order ${result.note.sourceOrderNo}.`,
+        active,
+        result.note.id,
+      );
+      persist();
+      setFlash(`${result.note.kind === 'DeliveryNote' ? 'Delivery note' : 'Goods receipt'} ${result.note.no} created.`);
+      navigate('orders');
+      break;
+    }
+
     case 'convert-quotation': {
       if (!can('voucher.write')) {
         requirePermission('voucher.write');

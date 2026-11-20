@@ -49,6 +49,9 @@ export function ordersScreen() {
   const quotations = [...(active.orders ?? [])]
     .filter((order) => order.kind === 'Quotation' && order.date >= from && order.date <= to)
     .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no);
+  const deliveryNotes = [...(active.orders ?? [])]
+    .filter((order) => ['DeliveryNote', 'GoodsReceipt'].includes(order.kind) && order.date >= from && order.date <= to)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no);
   const parties = new Map((active.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
   const items = new Map((active.stockItems ?? []).map((item) => [item.id, item]));
   const units = new Map((active.units ?? []).map((unit) => [unit.id, unit]));
@@ -79,6 +82,9 @@ export function ordersScreen() {
         order.status === 'Open' && remaining.length
           ? `<button class="btn small" type="button" data-action="order-to-voucher" data-id="${esc(order.id)}">Create voucher</button>`
           : '',
+        order.status === 'Open' && remaining.length
+          ? `<button class="btn small ghost" type="button" data-action="order-delivery-note" data-id="${esc(order.id)}">${order.type === 'Sales' ? 'Delivery note' : 'Goods receipt'}</button>`
+          : '',
         order.status === 'Open'
           ? `<button class="btn small ghost" type="button" data-action="order-status" data-id="${esc(order.id)}" data-status="Closed">Close</button>`
           : '',
@@ -104,6 +110,15 @@ export function ordersScreen() {
     })
     .join('');
 
+  const deliveryRows = deliveryNotes
+    .map((note) => `<tr>
+      <td><strong>${note.kind === 'DeliveryNote' ? 'DN' : 'GRN'}-${note.no}</strong><div class="muted small">${esc(dateLabel(note.date))}</div></td>
+      <td>${esc(parties.get(note.partyLedgerId)?.name ?? 'Unknown party')}</td>
+      <td>${note.type === 'Sales' ? 'SO' : 'PO'}-${note.sourceOrderNo}</td>
+      <td class="num">${money(note.total)}</td>
+      <td class="row-actions"><button class="btn small danger" type="button" data-action="delete-order" data-id="${esc(note.id)}">Delete</button></td>
+    </tr>`)
+    .join('');
   const quotationRows = quotations
     .map((quotation) => `<tr>
       <td><strong>QTN-${quotation.no}</strong><div class="muted small">${esc(dateLabel(quotation.date))}</div></td>
@@ -160,6 +175,13 @@ export function ordersScreen() {
       : '<p class="muted">No quotations in this period. Convert an open quotation into a sales order before creating a voucher.</p>'}`,
     'Quotations use sales-order item lines but do not move stock or post to the ledger. Conversion creates a linked sales order; it does not create a voucher.',
   )}
+  ${deliveryNotes.length
+    ? panel(
+        'Delivery notes and goods receipts',
+        `<table class="data-table compact"><thead><tr><th>Document</th><th>Party</th><th>Source order</th><th class="num">Value</th><th></th></tr></thead><tbody>${deliveryRows}</tbody></table>`,
+        'Non-posting dispatch documents created from the remaining quantity of an order. They do not move stock, create a voucher or record acknowledgement of receipt.',
+      )
+    : ''}
   ${panel(
     'New order',
     `<form id="order-form" class="form-grid" novalidate>

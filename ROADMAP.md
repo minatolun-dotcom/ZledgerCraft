@@ -344,6 +344,15 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 50: delivery notes and goods receipts
+
+- Sales orders can produce delivery notes and purchase orders goods receipts
+  carrying the remaining quantity, party, source order and value.
+- Documents use a shared DN/GRN sequence and are explicitly non-posting: they do
+  not move stock, create a voucher or acknowledge receipt.
+- Verification: remaining-quantity copy, numbering, source link and unchanged
+  stock; 300 tests (299 pass, 1 skipped) and a 1,042.6 kB build.
+
 ### 2026-11-20 — Phase 49: quotations
 
 - Sales quotations carry party, validity date and the same item lines as an

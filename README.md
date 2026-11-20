@@ -573,6 +573,8 @@ disabled.
   separate status-as-on date and an optional comparison date: original, settled
   and outstanding amounts, settlements since the comparison, status changes,
   overdue days, totals and drill-down to the voucher or the party statement.
+  Each bill can expand to a dated timeline of when it was raised, settled or
+  became overdue, including the settlement voucher and resulting status.
   Fully settled bills remain listed.
 - Party credit limits, a printable payment reminder per customer, and simple
   overdue interest at each party's stored annual rate. Interest can be posted

@@ -180,6 +180,32 @@ test('bill-wise register shows movement since a prior as-on date', () => {
   assert.equal(invalid.compareAsOn, null);
 });
 
+test('bill-wise register exposes each bill movement and resulting status', () => {
+  const { company, customer, sales, cash } = fixture();
+  const bill = sale(company, customer, sales, 1000, '2026-04-05', {
+    ref: 'INV-TIMELINE',
+    dueDate: '2026-05-05',
+  });
+  receipt(company, cash, customer, 400, '2026-04-25', [{ voucherId: bill.id, amount: 400 }]);
+  receipt(company, cash, customer, 600, '2026-05-10', [{ voucherId: bill.id, amount: 600 }]);
+
+  const report = billWiseRegister(company, {
+    side: 'receivable',
+    from: '2026-04-01',
+    to: '2026-04-30',
+    asOn: '2026-05-31',
+  });
+  const row = report.rows.find((entry) => entry.ref === 'INV-TIMELINE');
+  assert.deepEqual(row.events.map((event) => event.kind), ['raised', 'settlement', 'due', 'settlement']);
+  assert.deepEqual(row.events.map((event) => event.statusAfter), ['Open', 'Part-paid', 'Overdue', 'Settled']);
+  assert.deepEqual(row.events.map((event) => event.amount), [1000, 400, 0, 600]);
+  assert.equal(row.events[1].date, '2026-04-25');
+  assert.equal(row.events[1].type, 'Receipt');
+  assert.equal(row.events[2].date, '2026-05-05');
+  assert.equal(row.events[3].remainingAfter, 0);
+  assert.equal(row.status, 'Settled');
+});
+
 test('bill-wise register attributes unallocated receipts to the oldest bill first', () => {
   const { company, customer, sales, cash } = fixture();
   sale(company, customer, sales, 1000, '2026-04-05', { ref: 'INV-001' });

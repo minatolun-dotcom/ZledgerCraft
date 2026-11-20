@@ -1408,6 +1408,17 @@ function daysBetween(fromIso, toIso) {
  * existing outstanding totals do not change. Stored allocations settle a named
  * bill first, then anything left settles the oldest open bill (FIFO).
  */
+function billMovementStatus(dueDate, at, remaining, settled) {
+  const overdue = Boolean(dueDate && dueDate < at && remaining > EPSILON);
+  return remaining <= EPSILON
+    ? 'Settled'
+    : overdue
+      ? 'Overdue'
+      : settled > EPSILON
+        ? 'Part-paid'
+        : 'Open';
+}
+
 function partyBillLedger(company, ledger, side, asOn) {
   const billSide = side === 'receivable' ? 'Dr' : 'Cr';
   const invoiceType = side === 'receivable' ? 'Sales' : 'Purchase';
@@ -1430,6 +1441,7 @@ function partyBillLedger(company, ledger, side, asOn) {
       settled: 0,
       isBill: false,
       opening: true,
+      events: [],
     });
     hasEntries = true;
   }
@@ -1453,12 +1465,29 @@ function partyBillLedger(company, ledger, side, asOn) {
           settled: 0,
           isBill: voucher.type === invoiceType,
           opening: false,
+          events: [
+            {
+              date: voucher.date,
+              kind: 'raised',
+              voucherId: voucher.id,
+              type: voucher.type,
+              no: voucher.no,
+              ref: billLabel(voucher),
+              amount: round2(line.amount),
+              settledAfter: 0,
+              remainingAfter: round2(line.amount),
+              statusAfter: billMovementStatus(voucher.bill?.dueDate || null, voucher.date, round2(line.amount), 0),
+            },
+          ],
         });
       } else {
         settlements.push({
           date: voucher.date,
           no: Number(voucher.no) || 0,
           lineIndex,
+          voucherId: voucher.id,
+          type: voucher.type,
+          ref: billLabel(voucher),
           amount: round2(line.amount),
           allocations: Array.isArray(line.allocations) ? line.allocations : [],
         });
@@ -1478,6 +1507,18 @@ function partyBillLedger(company, ledger, side, asOn) {
       const applied = Math.min(bill.remaining, allocation.amount, left);
       bill.remaining = round2(bill.remaining - applied);
       bill.settled = round2(bill.settled + applied);
+      bill.events.push({
+        date: settlement.date,
+        kind: 'settlement',
+        voucherId: settlement.voucherId,
+        type: settlement.type,
+        no: settlement.no,
+        ref: settlement.ref,
+        amount: round2(applied),
+        settledAfter: bill.settled,
+        remainingAfter: bill.remaining,
+        statusAfter: billMovementStatus(bill.dueDate, settlement.date, bill.remaining, bill.settled),
+      });
       left = round2(left - applied);
     }
     for (const bill of entries) {
@@ -1486,6 +1527,18 @@ function partyBillLedger(company, ledger, side, asOn) {
       const applied = Math.min(bill.remaining, left);
       bill.remaining = round2(bill.remaining - applied);
       bill.settled = round2(bill.settled + applied);
+      bill.events.push({
+        date: settlement.date,
+        kind: 'settlement',
+        voucherId: settlement.voucherId,
+        type: settlement.type,
+        no: settlement.no,
+        ref: settlement.ref,
+        amount: round2(applied),
+        settledAfter: bill.settled,
+        remainingAfter: bill.remaining,
+        statusAfter: billMovementStatus(bill.dueDate, settlement.date, bill.remaining, bill.settled),
+      });
       left = round2(left - applied);
     }
     if (left > EPSILON) {
@@ -1514,13 +1567,28 @@ function partyBillLedger(company, ledger, side, asOn) {
       const ageDays = daysBetween(bucketDate, asOn);
       const overdueDays = dueDate ? daysBetween(dueDate, asOn) : 0;
       const overdue = Boolean(dueDate && dueDate < asOn && bill.remaining > EPSILON);
-      const status = bill.remaining <= EPSILON
-        ? 'Settled'
-        : overdue
-          ? 'Overdue'
-          : bill.settled > EPSILON
-            ? 'Part-paid'
-            : 'Open';
+      const status = billMovementStatus(dueDate, asOn, bill.remaining, bill.settled);
+      const events = [...bill.events];
+      if (dueDate && dueDate < asOn && !events.some((event) => event.date === dueDate && event.kind === 'settlement')) {
+        const settledByDue = events
+          .filter((event) => event.kind === 'settlement' && event.date <= dueDate)
+          .reduce((_, event) => event.settledAfter, 0);
+        if (round2(bill.original - settledByDue) > EPSILON) {
+          events.push({
+            date: dueDate,
+            kind: 'due',
+            amount: 0,
+            settledAfter: settledByDue,
+            remainingAfter: round2(bill.original - settledByDue),
+            statusAfter: 'Overdue',
+          });
+        }
+      }
+      events.sort(
+        (a, b) =>
+          a.date.localeCompare(b.date) ||
+          (a.kind === 'raised' ? 0 : 1) - (b.kind === 'raised' ? 0 : 1),
+      );
       return {
         voucherId: bill.voucherId,
         type: bill.type,
@@ -1537,6 +1605,7 @@ function partyBillLedger(company, ledger, side, asOn) {
         bucket: ageBucketFor(ageDays),
         status,
         isBill: bill.isBill,
+        events,
       };
     })
     .sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));

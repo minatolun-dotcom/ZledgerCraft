@@ -747,6 +747,17 @@ export function billRegisterScreen() {
             <strong>${esc(row.ref)}</strong>
             <span class="muted small">${esc(voucherLabel(row.type))} ${row.no}</span>
           </button>
+          ${(row.events ?? []).length > 1
+            ? `<details class="bill-history"><summary class="muted small">${row.events.length} history events</summary><div class="muted small">${row.events
+                .map((event) =>
+                  event.kind === 'raised'
+                    ? `${esc(dateLabel(event.date))} · Raised ${money(event.amount)}`
+                    : event.kind === 'due'
+                      ? `${esc(dateLabel(event.date))} · Due date passed · Overdue`
+                      : `${esc(dateLabel(event.date))} · ${esc(voucherLabel(event.type))} ${event.no} · ${money(event.amount)} · ${esc(event.statusAfter)}`,
+                )
+                .join('<br>')}</div></details>`
+            : ''}
         </td>
         <td>${esc(dateLabel(row.date))}</td>
         <td>${row.dueDate ? esc(dateLabel(row.dueDate)) : '<span class="muted">—</span>'}</td>
@@ -786,7 +797,7 @@ export function billRegisterScreen() {
           <tfoot><tr><td colspan="4">${report.count} bill${report.count === 1 ? '' : 's'} · ${report.partyCount} part${report.partyCount === 1 ? 'y' : 'ies'}${report.overdueCount ? ` · ${report.overdueCount} overdue` : ''}</td><td class="num">${money(report.totalOriginal)}</td><td class="num">${money(report.totalSettled)}</td>${compared ? `<td class="num">${money(report.totalSettledDuring)}</td>` : ''}<td class="num">${money(report.totalOutstanding)}</td><td colspan="2"></td></tr></tfoot>
         </table></div>`
       : `<p class="muted">No ${side === 'receivable' ? 'customer' : 'supplier'} bills in this period${status === 'All' ? '' : ` with status ${esc(status)}`}.</p>`}`,
-    `Bills dated ${esc(dateLabel(from))} to ${esc(dateLabel(to))} · status as on ${esc(dateLabel(asOn))}${compared ? ` · movement compared with ${esc(dateLabel(report.compareAsOn))}` : ''}. Fully settled bills remain listed. Click a party for its statement, or a bill to open the voucher.`,
+    `Bills dated ${esc(dateLabel(from))} to ${esc(dateLabel(to))} · status as on ${esc(dateLabel(asOn))}${compared ? ` · movement compared with ${esc(dateLabel(report.compareAsOn))}` : ''}. Fully settled bills remain listed. Click a party for its statement, or a bill to open the voucher. Expand a bill's history to see each settlement and the resulting status.`,
   );
 }
 

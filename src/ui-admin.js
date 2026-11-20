@@ -758,7 +758,11 @@ export function budgetsScreen() {
   const years = [...(active.years ?? [])].sort((a, b) => b.start.localeCompare(a.start));
   const current = filters.budget;
   const yearId = years.some((year) => year.id === current.yearId) ? current.yearId : active.yearId;
-  const report = budgetVsActual(active, { yearId, asOn: current.asOn });
+  const report = budgetVsActual(active, {
+    yearId,
+    asOn: current.asOn,
+    includeOpening: current.includeOpening,
+  });
   const asOnValue = current.asOn || report.asOn;
   const yearOptions = years
     .map((year) => `<option value="${esc(year.id)}"${year.id === yearId ? ' selected' : ''}>${esc(dateLabel(year.start))} – ${esc(dateLabel(year.end))}</option>`)
@@ -786,11 +790,12 @@ export function budgetsScreen() {
     `<form id="budget-report-form" class="filter-bar">
       <label class="field inline-field"><span>Financial year</span><select name="yearId">${yearOptions}</select></label>
       <label class="field inline-field"><span>As on</span><input name="asOn" type="date" min="${esc(report.year.start)}" max="${esc(report.year.end)}" value="${esc(asOnValue)}" data-period></label>
+      <label class="field inline-field"><input type="checkbox" name="includeOpening"${report.includeOpening ? ' checked' : ''}> <span>Include opening balances</span></label>
       <button class="btn small" type="submit">Apply</button>
     </form>
     <div class="ratio-grid">
       <div class="ratio-card"><span class="ratio-label">Budget</span><strong>${money(report.totalBudget)}</strong><span class="muted small">${report.count} budget${report.count === 1 ? '' : 's'}</span></div>
-      <div class="ratio-card"><span class="ratio-label">Actual</span><strong>${money(report.totalActual)}</strong><span class="muted small">To ${esc(dateLabel(report.asOn))}</span></div>
+      <div class="ratio-card"><span class="ratio-label">Actual</span><strong>${money(report.totalActual)}</strong><span class="muted small">${report.includeOpening ? 'Opening + movement' : 'Period movement'} to ${esc(dateLabel(report.asOn))}</span></div>
       <div class="ratio-card"><span class="ratio-label">Variance</span><strong class="${report.totalVariance < 0 ? 'neg' : ''}">${money(report.totalVariance)}</strong><span class="muted small">Budget less actual</span></div>
       <div class="ratio-card"><span class="ratio-label">Over budget</span><strong>${report.overCount}</strong><span class="muted small">Budget${report.count === 1 ? '' : 's'} exceeded</span></div>
     </div>
@@ -800,7 +805,7 @@ export function budgetsScreen() {
           <tbody>${rows}</tbody>
         </table></div>`
       : '<p class="muted">No budgets for this financial year. Add year-wise budgets in Masters.</p>'}`,
-    `Variance is budget less actual. Totals exclude ${report.overlapCount || 'no'} budget${report.overlapCount === 1 ? '' : 's'} nested inside a group budget, so overlapping targets are not double-counted.`,
+    `Variance is budget less actual. Totals exclude ${report.overlapCount || 'no'} budget${report.overlapCount === 1 ? '' : 's'} nested inside a group budget, so overlapping targets are not double-counted. Opening balances apply to ledger and group budgets; cost-centre and category budgets always use period movement.`,
   );
 }
 

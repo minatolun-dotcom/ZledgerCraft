@@ -1161,6 +1161,7 @@ export function forexRevaluation(company, filters = {}) {
 
 /** Annual budget vs actual by ledger or group. */
 export function budgetVsActual(company, filters = {}) {
+  const includeOpening = Boolean(filters.includeOpening);
   const year =
     (company.years ?? []).find((item) => item.id === filters.yearId) ??
     (company.years ?? []).find((item) => item.id === company.yearId) ??
@@ -1169,6 +1170,9 @@ export function budgetVsActual(company, filters = {}) {
   const today = new Date().toISOString().slice(0, 10);
   const requested = filters.asOn && filters.asOn >= year.start && filters.asOn <= year.end ? filters.asOn : today;
   const asOn = requested < year.start ? year.start : requested > year.end ? year.end : requested;
+  const openingTotals = includeOpening
+    ? ledgerTotals(company, { to: addIsoDays(year.start, -1) })
+    : null;
   const rows = (company.budgets ?? [])
     .filter((budget) => budget.yearId === year.id)
     .map((budget) => {
@@ -1213,11 +1217,27 @@ export function budgetVsActual(company, filters = {}) {
           : budget.targetType === 'group'
             ? groupNature(company, target.id)
             : groupNature(company, target.groupId);
-      const actual = costCentre || costCategory
-        ? round2(debit - credit)
-        : nature === 'Income' || nature === 'Liabilities'
-          ? round2(credit - debit)
-          : round2(debit - credit);
+      let opening = 0;
+      if (openingTotals && !costCentre && !costCategory) {
+        for (const ledgerId of ledgerIds) {
+          const entry = openingTotals.get(ledgerId);
+          if (!entry) continue;
+          opening = round2(
+            opening +
+              (nature === 'Income' || nature === 'Liabilities'
+                ? -entry.closing
+                : entry.closing),
+          );
+        }
+      }
+      const actual = round2(
+        opening +
+          (costCentre || costCategory
+            ? debit - credit
+            : nature === 'Income' || nature === 'Liabilities'
+              ? credit - debit
+              : debit - credit),
+      );
       return {
         budgetId: budget.id,
         name: budget.name,
@@ -1270,6 +1290,7 @@ export function budgetVsActual(company, filters = {}) {
   return {
     year,
     asOn,
+    includeOpening,
     rows,
     count: rows.length,
     overlapCount: rows.length - topRows.length,

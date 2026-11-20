@@ -512,9 +512,10 @@ disabled.
   with ledger-wise movement and voucher lines.
 - Budget vs Actual by ledger, group, cost centre or cost category for a
   financial year and as-on date: budget, actual, variance, used percentage,
-  over-budget status and Print/CSV. Actuals use period voucher movement and
-  exclude opening balances; a category budget and a budget for one of its
-  centres are both shown without double-counting the totals.
+  over-budget status and Print/CSV. Actuals default to period voucher movement
+  with an optional include-openings view for ledger and group budgets; a
+  category budget and a budget for one of its centres are both shown without
+  double-counting the totals.
 - TDS/TCS register for a period: deducted or collected amounts, section and
   party summaries, quarterly totals, a threshold watch for the financial year to
   date, and a voucher list with PAN and drill-down. Tax challans can be recorded

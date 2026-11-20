@@ -198,6 +198,49 @@ test('budget vs actual measures expense movement up to the as-on date', () => {
   assert.equal(may.rows[0].variance, 200);
   assert.equal(may.totalBudget, 1000);
   assert.equal(may.totalActual, 800);
+
+  const withOpening = budgetVsActual({
+    ...company,
+    ledgers: company.ledgers.map((ledger) => (ledger.id === rent.id ? { ...ledger, opening: 300, openingType: 'Dr' } : ledger)),
+  }, { yearId: yearId(company), asOn: '2026-05-31', includeOpening: true });
+  assert.equal(withOpening.includeOpening, true);
+  assert.equal(withOpening.rows[0].actual, 1100, 'opening plus period movement');
+  assert.equal(withOpening.rows[0].variance, -100);
+  assert.equal(withOpening.rows[0].over, true);
+});
+
+test('budget openings respect the credit side for income ledgers', () => {
+  const fixture = budgetFixture();
+  const company = {
+    ...fixture.company,
+    ledgers: fixture.company.ledgers.map((ledger) =>
+      ledger.id === fixture.sales.id ? { ...ledger, opening: 1000, openingType: 'Cr' } : ledger,
+    ),
+  };
+  addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-07',
+    lines: [
+      { ledgerId: fixture.customer.id, side: 'Dr', amount: 500 },
+      { ledgerId: fixture.sales.id, side: 'Cr', amount: 500 },
+    ],
+  });
+  addBudget(company, {
+    name: 'Sales target',
+    targetType: 'ledger',
+    targetId: fixture.sales.id,
+    yearId: yearId(company),
+    amount: 2000,
+  });
+  const movement = budgetVsActual(company, { yearId: yearId(company), asOn: '2026-04-30' });
+  assert.equal(movement.rows[0].actual, 500);
+  const withOpening = budgetVsActual(company, {
+    yearId: yearId(company),
+    asOn: '2026-04-30',
+    includeOpening: true,
+  });
+  assert.equal(withOpening.rows[0].actual, 1500);
+  assert.equal(withOpening.rows[0].variance, 500);
 });
 
 test('group budgets include child ledgers and income uses the credit side', () => {

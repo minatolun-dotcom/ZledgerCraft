@@ -380,7 +380,7 @@ export let filters = {
   orders: { from: '', to: '', status: 'All' },
   postDated: { from: '', to: '', asOn: '', status: 'All', bankLedgerId: '', party: '' },
   costCentres: { from: '', to: '' },
-  budget: { yearId: '', asOn: '' },
+  budget: { yearId: '', asOn: '', includeOpening: false },
   forex: { asOn: '' },
   gst: { from: '', to: '' },
   tds: { kind: 'TDS', from: '', to: '' },
@@ -3758,7 +3758,11 @@ export async function handleSubmit(event) {
 
   if (form.id === 'budget-report-form') {
     const data = new FormData(form);
-    filters.budget = { yearId: data.get('yearId') || '', asOn: data.get('asOn') || '' };
+    filters.budget = {
+      yearId: data.get('yearId') || '',
+      asOn: data.get('asOn') || '',
+      includeOpening: data.get('includeOpening') === 'on',
+    };
     render();
     return;
   }

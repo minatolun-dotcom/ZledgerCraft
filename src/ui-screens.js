@@ -620,13 +620,19 @@ export function companiesScreen() {
 export function budgetTargetOptions(active, selected = '') {
   const groups = [...active.groups].sort((a, b) => a.name.localeCompare(b.name));
   const ledgers = [...active.ledgers].sort((a, b) => a.name.localeCompare(b.name));
-  return `<option value="">Choose a ledger or group…</option>
+  const centres = [...(active.costCentres ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  return `<option value="">Choose a ledger, group or cost centre…</option>
     <optgroup label="Groups">${groups
       .map((group) => `<option value="group:${esc(group.id)}"${selected === `group:${group.id}` ? ' selected' : ''}>${esc(group.name)}</option>`)
       .join('')}</optgroup>
     <optgroup label="Ledgers">${ledgers
       .map((ledger) => `<option value="ledger:${esc(ledger.id)}"${selected === `ledger:${ledger.id}` ? ' selected' : ''}>${esc(ledger.name)}</option>`)
-      .join('')}</optgroup>`;
+      .join('')}</optgroup>
+    ${centres.length
+      ? `<optgroup label="Cost centres">${centres
+          .map((centre) => `<option value="costCentre:${esc(centre.id)}"${selected === `costCentre:${centre.id}` ? ' selected' : ''}>${esc(centre.name)}</option>`)
+          .join('')}</optgroup>`
+      : ''}`;
 }
 
 export function budgetMastersPanel(active) {
@@ -640,12 +646,14 @@ export function budgetMastersPanel(active) {
       const target =
         budget.targetType === 'group'
           ? active.groups.find((group) => group.id === budget.targetId)
-          : active.ledgers.find((ledger) => ledger.id === budget.targetId);
+          : budget.targetType === 'costCentre'
+            ? (active.costCentres ?? []).find((centre) => centre.id === budget.targetId)
+            : active.ledgers.find((ledger) => ledger.id === budget.targetId);
       const year = (active.years ?? []).find((item) => item.id === budget.yearId);
       return `<tr>
         <td><strong>${esc(budget.name)}</strong></td>
         <td>${esc(target?.name ?? 'Missing target')}</td>
-        <td class="muted">${budget.targetType === 'group' ? 'Group' : 'Ledger'} · ${esc(year ? dateLabel(year.start) : 'Missing year')}</td>
+        <td class="muted">${budget.targetType === 'group' ? 'Group' : budget.targetType === 'costCentre' ? 'Cost centre' : 'Ledger'} · ${esc(year ? dateLabel(year.start) : 'Missing year')}</td>
         <td class="num">${money(budget.amount)}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-budget" data-id="${esc(budget.id)}">Edit</button>
@@ -657,8 +665,7 @@ export function budgetMastersPanel(active) {
     .join('');
 
   return panel(
-    `Budgets <span class="count">${budgets.length}</span>`,
-    `    <p class="muted">Create one annual budget per ledger or group. Actuals are measured from the start of the selected financial year to the as-on date in Budget vs Actual.</p>
+    `Budgets <span class="count">${budgets.length}</span>`,    `<p class="muted">Create one annual budget per ledger, group or cost centre. Actuals are measured from the start of the selected financial year to the as-on date in Budget vs Actual.</p>
     <form id="budget-form" class="form-grid" novalidate>
       <label class="field">
         <span>Budget name</span>

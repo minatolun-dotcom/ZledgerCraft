@@ -4411,7 +4411,18 @@ function deleteGstRate(company, rateId) {
   return { ok: true, rate };
 }
 
-/** Annual budgets by ledger or group; one target and year per record. */
+function normaliseBudgetTargetType(value) {
+  return value === 'group' || value === 'ledger' || value === 'costCentre' ? value : null;
+}
+
+function budgetTargetOf(company, targetType, targetId) {
+  if (targetType === 'group') return (company.groups ?? []).find((group) => group.id === targetId) ?? null;
+  if (targetType === 'ledger') return (company.ledgers ?? []).find((ledger) => ledger.id === targetId) ?? null;
+  if (targetType === 'costCentre') return (company.costCentres ?? []).find((centre) => centre.id === targetId) ?? null;
+  return null;
+}
+
+/** Annual budgets by ledger, group or cost centre; one target and year per record. */
 function normalizeBudgets(company) {
   const seenIds = new Set();
   const seenNames = new Set();
@@ -4419,13 +4430,8 @@ function normalizeBudgets(company) {
   company.budgets = (Array.isArray(company.budgets) ? company.budgets : [])
     .filter((budget) => budget && typeof budget === 'object')
     .map((budget) => {
-      const targetType = budget.targetType === 'group' ? 'group' : budget.targetType === 'ledger' ? 'ledger' : null;
-      const target =
-        targetType === 'group'
-          ? company.groups.find((group) => group.id === budget.targetId)
-          : targetType === 'ledger'
-            ? company.ledgers.find((ledger) => ledger.id === budget.targetId)
-            : null;
+      const targetType = normaliseBudgetTargetType(budget.targetType);
+      const target = budgetTargetOf(company, targetType, budget.targetId);
       const year = (company.years ?? []).find((item) => item.id === budget.yearId);
       const amount = parseAmount(budget.amount);
       if (!target || !year || amount === null || amount < 0) return null;
@@ -4454,12 +4460,9 @@ function normalizeBudgets(company) {
 }
 
 function addBudget(company, input = {}) {
-  const targetType = input.targetType === 'group' ? 'group' : input.targetType === 'ledger' ? 'ledger' : null;
-  if (!targetType) return { ok: false, error: 'Choose a ledger or group for the budget.' };
-  const target =
-    targetType === 'group'
-      ? company.groups.find((group) => group.id === input.targetId)
-      : company.ledgers.find((ledger) => ledger.id === input.targetId);
+  const targetType = normaliseBudgetTargetType(input.targetType);
+  if (!targetType) return { ok: false, error: 'Choose a ledger, group or cost centre for the budget.' };
+  const target = budgetTargetOf(company, targetType, input.targetId);
   if (!target) return { ok: false, error: 'Budget target not found.' };
   const year = (company.years ?? []).find((item) => item.id === input.yearId);
   if (!year) return { ok: false, error: 'Choose a financial year for the budget.' };
@@ -4490,16 +4493,9 @@ function addBudget(company, input = {}) {
 function updateBudget(company, budgetId, input = {}) {
   const budget = (company.budgets ?? []).find((item) => item.id === budgetId);
   if (!budget) return { ok: false, error: 'Budget not found.' };
-  const targetType = input.targetType === 'group'
-    ? 'group'
-    : input.targetType === 'ledger'
-      ? 'ledger'
-      : budget.targetType;
+  const targetType = normaliseBudgetTargetType(input.targetType) ?? budget.targetType;
   const targetId = input.targetId ?? budget.targetId;
-  const target =
-    targetType === 'group'
-      ? company.groups.find((group) => group.id === targetId)
-      : company.ledgers.find((ledger) => ledger.id === targetId);
+  const target = budgetTargetOf(company, targetType, targetId);
   if (!target) return { ok: false, error: 'Budget target not found.' };
   const yearId = input.yearId ?? budget.yearId;
   const year = (company.years ?? []).find((item) => item.id === yearId);
@@ -8563,10 +8559,14 @@ function budgetVsActual(company, filters = {}) {
       const target =
         budget.targetType === 'group'
           ? company.groups.find((group) => group.id === budget.targetId)
-          : company.ledgers.find((ledger) => ledger.id === budget.targetId);
+          : budget.targetType === 'costCentre'
+            ? (company.costCentres ?? []).find((centre) => centre.id === budget.targetId)
+            : company.ledgers.find((ledger) => ledger.id === budget.targetId);
       if (!target) return null;
-      const ledgerIds =
-        budget.targetType === 'group'
+      const costCentre = budget.targetType === 'costCentre';
+      const ledgerIds = costCentre
+        ? null
+        : budget.targetType === 'group'
           ? new Set(ledgersUnderGroup(company, target.id).map((ledger) => ledger.id))
           : new Set([target.id]);
       let debit = 0;
@@ -8574,13 +8574,21 @@ function budgetVsActual(company, filters = {}) {
       for (const voucher of company.vouchers ?? []) {
         if (voucher.date < year.start || voucher.date > asOn) continue;
         for (const line of voucher.lines ?? []) {
-          if (!ledgerIds.has(line.ledgerId)) continue;
+          if (costCentre ? line.costCentreId !== target.id : !ledgerIds.has(line.ledgerId)) continue;
           if (line.side === 'Cr') credit = round2(credit + line.amount);
           else debit = round2(debit + line.amount);
         }
       }
-      const nature = budget.targetType === 'group' ? groupNature(company, target.id) : groupNature(company, target.groupId);
-      const actual = nature === 'Income' || nature === 'Liabilities' ? round2(credit - debit) : round2(debit - credit);
+      const nature = costCentre
+        ? 'Cost centre'
+        : budget.targetType === 'group'
+          ? groupNature(company, target.id)
+          : groupNature(company, target.groupId);
+      const actual = costCentre
+        ? round2(debit - credit)
+        : nature === 'Income' || nature === 'Liabilities'
+          ? round2(credit - debit)
+          : round2(debit - credit);
       return {
         budgetId: budget.id,
         name: budget.name,
@@ -8615,6 +8623,8 @@ function budgetVsActual(company, filters = {}) {
     if (row.targetType === 'group') {
       const target = groupById(company, row.targetId);
       row.nested = Boolean(target?.parentId && groupOrAncestorBudgeted(target.parentId));
+    } else if (row.targetType === 'costCentre') {
+      row.nested = false;
     } else {
       const ledger = (company.ledgers ?? []).find((entry) => entry.id === row.targetId);
       row.nested = Boolean(ledger && groupOrAncestorBudgeted(ledger.groupId));
@@ -13025,13 +13035,19 @@ function companiesScreen() {
 function budgetTargetOptions(active, selected = '') {
   const groups = [...active.groups].sort((a, b) => a.name.localeCompare(b.name));
   const ledgers = [...active.ledgers].sort((a, b) => a.name.localeCompare(b.name));
-  return `<option value="">Choose a ledger or group…</option>
+  const centres = [...(active.costCentres ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  return `<option value="">Choose a ledger, group or cost centre…</option>
     <optgroup label="Groups">${groups
       .map((group) => `<option value="group:${esc(group.id)}"${selected === `group:${group.id}` ? ' selected' : ''}>${esc(group.name)}</option>`)
       .join('')}</optgroup>
     <optgroup label="Ledgers">${ledgers
       .map((ledger) => `<option value="ledger:${esc(ledger.id)}"${selected === `ledger:${ledger.id}` ? ' selected' : ''}>${esc(ledger.name)}</option>`)
-      .join('')}</optgroup>`;
+      .join('')}</optgroup>
+    ${centres.length
+      ? `<optgroup label="Cost centres">${centres
+          .map((centre) => `<option value="costCentre:${esc(centre.id)}"${selected === `costCentre:${centre.id}` ? ' selected' : ''}>${esc(centre.name)}</option>`)
+          .join('')}</optgroup>`
+      : ''}`;
 }
 
 function budgetMastersPanel(active) {
@@ -13045,12 +13061,14 @@ function budgetMastersPanel(active) {
       const target =
         budget.targetType === 'group'
           ? active.groups.find((group) => group.id === budget.targetId)
-          : active.ledgers.find((ledger) => ledger.id === budget.targetId);
+          : budget.targetType === 'costCentre'
+            ? (active.costCentres ?? []).find((centre) => centre.id === budget.targetId)
+            : active.ledgers.find((ledger) => ledger.id === budget.targetId);
       const year = (active.years ?? []).find((item) => item.id === budget.yearId);
       return `<tr>
         <td><strong>${esc(budget.name)}</strong></td>
         <td>${esc(target?.name ?? 'Missing target')}</td>
-        <td class="muted">${budget.targetType === 'group' ? 'Group' : 'Ledger'} · ${esc(year ? dateLabel(year.start) : 'Missing year')}</td>
+        <td class="muted">${budget.targetType === 'group' ? 'Group' : budget.targetType === 'costCentre' ? 'Cost centre' : 'Ledger'} · ${esc(year ? dateLabel(year.start) : 'Missing year')}</td>
         <td class="num">${money(budget.amount)}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-budget" data-id="${esc(budget.id)}">Edit</button>
@@ -13062,8 +13080,7 @@ function budgetMastersPanel(active) {
     .join('');
 
   return panel(
-    `Budgets <span class="count">${budgets.length}</span>`,
-    `    <p class="muted">Create one annual budget per ledger or group. Actuals are measured from the start of the selected financial year to the as-on date in Budget vs Actual.</p>
+    `Budgets <span class="count">${budgets.length}</span>`,    `<p class="muted">Create one annual budget per ledger, group or cost centre. Actuals are measured from the start of the selected financial year to the as-on date in Budget vs Actual.</p>
     <form id="budget-form" class="form-grid" novalidate>
       <label class="field">
         <span>Budget name</span>
@@ -16136,7 +16153,7 @@ function budgetsScreen() {
     .map((row) => {
       const used = row.usedPercent === null ? 0 : Math.max(0, Math.min(100, row.usedPercent));
       return `<tr>
-        <td><strong>${esc(row.name)}</strong><div class="muted small">${esc(row.targetType === 'group' ? 'Group' : 'Ledger')} · ${esc(row.nature)}</div></td>
+        <td><strong>${esc(row.name)}</strong><div class="muted small">${esc(row.targetType === 'group' ? 'Group' : row.targetType === 'costCentre' ? 'Cost centre' : 'Ledger')} · ${esc(row.nature)}</div></td>
         <td>${esc(row.target)}</td>
         <td class="num">${money(row.amount)}</td>
         <td class="num">${money(row.actual)}</td>

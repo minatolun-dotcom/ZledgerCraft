@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   addBudget,
+  addCostCentre,
   addFinancialYear,
   addGroup,
   addLedger,
@@ -257,6 +258,70 @@ test('over-budget rows are flagged and budgets can be deleted', () => {
   const removed = deleteBudget(company, added.budget.id);
   assert.equal(removed.ok, true, removed.error);
   assert.equal(company.budgets.length, 0);
+});
+
+test('a budget can target a cost centre and measure tagged spend', () => {
+  const { company, bank, rent, salaries } = budgetFixture();
+  const centre = addCostCentre(company, {
+    name: 'Marketing',
+    categoryId: company.costCategories[0].id,
+  }).centre;
+  const budget = addBudget(company, {
+    name: 'Marketing plan',
+    targetType: 'costCentre',
+    targetId: centre.id,
+    yearId: yearId(company),
+    amount: 5000,
+  });
+  assert.equal(budget.ok, true, budget.error);
+  assert.equal(budget.budget.targetType, 'costCentre');
+
+  const tagged = addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: rent.id, side: 'Dr', amount: 1200, costCentreId: centre.id },
+      { ledgerId: bank.id, side: 'Cr', amount: 1200 },
+    ],
+  });
+  assert.equal(tagged.ok, true, tagged.error);
+  addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-11',
+    lines: [
+      { ledgerId: salaries.id, side: 'Dr', amount: 900 },
+      { ledgerId: bank.id, side: 'Cr', amount: 900 },
+    ],
+  });
+
+  const report = budgetVsActual(company, { yearId: yearId(company), asOn: '2026-04-30' });
+  const row = report.rows.find((entry) => entry.name === 'Marketing plan');
+  assert.equal(row.targetType, 'costCentre');
+  assert.equal(row.nature, 'Cost centre');
+  assert.equal(row.actual, 1200, 'only the tagged line counts');
+  assert.equal(row.variance, 3800);
+  assert.equal(row.nested, false);
+  assert.equal(report.totalBudget, 5000);
+
+  const duplicate = addBudget(company, {
+    name: 'Marketing plan 2',
+    targetType: 'costCentre',
+    targetId: centre.id,
+    yearId: yearId(company),
+    amount: 100,
+  });
+  assert.equal(duplicate.ok, false);
+  assert.match(duplicate.error, /already exists/);
+  assert.equal(
+    addBudget(company, {
+      name: 'Missing centre',
+      targetType: 'costCentre',
+      targetId: 'missing',
+      yearId: yearId(company),
+      amount: 10,
+    }).ok,
+    false,
+  );
 });
 
 test('budget totals exclude a ledger budget nested inside a group budget', () => {

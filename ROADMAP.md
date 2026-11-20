@@ -344,6 +344,17 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 31: cost-centre budgets
+
+- Budget targets now include cost centres. The master picker lists them under
+  their own group, and Budget vs Actual measures spend from voucher lines tagged
+  to the centre (debit less credit) rather than all ledger activity.
+- One budget per target/year, edit, duplicate-next-year and name rules apply to
+  cost-centre budgets too; they are independent targets, so they are never
+  treated as nested.
+- Verification: tagged-vs-untagged spend, variance, duplicate and missing-centre
+  cases; 272 tests (271 pass, 1 skipped) and a 915.9 kB build pass.
+
 ### 2026-11-20 — Phase 30: no double-counted budget totals
 
 - Budget vs Actual still lists every budget, but totals now use only top-level

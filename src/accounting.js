@@ -970,10 +970,14 @@ export function budgetVsActual(company, filters = {}) {
       const target =
         budget.targetType === 'group'
           ? company.groups.find((group) => group.id === budget.targetId)
-          : company.ledgers.find((ledger) => ledger.id === budget.targetId);
+          : budget.targetType === 'costCentre'
+            ? (company.costCentres ?? []).find((centre) => centre.id === budget.targetId)
+            : company.ledgers.find((ledger) => ledger.id === budget.targetId);
       if (!target) return null;
-      const ledgerIds =
-        budget.targetType === 'group'
+      const costCentre = budget.targetType === 'costCentre';
+      const ledgerIds = costCentre
+        ? null
+        : budget.targetType === 'group'
           ? new Set(ledgersUnderGroup(company, target.id).map((ledger) => ledger.id))
           : new Set([target.id]);
       let debit = 0;
@@ -981,13 +985,21 @@ export function budgetVsActual(company, filters = {}) {
       for (const voucher of company.vouchers ?? []) {
         if (voucher.date < year.start || voucher.date > asOn) continue;
         for (const line of voucher.lines ?? []) {
-          if (!ledgerIds.has(line.ledgerId)) continue;
+          if (costCentre ? line.costCentreId !== target.id : !ledgerIds.has(line.ledgerId)) continue;
           if (line.side === 'Cr') credit = round2(credit + line.amount);
           else debit = round2(debit + line.amount);
         }
       }
-      const nature = budget.targetType === 'group' ? groupNature(company, target.id) : groupNature(company, target.groupId);
-      const actual = nature === 'Income' || nature === 'Liabilities' ? round2(credit - debit) : round2(debit - credit);
+      const nature = costCentre
+        ? 'Cost centre'
+        : budget.targetType === 'group'
+          ? groupNature(company, target.id)
+          : groupNature(company, target.groupId);
+      const actual = costCentre
+        ? round2(debit - credit)
+        : nature === 'Income' || nature === 'Liabilities'
+          ? round2(credit - debit)
+          : round2(debit - credit);
       return {
         budgetId: budget.id,
         name: budget.name,
@@ -1022,6 +1034,8 @@ export function budgetVsActual(company, filters = {}) {
     if (row.targetType === 'group') {
       const target = groupById(company, row.targetId);
       row.nested = Boolean(target?.parentId && groupOrAncestorBudgeted(target.parentId));
+    } else if (row.targetType === 'costCentre') {
+      row.nested = false;
     } else {
       const ledger = (company.ledgers ?? []).find((entry) => entry.id === row.targetId);
       row.nested = Boolean(ledger && groupOrAncestorBudgeted(ledger.groupId));

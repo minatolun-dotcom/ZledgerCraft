@@ -2068,7 +2068,18 @@ export function deleteGstRate(company, rateId) {
   return { ok: true, rate };
 }
 
-/** Annual budgets by ledger or group; one target and year per record. */
+function normaliseBudgetTargetType(value) {
+  return value === 'group' || value === 'ledger' || value === 'costCentre' ? value : null;
+}
+
+function budgetTargetOf(company, targetType, targetId) {
+  if (targetType === 'group') return (company.groups ?? []).find((group) => group.id === targetId) ?? null;
+  if (targetType === 'ledger') return (company.ledgers ?? []).find((ledger) => ledger.id === targetId) ?? null;
+  if (targetType === 'costCentre') return (company.costCentres ?? []).find((centre) => centre.id === targetId) ?? null;
+  return null;
+}
+
+/** Annual budgets by ledger, group or cost centre; one target and year per record. */
 export function normalizeBudgets(company) {
   const seenIds = new Set();
   const seenNames = new Set();
@@ -2076,13 +2087,8 @@ export function normalizeBudgets(company) {
   company.budgets = (Array.isArray(company.budgets) ? company.budgets : [])
     .filter((budget) => budget && typeof budget === 'object')
     .map((budget) => {
-      const targetType = budget.targetType === 'group' ? 'group' : budget.targetType === 'ledger' ? 'ledger' : null;
-      const target =
-        targetType === 'group'
-          ? company.groups.find((group) => group.id === budget.targetId)
-          : targetType === 'ledger'
-            ? company.ledgers.find((ledger) => ledger.id === budget.targetId)
-            : null;
+      const targetType = normaliseBudgetTargetType(budget.targetType);
+      const target = budgetTargetOf(company, targetType, budget.targetId);
       const year = (company.years ?? []).find((item) => item.id === budget.yearId);
       const amount = parseAmount(budget.amount);
       if (!target || !year || amount === null || amount < 0) return null;
@@ -2111,12 +2117,9 @@ export function normalizeBudgets(company) {
 }
 
 export function addBudget(company, input = {}) {
-  const targetType = input.targetType === 'group' ? 'group' : input.targetType === 'ledger' ? 'ledger' : null;
-  if (!targetType) return { ok: false, error: 'Choose a ledger or group for the budget.' };
-  const target =
-    targetType === 'group'
-      ? company.groups.find((group) => group.id === input.targetId)
-      : company.ledgers.find((ledger) => ledger.id === input.targetId);
+  const targetType = normaliseBudgetTargetType(input.targetType);
+  if (!targetType) return { ok: false, error: 'Choose a ledger, group or cost centre for the budget.' };
+  const target = budgetTargetOf(company, targetType, input.targetId);
   if (!target) return { ok: false, error: 'Budget target not found.' };
   const year = (company.years ?? []).find((item) => item.id === input.yearId);
   if (!year) return { ok: false, error: 'Choose a financial year for the budget.' };
@@ -2147,16 +2150,9 @@ export function addBudget(company, input = {}) {
 export function updateBudget(company, budgetId, input = {}) {
   const budget = (company.budgets ?? []).find((item) => item.id === budgetId);
   if (!budget) return { ok: false, error: 'Budget not found.' };
-  const targetType = input.targetType === 'group'
-    ? 'group'
-    : input.targetType === 'ledger'
-      ? 'ledger'
-      : budget.targetType;
+  const targetType = normaliseBudgetTargetType(input.targetType) ?? budget.targetType;
   const targetId = input.targetId ?? budget.targetId;
-  const target =
-    targetType === 'group'
-      ? company.groups.find((group) => group.id === targetId)
-      : company.ledgers.find((ledger) => ledger.id === targetId);
+  const target = budgetTargetOf(company, targetType, targetId);
   if (!target) return { ok: false, error: 'Budget target not found.' };
   const yearId = input.yearId ?? budget.yearId;
   const year = (company.years ?? []).find((item) => item.id === yearId);

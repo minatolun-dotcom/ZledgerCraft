@@ -500,11 +500,12 @@ disabled.
   complete. An unmatched line can post a Journal against a chosen adjustment
   ledger and is then matched automatically. Matching itself never alters a
   voucher, and editing or deleting a matched voucher drops the stale match.
-- Cheque / DD register with period, as-on, status, bank, party and cheque-number
-  range filters, post-dated/due/cleared status, instrument detail, totals and
-  drill-down. Cleared status comes from Bank Reconciliation matches; an
-  instrument can also be marked cleared, stopped or cancelled manually and
-  restored to automatic, with its recent status changes shown in the row.
+- Cheque / DD register with period, as-on, status, bank, party text, exact party
+  account and cheque-number range filters, post-dated/due/cleared status,
+  instrument detail, totals and drill-down. Cleared status comes from Bank
+  Reconciliation matches; an instrument can also be marked cleared, stopped or
+  cancelled manually and restored to automatic, with its recent status changes
+  shown in the row.
 - Instrument preview and print: cheque payments show bank, cheque number, date,
   payee, Indian-numbering amount in words, figures and A/c Payee crossing; DD
   payments get a DD advice and receipt instruments a deposit slip.

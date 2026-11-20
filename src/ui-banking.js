@@ -2,6 +2,7 @@
 // Screen functions read the live UI state exported by ui.js.
 import {
   dateLabel,
+  ledgerOptions,
   todayIso,
 } from './store.js';
 import {
@@ -204,6 +205,7 @@ export function postDatedScreen() {
     status: current.status,
     bankLedgerId: current.bankLedgerId,
     party: current.party,
+    partyLedgerId: current.partyLedgerId,
     numberFrom: current.numberFrom,
     numberTo: current.numberTo,
   });
@@ -217,6 +219,12 @@ export function postDatedScreen() {
       .filter((ledger) => groupChainKeys(active, ledger.groupId).includes('bank'))
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((ledger) => `<option value="${esc(ledger.id)}"${current.bankLedgerId === ledger.id ? ' selected' : ''}>${esc(ledger.name)}</option>`),
+  ].join('');
+  const partyOptions = [
+    '<option value="">Any party account</option>',
+    ...ledgerOptions(active).map(
+      (ledger) => `<option value="${esc(ledger.id)}"${current.partyLedgerId === ledger.id ? ' selected' : ''}>${esc(ledger.name)} · ${esc(ledger.groupName)}</option>`,
+    ),
   ].join('');
   const rows = report.rows
     .map((row) => {
@@ -264,7 +272,8 @@ export function postDatedScreen() {
       <label class="field inline-field"><span>As on</span><input name="asOn" type="date" value="${esc(asOn)}" data-period></label>
       <label class="field inline-field"><span>Status</span><select name="status">${statusOptions}</select></label>
       <label class="field inline-field"><span>Bank</span><select name="bankLedgerId">${bankOptions}</select></label>
-      <label class="field inline-field"><span>Party</span><input name="party" maxlength="80" placeholder="Any party" value="${esc(current.party ?? '')}"></label>
+      <label class="field inline-field"><span>Party contains</span><input name="party" maxlength="80" placeholder="Any party" value="${esc(current.party ?? '')}"></label>
+      <label class="field inline-field"><span>Party account</span><select name="partyLedgerId">${partyOptions}</select></label>
       <label class="field inline-field"><span>Cheque no. from</span><input name="numberFrom" maxlength="30" placeholder="Any" value="${esc(current.numberFrom ?? '')}"></label>
       <label class="field inline-field"><span>to</span><input name="numberTo" maxlength="30" placeholder="Any" value="${esc(current.numberTo ?? '')}"></label>
       <button class="btn small" type="submit">Apply</button>
@@ -281,7 +290,7 @@ export function postDatedScreen() {
           <tbody>${rows}</tbody>
         </table></div>`
       : '<p class="muted">No cheque or DD instruments in this period. Add instrument details on a payment, receipt or contra voucher.</p>'}`,
-    'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation unless the instrument was marked cleared, stopped or cancelled manually. Bank, party and cheque-number range filters narrow the same register without changing status logic; manual status changes keep a short history.',
+    'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation unless the instrument was marked cleared, stopped or cancelled manually. Bank, party text, exact party account and cheque-number range filters narrow the same register without changing status logic; manual status changes keep a short history.',
   );
 }
 

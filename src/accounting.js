@@ -645,7 +645,7 @@ export function cashBankBook(company, filters = {}) {
   };
 }
 
-function partyForVoucher(company, voucher) {
+function partyLineForVoucher(company, voucher) {
   const lines = (voucher.lines ?? []).map((line) => ({
     ...line,
     ledger: company.ledgers.find((item) => item.id === line.ledgerId),
@@ -671,7 +671,15 @@ function partyForVoucher(company, voucher) {
   } else if (voucher.type === 'Receipt') {
     party = lines.find((line) => line.side === 'Cr');
   }
-  return party?.ledger?.name ?? lines.map((line) => line.ledger?.name ?? 'Unknown').join(' / ');
+  return party;
+}
+
+function partyForVoucher(company, voucher) {
+  const party = partyLineForVoucher(company, voucher);
+  if (party?.ledger?.name) return party.ledger.name;
+  return (voucher.lines ?? [])
+    .map((line) => company.ledgers.find((item) => item.id === line.ledgerId)?.name ?? 'Unknown')
+    .join(' / ');
 }
 
 /** Sales / purchase / credit note / debit note registers. */
@@ -774,6 +782,7 @@ export function postDatedRegister(company, filters = {}) {
     .map((voucher) => {
       const instrument = voucher.instrument;
       const bank = company.ledgers.find((ledger) => ledger.id === instrument.bankLedgerId);
+      const partyLine = partyLineForVoucher(company, voucher);
       const manualStatus = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
         ? instrument.status
         : '';
@@ -792,7 +801,8 @@ export function postDatedRegister(company, filters = {}) {
         type: voucher.type,
         no: voucher.no,
         voucherDate: voucher.date,
-        party: partyForVoucher(company, voucher),
+        party: partyLine?.ledger?.name ?? partyForVoucher(company, voucher),
+        partyLedgerId: partyLine?.ledger?.id ?? '',
         bankLedgerId: instrument.bankLedgerId,
         bank: bank?.name ?? 'Unknown bank',
         kind: instrument.kind,
@@ -808,6 +818,7 @@ export function postDatedRegister(company, filters = {}) {
     .filter((row) => !filters.status || filters.status === 'All' || row.status === filters.status)
     .filter((row) => !filters.bankLedgerId || row.bankLedgerId === filters.bankLedgerId)
     .filter((row) => !filters.party || row.party.toLowerCase().includes(String(filters.party).toLowerCase()))
+    .filter((row) => !filters.partyLedgerId || row.partyLedgerId === filters.partyLedgerId)
     .filter((row) => !filters.numberFrom || compareInstrumentNumber(row.number, filters.numberFrom) >= 0)
     .filter((row) => !filters.numberTo || compareInstrumentNumber(row.number, filters.numberTo) <= 0)
     .sort(

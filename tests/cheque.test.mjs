@@ -71,6 +71,8 @@ test('a payment stores valid cheque details', () => {
   assert.equal(postDatedRegister(company, { asOn: '2026-05-31', numberFrom: '100234', numberTo: '100234' }).count, 1);
   assert.equal(postDatedRegister(company, { asOn: '2026-05-31', numberFrom: '100235' }).count, 0);
   assert.equal(postDatedRegister(company, { asOn: '2026-05-31', numberTo: '100233' }).count, 0);
+  assert.equal(postDatedRegister(company, { asOn: '2026-05-31', partyLedgerId: expense.id }).count, 1);
+  assert.equal(postDatedRegister(company, { asOn: '2026-05-31', partyLedgerId: bank.id }).count, 0);
 });
 
 test('cheque details need a supported voucher, number, date and bank line', () => {

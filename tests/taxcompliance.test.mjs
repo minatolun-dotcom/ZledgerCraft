@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  addComplianceTask,
   addLedger,
   addStockItem,
   addVoucher,
   createCompany,
+  deleteComplianceTask,
   deleteVoucher,
   emptyState,
   exportState,
@@ -12,7 +14,9 @@ import {
   importState,
   saveGstSettings,
   saveTdsSettings,
+  setComplianceTaskStatus,
   setEwayPartB,
+  updateComplianceTask,
   updateLedger,
 } from '../src/store.js';
 import {
@@ -282,6 +286,62 @@ test('e-way bill register uses the 50,000 threshold and saves Part B details', (
     threshold: 500000,
   });
   assert.equal(lower.count, 0);
+});
+
+test('compliance tasks validate, update, toggle and survive a backup', () => {
+  const { company } = fixture();
+  assert.equal(addComplianceTask(company, { dueDate: '2026-05-11' }).ok, false);
+  assert.equal(addComplianceTask(company, { title: 'File GSTR-1', dueDate: '11-05-2026' }).ok, false);
+
+  const added = addComplianceTask(company, {
+    title: ' File GSTR-1 for April ',
+    category: 'GST',
+    dueDate: '2026-05-11',
+    notes: 'Check B2B invoices',
+  });
+  assert.equal(added.ok, true, added.error);
+  assert.equal(added.task.title, 'File GSTR-1 for April');
+  assert.equal(added.task.status, 'Open');
+
+  const second = addComplianceTask(company, {
+    title: 'Deposit TDS',
+    category: 'Unknown',
+    dueDate: '2026-05-07',
+  });
+  assert.equal(second.ok, true, second.error);
+  assert.equal(second.task.category, 'Other');
+
+  const updated = updateComplianceTask(company, added.task.id, {
+    title: 'File GSTR-3B for April',
+    category: 'GST',
+    dueDate: '2026-05-20',
+    notes: 'After books close',
+  });
+  assert.equal(updated.ok, true, updated.error);
+  assert.equal(updated.task.title, 'File GSTR-3B for April');
+
+  const done = setComplianceTaskStatus(company, added.task.id, 'Done');
+  assert.equal(done.ok, true, done.error);
+  assert.equal(done.task.status, 'Done');
+  assert.ok(done.task.completedAt);
+  assert.equal(setComplianceTaskStatus(company, added.task.id, 'Waiting').ok, false);
+
+  const reopened = setComplianceTaskStatus(company, added.task.id, 'Open');
+  assert.equal(reopened.task.status, 'Open');
+  assert.equal(reopened.task.completedAt, undefined);
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  const tasks = restored.state.companies[0].complianceTasks;
+  assert.equal(tasks.length, 2);
+  assert.equal(tasks.find((task) => task.id === added.task.id).dueDate, '2026-05-20');
+
+  assert.equal(deleteComplianceTask(company, added.task.id).ok, true);
+  assert.equal(company.complianceTasks.length, 1);
+  assert.equal(deleteComplianceTask(company, added.task.id).ok, false);
 });
 
 test('tax audit reconciles turnover, GST and TDS and survives a backup', () => {

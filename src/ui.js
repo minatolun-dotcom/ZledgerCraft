@@ -14,6 +14,7 @@ import {
   addCurrencyRate,
   addUser,
   addCompany,
+  addComplianceTask,
   addCostCategory,
   addCostCentre,
   addEmployee,
@@ -51,6 +52,7 @@ import {
   deleteBudget,
   duplicateBudget,
   deleteCompany,
+  deleteComplianceTask,
   deleteCurrency,
   deleteCurrencyRate,
   deleteCostCategory,
@@ -106,12 +108,14 @@ import {
   selectYear,
   setBankMatch,
   setCurrentUser,
+  setComplianceTaskStatus,
   setEwayPartB,
   setInstrumentStatus,
   setOrderStatus,
   signedOpening,
   todayIso,
   updateCompany,
+  updateComplianceTask,
   updateEmployee,
   updateGroup,
   updateLedger,
@@ -251,6 +255,7 @@ import {
   issueList,
   eInvoiceScreen,
   ewayBillScreen,
+  complianceScreen,
   taxAuditScreen,
   tdsScreen,
 } from './ui-tax.js';
@@ -2107,6 +2112,8 @@ export function screenHtml() {
       return eInvoiceScreen();
     case 'ewaybill':
       return ewayBillScreen();
+    case 'compliance':
+      return complianceScreen();
     case 'taxAudit':
       return taxAuditScreen();
     case 'payroll':
@@ -2978,6 +2985,39 @@ export async function handleSubmit(event) {
     setFlash(`Budget "${result.budget.name}" ${editingBudgetId ? 'updated' : 'added'}.`);
     if (editingBudgetId) navigate('masters');
     else render();
+    return;
+  }
+
+  if (form.id === 'compliance-task-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const taskId = String(data.get('taskId') ?? '');
+    const input = {
+      title: data.get('title'),
+      category: data.get('category'),
+      dueDate: data.get('dueDate'),
+      notes: data.get('notes'),
+    };
+    const result = taskId
+      ? updateComplianceTask(active, taskId, input)
+      : addComplianceTask(active, input);
+    if (!result.ok) {
+      showFormError(result.error, 'compliance-task-error');
+      return;
+    }
+    logAudit(
+      taskId ? 'compliance.update' : 'compliance.create',
+      `${taskId ? 'Updated' : 'Added'} compliance task "${result.task.title}" due ${result.task.dueDate}.`,
+      active,
+      result.task.id,
+    );
+    persist();
+    view.complianceTaskId = null;
+    setFlash(taskId ? 'Compliance task updated.' : 'Compliance task added.');
+    render();
     return;
   }
 
@@ -5058,6 +5098,78 @@ async function handleClick(event) {
       setFlash(`Downloaded e-invoice draft for ${row.ref}. Nothing was transmitted.`);
       break;
     }
+    case 'edit-compliance-task': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      view.complianceTaskId = trigger.dataset.id;
+      render();
+      break;
+    }
+
+    case 'cancel-compliance-task': {
+      view.complianceTaskId = null;
+      render();
+      break;
+    }
+
+    case 'toggle-compliance-task': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const task = (active.complianceTasks ?? []).find((entry) => entry.id === trigger.dataset.id);
+      if (!task) {
+        setFlash('Compliance task not found.', 'warn');
+        break;
+      }
+      const nextStatus = task.status === 'Done' ? 'Open' : 'Done';
+      const result = setComplianceTaskStatus(active, task.id, nextStatus);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit(
+        'compliance.status',
+        `Marked compliance task "${task.title}" as ${nextStatus}.`,
+        active,
+        task.id,
+      );
+      persist();
+      setFlash(nextStatus === 'Done' ? 'Compliance task marked done.' : 'Compliance task reopened.');
+      render();
+      break;
+    }
+
+    case 'delete-compliance-task': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Delete this compliance task?')) break;
+      const task = (active.complianceTasks ?? []).find((entry) => entry.id === trigger.dataset.id);
+      const result = deleteComplianceTask(active, trigger.dataset.id);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      if (view.complianceTaskId === trigger.dataset.id) view.complianceTaskId = null;
+      logAudit(
+        'compliance.delete',
+        `Deleted compliance task "${task?.title ?? result.task.title}".`,
+        active,
+        trigger.dataset.id,
+      );
+      persist();
+      setFlash('Compliance task deleted.');
+      render();
+      break;
+    }
+
     case 'edit-eway-partb': {
       if (!can('master.write')) {
         requirePermission('master.write');

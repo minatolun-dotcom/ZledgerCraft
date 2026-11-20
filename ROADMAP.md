@@ -201,7 +201,7 @@ Status: **Done**, **Partial**, **Missing**.
 | GSTR-1, GSTR-3B, GSTR-2B reconciliation and annual returns | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary; no filing, GSTR-1 JSON export, 2B reconciliation or annual return |
 | E-invoice and e-way bill generation | Partial — B2B e-invoice readiness and draft NIC-style JSON; e-way Part A working papers and draft JSON at a configurable threshold; no IRP/e-way portal submission, IRN/QR, Part B, transporter/vehicle, cancellation or amendment |
 | TDS/TCS sections, thresholds, challans, returns and certificates | Partial — TAN, section/rate/threshold master, TDS on purchases, TCS on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns, certificates, threshold enforcement, higher-rate/no-PAN logic or journal deductions |
-| Tax audit, reconciliation and statutory registers | Partial — turnover, output-tax/ITC and TDS/TCS reconciliations plus a Form 3CD-style checklist; no Form 3CD, audit opinion, statutory registers, consolidation or compliance calendar |
+| Tax audit, reconciliation and statutory registers | Partial — turnover, output-tax/ITC and TDS/TCS reconciliations plus a Form 3CD-style checklist and a user-managed compliance calendar; no Form 3CD, audit opinion, statutory registers or consolidation |
 | Immutable audit trail | Done (Stage 1, app-level append-only; not tamper-proof against browser-storage edits) |
 
 ### Payroll and statutory deductions — Partial
@@ -343,6 +343,17 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
+
+### 2026-11-20 — Phase 45: compliance calendar
+
+- A new Compliance calendar screen keeps user-managed GST, TDS, payroll and
+  other filing tasks with due dates and notes. Open tasks are sorted by due date
+  and flagged overdue or due within seven days; tasks can be edited, completed,
+  reopened and deleted, with audit events and backup validation.
+- The app does not calculate statutory due dates, file anything or store
+  acknowledgements; the calendar is a reminder and working-note register.
+- Verification: validation and category fallback, edit/status/delete flow and
+  backup round trip; 286 tests (285 pass, 1 skipped) and a 982.5 kB build pass.
 
 ### 2026-11-20 — Phase 44: batch-level stock counts
 

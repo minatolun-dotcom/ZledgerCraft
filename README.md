@@ -488,6 +488,10 @@ disabled.
   value, Part A readiness notes, and saved Part B transporter, vehicle and
   distance details per invoice with a draft JSON download. Nothing is submitted
   to the portal.
+- Compliance calendar: user-managed GST, TDS, payroll and other filing tasks
+  with title, due date, category and notes. Open tasks are flagged overdue or
+  due within seven days, and tasks can be edited, marked done, reopened and
+  deleted. Due dates are not calculated and nothing is filed or acknowledged.
 - Tax audit working papers for a period: books turnover from Sales Accounts
   versus GST outward taxable, output-tax and input-credit reconciliation between
   GST-role ledgers and GSTR-3B, TDS/TCS deducted, paid and outstanding, the
@@ -658,8 +662,8 @@ balance sheet, cash/bank books, registers, receivables/payables with ageing,
 group summary, cash flow, ratio analysis, statistics, period selection,
 bill-wise receivables, bill-wise register and party statement, godowns, batches,
 stock transfers, sales/purchase orders, BOMs and production, GST tax on
-invoices with GSTR-1/GSTR-3B working papers, e-invoice/e-way bill drafts and
-tax-audit reconciliations, TDS/TCS deduction with registers
+invoices with GSTR-1/GSTR-3B working papers, e-invoice/e-way bill drafts, a
+user-managed compliance calendar and tax-audit reconciliations, TDS/TCS deduction with registers
 and challan tracking, payroll runs with payslips and a salary register, report
 export, backup snapshots,
 an append-only audit trail, bank statement reconciliation, foreign-currency

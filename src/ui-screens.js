@@ -346,6 +346,7 @@ export function gatewayScreen() {
           <button type="button" class="link-row" data-screen="budgets"><span>Budget vs Actual</span><span class="muted small">Plan</span></button>
           <button type="button" class="link-row" data-screen="forex"><span>Forex Revaluation</span><span class="muted small">Currency</span></button>
           <button type="button" class="link-row" data-screen="gst"><span>GST returns</span><span class="muted small">Tax</span></button>
+          <button type="button" class="link-row" data-screen="compliance"><span>Compliance calendar</span><span class="muted small">Tasks</span></button>
           <button type="button" class="link-row" data-screen="tds"><span>TDS / TCS register</span><span class="muted small">Tax</span></button>
           <button type="button" class="link-row" data-screen="payroll"><span>Payroll &amp; payslips</span><span class="muted small">Salary</span></button>
           <button type="button" class="link-row" data-screen="registers"><span>Sales &amp; purchase registers</span><kbd>R</kbd></button>

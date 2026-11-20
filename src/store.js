@@ -792,6 +792,7 @@ export function loadState() {
   for (const company of parsed.companies) normalizeBankReconciliations(company);
   for (const company of parsed.companies) normalizeStockCounts(company);
   for (const company of parsed.companies) normalizeEwayPartB(company);
+  for (const company of parsed.companies) normalizeComplianceTasks(company);
   parsed.audit = normalizeAudit(parsed.audit);
   seedUsers(parsed);
   return parsed;
@@ -4191,6 +4192,97 @@ export function normalizeStockCounts(company) {
   return company;
 }
 
+const COMPLIANCE_CATEGORIES = new Set(['GST', 'TDS', 'Payroll', 'Other']);
+
+function complianceTaskInput(input = {}) {
+  const title = String(input.title ?? '').trim().slice(0, 100);
+  if (!title) return { error: 'Enter a compliance task title.' };
+  const dueDate = String(input.dueDate ?? '');
+  if (!isValidIsoDate(dueDate)) return { error: 'Enter a valid due date.' };
+  const category = COMPLIANCE_CATEGORIES.has(input.category) ? input.category : 'Other';
+  const notes = String(input.notes ?? '').trim().slice(0, 200);
+  return { title, dueDate, category, notes };
+}
+
+export function addComplianceTask(company, input = {}) {
+  const checked = complianceTaskInput(input);
+  if (checked.error) return { ok: false, error: checked.error };
+  company.complianceTasks = Array.isArray(company.complianceTasks) ? company.complianceTasks : [];
+  if (company.complianceTasks.length >= 1000) {
+    return { ok: false, error: 'Keep at most 1,000 compliance tasks.' };
+  }
+  const task = {
+    id: uid('ctask'),
+    title: checked.title,
+    category: checked.category,
+    dueDate: checked.dueDate,
+    notes: checked.notes,
+    status: 'Open',
+    createdAt: new Date().toISOString(),
+  };
+  company.complianceTasks.push(task);
+  return { ok: true, task };
+}
+
+export function updateComplianceTask(company, taskId, input = {}) {
+  const task = (company.complianceTasks ?? []).find((entry) => entry.id === taskId);
+  if (!task) return { ok: false, error: 'Compliance task not found.' };
+  const checked = complianceTaskInput(input);
+  if (checked.error) return { ok: false, error: checked.error };
+  task.title = checked.title;
+  task.category = checked.category;
+  task.dueDate = checked.dueDate;
+  task.notes = checked.notes;
+  return { ok: true, task };
+}
+
+export function setComplianceTaskStatus(company, taskId, status) {
+  const task = (company.complianceTasks ?? []).find((entry) => entry.id === taskId);
+  if (!task) return { ok: false, error: 'Compliance task not found.' };
+  if (status !== 'Open' && status !== 'Done') return { ok: false, error: 'Choose Open or Done.' };
+  task.status = status;
+  if (status === 'Done') task.completedAt = new Date().toISOString();
+  else delete task.completedAt;
+  return { ok: true, task };
+}
+
+export function deleteComplianceTask(company, taskId) {
+  const task = (company.complianceTasks ?? []).find((entry) => entry.id === taskId);
+  if (!task) return { ok: false, error: 'Compliance task not found.' };
+  company.complianceTasks = (company.complianceTasks ?? []).filter((entry) => entry.id !== taskId);
+  return { ok: true, task };
+}
+
+/** Repairs saved compliance tasks after load or backup import. */
+export function normalizeComplianceTasks(company) {
+  if (!Array.isArray(company.complianceTasks)) {
+    company.complianceTasks = [];
+    return company;
+  }
+  const seen = new Set();
+  company.complianceTasks = company.complianceTasks
+    .filter((task) => {
+      if (!task || typeof task !== 'object') return false;
+      const id = String(task.id ?? '').slice(0, 80);
+      const checked = complianceTaskInput(task);
+      if (!id || checked.error || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .slice(-1000)
+    .map((task) => ({
+      id: String(task.id).slice(0, 80),
+      title: String(task.title).trim().slice(0, 100),
+      category: COMPLIANCE_CATEGORIES.has(task.category) ? task.category : 'Other',
+      dueDate: task.dueDate,
+      notes: String(task.notes ?? '').trim().slice(0, 200),
+      status: task.status === 'Done' ? 'Done' : 'Open',
+      ...(task.status === 'Done' && task.completedAt ? { completedAt: String(task.completedAt) } : {}),
+      createdAt: String(task.createdAt ?? new Date().toISOString()),
+    }));
+  return company;
+}
+
 export function addOrder(company, input) {
   const type = input.type === 'Purchase' ? 'Purchase' : input.type === 'Sales' ? 'Sales' : '';
   if (!type) return { ok: false, error: 'Choose a sales or purchase order.' };
@@ -5477,6 +5569,34 @@ function validateImportedCompany(company) {
     }
   }
 
+  if (company.complianceTasks !== undefined) {
+    if (!Array.isArray(company.complianceTasks) || company.complianceTasks.length > 1000) {
+      return `Company "${name}" has invalid compliance tasks.`;
+    }
+    const taskIds = new Set();
+    for (const task of company.complianceTasks) {
+      if (!task || !task.id || taskIds.has(task.id)) {
+        return `Company "${name}" has a duplicate or missing compliance task id.`;
+      }
+      taskIds.add(task.id);
+      if (String(task.title ?? '').trim().length === 0 || String(task.title).length > 100) {
+        return `Company "${name}" has a compliance task with an invalid title.`;
+      }
+      if (!isValidIsoDate(task.dueDate)) {
+        return `Company "${name}" has a compliance task with an invalid due date.`;
+      }
+      if (!['GST', 'TDS', 'Payroll', 'Other'].includes(task.category)) {
+        return `Company "${name}" has a compliance task with an invalid category.`;
+      }
+      if (task.status !== 'Open' && task.status !== 'Done') {
+        return `Company "${name}" has a compliance task with an invalid status.`;
+      }
+      if (String(task.notes ?? '').length > 200) {
+        return `Company "${name}" has compliance task notes that are too long.`;
+      }
+    }
+  }
+
   if (company.ewayPartB !== undefined) {
     if (!company.ewayPartB || typeof company.ewayPartB !== 'object' || Array.isArray(company.ewayPartB)) {
       return `Company "${name}" has invalid e-way Part B data.`;
@@ -5776,6 +5896,7 @@ export function importState(json) {
     normalizeBankReconciliations(mapped);
     normalizeStockCounts(mapped);
     normalizeEwayPartB(mapped);
+    normalizeComplianceTasks(mapped);
     return mapped;
   });
 

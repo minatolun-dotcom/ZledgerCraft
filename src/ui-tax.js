@@ -506,6 +506,85 @@ export function ewayBillScreen() {
   );
 }
 
+function addIsoDays(iso, days) {
+  const date = new Date(Date.UTC(
+    Number(iso.slice(0, 4)),
+    Number(iso.slice(5, 7)) - 1,
+    Number(iso.slice(8, 10)) + days,
+  ));
+  return date.toISOString().slice(0, 10);
+}
+
+export function complianceScreen() {
+  if (!company()) return emptyCompanyScreen('Compliance');
+  const active = company();
+  const today = todayIso();
+  const soon = addIsoDays(today, 7);
+  const tasks = [...(active.complianceTasks ?? [])];
+  const editing = view.complianceTaskId
+    ? tasks.find((task) => task.id === view.complianceTaskId) ?? null
+    : null;
+  const sorted = tasks.sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'Open' ? -1 : 1;
+    return a.dueDate.localeCompare(b.dueDate) || a.title.localeCompare(b.title);
+  });
+  const open = tasks.filter((task) => task.status === 'Open');
+  const overdue = open.filter((task) => task.dueDate < today);
+  const dueSoon = open.filter((task) => task.dueDate >= today && task.dueDate <= soon);
+  const done = tasks.filter((task) => task.status === 'Done');
+
+  const categoryOptions = ['GST', 'TDS', 'Payroll', 'Other']
+    .map((category) => `<option value="${category}"${(editing?.category ?? 'Other') === category ? ' selected' : ''}>${category}</option>`)
+    .join('');
+  const taskForm = `<form id="compliance-task-form" class="form-grid compliance-task-form" novalidate>
+    <input type="hidden" name="taskId" value="${esc(editing?.id ?? '')}">
+    <label class="field"><span>Task</span><input name="title" maxlength="100" placeholder="e.g. File GSTR-3B for April" value="${esc(editing?.title ?? '')}"></label>
+    <label class="field"><span>Category</span><select name="category">${categoryOptions}</select></label>
+    <label class="field"><span>Due date</span><input name="dueDate" type="date" value="${esc(editing?.dueDate ?? '')}"></label>
+    <label class="field"><span>Notes</span><input name="notes" maxlength="200" placeholder="Optional working note" value="${esc(editing?.notes ?? '')}"></label>
+    <div class="form-actions">
+      <button class="btn primary" type="submit">${editing ? 'Update task' : 'Add task'}</button>
+      ${editing ? '<button class="btn ghost" type="button" data-action="cancel-compliance-task">Cancel</button>' : ''}
+    </div>
+    <p id="compliance-task-error" class="form-error" role="alert"></p>
+  </form>`;
+
+  const rows = sorted
+    .map((task) => {
+      const isDone = task.status === 'Done';
+      const late = !isDone && task.dueDate < today;
+      const near = !isDone && !late && task.dueDate <= soon;
+      return `<tr>
+        <td><span class="badge${isDone ? '' : late ? ' overdue' : near ? ' attention' : ''}">${isDone ? 'Done' : late ? 'Overdue' : near ? 'Due soon' : 'Open'}</span></td>
+        <td><strong>${esc(task.title)}</strong>${task.notes ? `<div class="muted small">${esc(task.notes)}</div>` : ''}</td>
+        <td>${esc(task.category)}</td>
+        <td>${esc(dateLabel(task.dueDate))}</td>
+        <td class="row-actions">
+          <button class="btn small ghost" type="button" data-action="edit-compliance-task" data-id="${esc(task.id)}">Edit</button>
+          <button class="btn small ghost" type="button" data-action="toggle-compliance-task" data-id="${esc(task.id)}">${isDone ? 'Reopen' : 'Mark done'}</button>
+          <button class="btn small danger" type="button" data-action="delete-compliance-task" data-id="${esc(task.id)}">Delete</button>
+        </td>
+      </tr>`;
+    })
+    .join('');
+
+  return panel(
+    'Compliance calendar',
+    `${taskForm}
+    <div class="ratio-grid">
+      <div class="ratio-card"><span class="ratio-label">Open</span><strong>${open.length}</strong><span class="muted small">${overdue.length} overdue · ${dueSoon.length} due within 7 days</span></div>
+      <div class="ratio-card"><span class="ratio-label">Completed</span><strong>${done.length}</strong><span class="muted small">Kept for filing history</span></div>
+    </div>
+    ${sorted.length
+      ? `<table class="data-table compact">
+          <thead><tr><th>Status</th><th>Task</th><th>Category</th><th>Due date</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`
+      : '<p class="muted">No compliance tasks yet. Add GST, TDS, payroll or other filing reminders above.</p>'}`,
+    'Tasks are your own reminders and filing notes. The app does not calculate statutory due dates, file returns or store acknowledgements.',
+  );
+}
+
 export function taxAuditScreen() {
   if (!company()) return emptyCompanyScreen('Tax audit');
   const active = company();

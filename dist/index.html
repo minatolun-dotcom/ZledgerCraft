@@ -3135,6 +3135,7 @@ function loadState() {
   for (const company of parsed.companies) normalizeBankReconciliations(company);
   for (const company of parsed.companies) normalizeStockCounts(company);
   for (const company of parsed.companies) normalizeEwayPartB(company);
+  for (const company of parsed.companies) normalizeComplianceTasks(company);
   parsed.audit = normalizeAudit(parsed.audit);
   seedUsers(parsed);
   return parsed;
@@ -6534,6 +6535,97 @@ function normalizeStockCounts(company) {
   return company;
 }
 
+const COMPLIANCE_CATEGORIES = new Set(['GST', 'TDS', 'Payroll', 'Other']);
+
+function complianceTaskInput(input = {}) {
+  const title = String(input.title ?? '').trim().slice(0, 100);
+  if (!title) return { error: 'Enter a compliance task title.' };
+  const dueDate = String(input.dueDate ?? '');
+  if (!isValidIsoDate(dueDate)) return { error: 'Enter a valid due date.' };
+  const category = COMPLIANCE_CATEGORIES.has(input.category) ? input.category : 'Other';
+  const notes = String(input.notes ?? '').trim().slice(0, 200);
+  return { title, dueDate, category, notes };
+}
+
+function addComplianceTask(company, input = {}) {
+  const checked = complianceTaskInput(input);
+  if (checked.error) return { ok: false, error: checked.error };
+  company.complianceTasks = Array.isArray(company.complianceTasks) ? company.complianceTasks : [];
+  if (company.complianceTasks.length >= 1000) {
+    return { ok: false, error: 'Keep at most 1,000 compliance tasks.' };
+  }
+  const task = {
+    id: uid('ctask'),
+    title: checked.title,
+    category: checked.category,
+    dueDate: checked.dueDate,
+    notes: checked.notes,
+    status: 'Open',
+    createdAt: new Date().toISOString(),
+  };
+  company.complianceTasks.push(task);
+  return { ok: true, task };
+}
+
+function updateComplianceTask(company, taskId, input = {}) {
+  const task = (company.complianceTasks ?? []).find((entry) => entry.id === taskId);
+  if (!task) return { ok: false, error: 'Compliance task not found.' };
+  const checked = complianceTaskInput(input);
+  if (checked.error) return { ok: false, error: checked.error };
+  task.title = checked.title;
+  task.category = checked.category;
+  task.dueDate = checked.dueDate;
+  task.notes = checked.notes;
+  return { ok: true, task };
+}
+
+function setComplianceTaskStatus(company, taskId, status) {
+  const task = (company.complianceTasks ?? []).find((entry) => entry.id === taskId);
+  if (!task) return { ok: false, error: 'Compliance task not found.' };
+  if (status !== 'Open' && status !== 'Done') return { ok: false, error: 'Choose Open or Done.' };
+  task.status = status;
+  if (status === 'Done') task.completedAt = new Date().toISOString();
+  else delete task.completedAt;
+  return { ok: true, task };
+}
+
+function deleteComplianceTask(company, taskId) {
+  const task = (company.complianceTasks ?? []).find((entry) => entry.id === taskId);
+  if (!task) return { ok: false, error: 'Compliance task not found.' };
+  company.complianceTasks = (company.complianceTasks ?? []).filter((entry) => entry.id !== taskId);
+  return { ok: true, task };
+}
+
+/** Repairs saved compliance tasks after load or backup import. */
+function normalizeComplianceTasks(company) {
+  if (!Array.isArray(company.complianceTasks)) {
+    company.complianceTasks = [];
+    return company;
+  }
+  const seen = new Set();
+  company.complianceTasks = company.complianceTasks
+    .filter((task) => {
+      if (!task || typeof task !== 'object') return false;
+      const id = String(task.id ?? '').slice(0, 80);
+      const checked = complianceTaskInput(task);
+      if (!id || checked.error || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .slice(-1000)
+    .map((task) => ({
+      id: String(task.id).slice(0, 80),
+      title: String(task.title).trim().slice(0, 100),
+      category: COMPLIANCE_CATEGORIES.has(task.category) ? task.category : 'Other',
+      dueDate: task.dueDate,
+      notes: String(task.notes ?? '').trim().slice(0, 200),
+      status: task.status === 'Done' ? 'Done' : 'Open',
+      ...(task.status === 'Done' && task.completedAt ? { completedAt: String(task.completedAt) } : {}),
+      createdAt: String(task.createdAt ?? new Date().toISOString()),
+    }));
+  return company;
+}
+
 function addOrder(company, input) {
   const type = input.type === 'Purchase' ? 'Purchase' : input.type === 'Sales' ? 'Sales' : '';
   if (!type) return { ok: false, error: 'Choose a sales or purchase order.' };
@@ -7820,6 +7912,34 @@ function validateImportedCompany(company) {
     }
   }
 
+  if (company.complianceTasks !== undefined) {
+    if (!Array.isArray(company.complianceTasks) || company.complianceTasks.length > 1000) {
+      return `Company "${name}" has invalid compliance tasks.`;
+    }
+    const taskIds = new Set();
+    for (const task of company.complianceTasks) {
+      if (!task || !task.id || taskIds.has(task.id)) {
+        return `Company "${name}" has a duplicate or missing compliance task id.`;
+      }
+      taskIds.add(task.id);
+      if (String(task.title ?? '').trim().length === 0 || String(task.title).length > 100) {
+        return `Company "${name}" has a compliance task with an invalid title.`;
+      }
+      if (!isValidIsoDate(task.dueDate)) {
+        return `Company "${name}" has a compliance task with an invalid due date.`;
+      }
+      if (!['GST', 'TDS', 'Payroll', 'Other'].includes(task.category)) {
+        return `Company "${name}" has a compliance task with an invalid category.`;
+      }
+      if (task.status !== 'Open' && task.status !== 'Done') {
+        return `Company "${name}" has a compliance task with an invalid status.`;
+      }
+      if (String(task.notes ?? '').length > 200) {
+        return `Company "${name}" has compliance task notes that are too long.`;
+      }
+    }
+  }
+
   if (company.ewayPartB !== undefined) {
     if (!company.ewayPartB || typeof company.ewayPartB !== 'object' || Array.isArray(company.ewayPartB)) {
       return `Company "${name}" has invalid e-way Part B data.`;
@@ -8119,6 +8239,7 @@ function importState(json) {
     normalizeBankReconciliations(mapped);
     normalizeStockCounts(mapped);
     normalizeEwayPartB(mapped);
+    normalizeComplianceTasks(mapped);
     return mapped;
   });
 
@@ -12853,6 +12974,7 @@ const REPORT_SCREENS = new Set([
   'tds',
   'einvoice',
   'ewaybill',
+  'compliance',
   'taxAudit',
   'payrollRegister',
   'payslip',
@@ -12887,6 +13009,7 @@ const REPORT_TITLES = {
   tds: 'TDS / TCS register',
   einvoice: 'E-invoice register',
   ewaybill: 'E-way bill register',
+  compliance: 'Compliance calendar',
   taxAudit: 'Tax audit working papers',
   payrollRegister: 'Salary register',
   payslip: 'Payslip',
@@ -13344,6 +13467,7 @@ function gatewayScreen() {
           <button type="button" class="link-row" data-screen="budgets"><span>Budget vs Actual</span><span class="muted small">Plan</span></button>
           <button type="button" class="link-row" data-screen="forex"><span>Forex Revaluation</span><span class="muted small">Currency</span></button>
           <button type="button" class="link-row" data-screen="gst"><span>GST returns</span><span class="muted small">Tax</span></button>
+          <button type="button" class="link-row" data-screen="compliance"><span>Compliance calendar</span><span class="muted small">Tasks</span></button>
           <button type="button" class="link-row" data-screen="tds"><span>TDS / TCS register</span><span class="muted small">Tax</span></button>
           <button type="button" class="link-row" data-screen="payroll"><span>Payroll &amp; payslips</span><span class="muted small">Salary</span></button>
           <button type="button" class="link-row" data-screen="registers"><span>Sales &amp; purchase registers</span><kbd>R</kbd></button>
@@ -17441,6 +17565,85 @@ function ewayBillScreen() {
   );
 }
 
+function addIsoDays(iso, days) {
+  const date = new Date(Date.UTC(
+    Number(iso.slice(0, 4)),
+    Number(iso.slice(5, 7)) - 1,
+    Number(iso.slice(8, 10)) + days,
+  ));
+  return date.toISOString().slice(0, 10);
+}
+
+function complianceScreen() {
+  if (!company()) return emptyCompanyScreen('Compliance');
+  const active = company();
+  const today = todayIso();
+  const soon = addIsoDays(today, 7);
+  const tasks = [...(active.complianceTasks ?? [])];
+  const editing = view.complianceTaskId
+    ? tasks.find((task) => task.id === view.complianceTaskId) ?? null
+    : null;
+  const sorted = tasks.sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'Open' ? -1 : 1;
+    return a.dueDate.localeCompare(b.dueDate) || a.title.localeCompare(b.title);
+  });
+  const open = tasks.filter((task) => task.status === 'Open');
+  const overdue = open.filter((task) => task.dueDate < today);
+  const dueSoon = open.filter((task) => task.dueDate >= today && task.dueDate <= soon);
+  const done = tasks.filter((task) => task.status === 'Done');
+
+  const categoryOptions = ['GST', 'TDS', 'Payroll', 'Other']
+    .map((category) => `<option value="${category}"${(editing?.category ?? 'Other') === category ? ' selected' : ''}>${category}</option>`)
+    .join('');
+  const taskForm = `<form id="compliance-task-form" class="form-grid compliance-task-form" novalidate>
+    <input type="hidden" name="taskId" value="${esc(editing?.id ?? '')}">
+    <label class="field"><span>Task</span><input name="title" maxlength="100" placeholder="e.g. File GSTR-3B for April" value="${esc(editing?.title ?? '')}"></label>
+    <label class="field"><span>Category</span><select name="category">${categoryOptions}</select></label>
+    <label class="field"><span>Due date</span><input name="dueDate" type="date" value="${esc(editing?.dueDate ?? '')}"></label>
+    <label class="field"><span>Notes</span><input name="notes" maxlength="200" placeholder="Optional working note" value="${esc(editing?.notes ?? '')}"></label>
+    <div class="form-actions">
+      <button class="btn primary" type="submit">${editing ? 'Update task' : 'Add task'}</button>
+      ${editing ? '<button class="btn ghost" type="button" data-action="cancel-compliance-task">Cancel</button>' : ''}
+    </div>
+    <p id="compliance-task-error" class="form-error" role="alert"></p>
+  </form>`;
+
+  const rows = sorted
+    .map((task) => {
+      const isDone = task.status === 'Done';
+      const late = !isDone && task.dueDate < today;
+      const near = !isDone && !late && task.dueDate <= soon;
+      return `<tr>
+        <td><span class="badge${isDone ? '' : late ? ' overdue' : near ? ' attention' : ''}">${isDone ? 'Done' : late ? 'Overdue' : near ? 'Due soon' : 'Open'}</span></td>
+        <td><strong>${esc(task.title)}</strong>${task.notes ? `<div class="muted small">${esc(task.notes)}</div>` : ''}</td>
+        <td>${esc(task.category)}</td>
+        <td>${esc(dateLabel(task.dueDate))}</td>
+        <td class="row-actions">
+          <button class="btn small ghost" type="button" data-action="edit-compliance-task" data-id="${esc(task.id)}">Edit</button>
+          <button class="btn small ghost" type="button" data-action="toggle-compliance-task" data-id="${esc(task.id)}">${isDone ? 'Reopen' : 'Mark done'}</button>
+          <button class="btn small danger" type="button" data-action="delete-compliance-task" data-id="${esc(task.id)}">Delete</button>
+        </td>
+      </tr>`;
+    })
+    .join('');
+
+  return panel(
+    'Compliance calendar',
+    `${taskForm}
+    <div class="ratio-grid">
+      <div class="ratio-card"><span class="ratio-label">Open</span><strong>${open.length}</strong><span class="muted small">${overdue.length} overdue · ${dueSoon.length} due within 7 days</span></div>
+      <div class="ratio-card"><span class="ratio-label">Completed</span><strong>${done.length}</strong><span class="muted small">Kept for filing history</span></div>
+    </div>
+    ${sorted.length
+      ? `<table class="data-table compact">
+          <thead><tr><th>Status</th><th>Task</th><th>Category</th><th>Due date</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`
+      : '<p class="muted">No compliance tasks yet. Add GST, TDS, payroll or other filing reminders above.</p>'}`,
+    'Tasks are your own reminders and filing notes. The app does not calculate statutory due dates, file returns or store acknowledgements.',
+  );
+}
+
 function taxAuditScreen() {
   if (!company()) return emptyCompanyScreen('Tax audit');
   const active = company();
@@ -20504,6 +20707,8 @@ function screenHtml() {
       return eInvoiceScreen();
     case 'ewaybill':
       return ewayBillScreen();
+    case 'compliance':
+      return complianceScreen();
     case 'taxAudit':
       return taxAuditScreen();
     case 'payroll':
@@ -21375,6 +21580,39 @@ async function handleSubmit(event) {
     setFlash(`Budget "${result.budget.name}" ${editingBudgetId ? 'updated' : 'added'}.`);
     if (editingBudgetId) navigate('masters');
     else render();
+    return;
+  }
+
+  if (form.id === 'compliance-task-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const taskId = String(data.get('taskId') ?? '');
+    const input = {
+      title: data.get('title'),
+      category: data.get('category'),
+      dueDate: data.get('dueDate'),
+      notes: data.get('notes'),
+    };
+    const result = taskId
+      ? updateComplianceTask(active, taskId, input)
+      : addComplianceTask(active, input);
+    if (!result.ok) {
+      showFormError(result.error, 'compliance-task-error');
+      return;
+    }
+    logAudit(
+      taskId ? 'compliance.update' : 'compliance.create',
+      `${taskId ? 'Updated' : 'Added'} compliance task "${result.task.title}" due ${result.task.dueDate}.`,
+      active,
+      result.task.id,
+    );
+    persist();
+    view.complianceTaskId = null;
+    setFlash(taskId ? 'Compliance task updated.' : 'Compliance task added.');
+    render();
     return;
   }
 
@@ -23455,6 +23693,78 @@ async function handleClick(event) {
       setFlash(`Downloaded e-invoice draft for ${row.ref}. Nothing was transmitted.`);
       break;
     }
+    case 'edit-compliance-task': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      view.complianceTaskId = trigger.dataset.id;
+      render();
+      break;
+    }
+
+    case 'cancel-compliance-task': {
+      view.complianceTaskId = null;
+      render();
+      break;
+    }
+
+    case 'toggle-compliance-task': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const task = (active.complianceTasks ?? []).find((entry) => entry.id === trigger.dataset.id);
+      if (!task) {
+        setFlash('Compliance task not found.', 'warn');
+        break;
+      }
+      const nextStatus = task.status === 'Done' ? 'Open' : 'Done';
+      const result = setComplianceTaskStatus(active, task.id, nextStatus);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit(
+        'compliance.status',
+        `Marked compliance task "${task.title}" as ${nextStatus}.`,
+        active,
+        task.id,
+      );
+      persist();
+      setFlash(nextStatus === 'Done' ? 'Compliance task marked done.' : 'Compliance task reopened.');
+      render();
+      break;
+    }
+
+    case 'delete-compliance-task': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Delete this compliance task?')) break;
+      const task = (active.complianceTasks ?? []).find((entry) => entry.id === trigger.dataset.id);
+      const result = deleteComplianceTask(active, trigger.dataset.id);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      if (view.complianceTaskId === trigger.dataset.id) view.complianceTaskId = null;
+      logAudit(
+        'compliance.delete',
+        `Deleted compliance task "${task?.title ?? result.task.title}".`,
+        active,
+        trigger.dataset.id,
+      );
+      persist();
+      setFlash('Compliance task deleted.');
+      render();
+      break;
+    }
+
     case 'edit-eway-partb': {
       if (!can('master.write')) {
         requirePermission('master.write');

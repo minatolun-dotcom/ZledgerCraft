@@ -8,6 +8,7 @@ import {
   payrollLedgers,
   parseAmount,
   payrollMonthEnd,
+  payrollStatutoryRows,
   round2,
   todayIso,
 } from './store.js';
@@ -147,6 +148,11 @@ export function payrollScreen() {
         <input type="checkbox" name="enabled"${payroll.enabled ? ' checked' : ''}>
         <span>Run payroll for employees and post salary journals</span>
       </label>
+      <label class="field"><span>PF rate %</span><input name="pfRate" inputmode="decimal" value="${esc(payroll.statutory?.pfRate ?? 12)}"></label>
+      <label class="field"><span>PF wage ceiling</span><input name="pfCeiling" inputmode="decimal" value="${esc(payroll.statutory?.pfCeiling ?? 15000)}"></label>
+      <label class="field"><span>ESI rate %</span><input name="esiRate" inputmode="decimal" value="${esc(payroll.statutory?.esiRate ?? 0.75)}"></label>
+      <label class="field"><span>ESI wage ceiling</span><input name="esiCeiling" inputmode="decimal" value="${esc(payroll.statutory?.esiCeiling ?? 21000)}"></label>
+      <label class="field"><span>Professional tax</span><input name="ptAmount" inputmode="decimal" value="${esc(payroll.statutory?.ptAmount ?? 200)}"></label>
       <div class="field form-actions">
         <button class="btn primary" type="submit">Save payroll settings</button>
       </div>
@@ -299,6 +305,30 @@ export function payrollScreen() {
       </tr>`,
     )
     .join('');
+  const statutory = payrollStatutoryRows(active, month);
+  const statutoryTable = statutory
+    .map((row) => `<tr>
+      <td><strong>${esc(row.name)}</strong>${row.code ? `<div class="muted small">${esc(row.code)}</div>` : ''}</td>
+      <td class="num">${money(row.basic)}</td>
+      <td class="num">${money(row.gross)}</td>
+      <td class="num">${money(row.pf)}</td>
+      <td class="num">${money(row.esi)}</td>
+      <td class="num">${money(row.pt)}</td>
+      <td class="num">${money(row.total)}</td>
+    </tr>`)
+    .join('');
+  const statutoryPanel = panel(
+    'Statutory calculator',
+    `${statutory.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
+          <thead><tr><th>Employee</th><th class="num">Basic</th><th class="num">Gross</th><th class="num">PF</th><th class="num">ESI</th><th class="num">PT</th><th class="num">Total</th></tr></thead>
+          <tbody>${statutoryTable}</tbody>
+        </table></div>
+        <div class="form-actions"><button class="btn small" type="button" data-action="apply-statutory">Apply to pay structures</button></div>`
+      : '<p class="muted">Add active employees with earnings to compute PF, ESI and PT.</p>'}`,
+    'PF uses Basic up to the wage ceiling, ESI applies to gross within its ceiling, and PT uses the fixed amount. Applying updates employee deduction amounts; a payroll run still posts explicitly.',
+  );
+
   const runsPanel = panel(
     'Payroll runs',
     `<form id="payroll-run-form" class="form-grid" novalidate>
@@ -379,7 +409,7 @@ export function payrollScreen() {
   );
 
   if (!payroll.enabled) return setupPanel;
-  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${runsPanel}${report.count ? summaryPanel : ''}`;
+  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${statutoryPanel}${runsPanel}${report.count ? summaryPanel : ''}`;
 }
 
 export function salaryRegisterPanel(report, from, to, standalone = false) {

@@ -4115,6 +4115,28 @@ function deleteTaxChallan(company, challanId) {
 const PAY_HEAD_KINDS = { Earning: 'Earning', Deduction: 'Deduction' };
 
 /** Pay heads seeded when payroll is first enabled; amounts are set per employee. */
+const DEFAULT_PAYROLL_STATUTORY = {
+  pfRate: 12,
+  pfCeiling: 15000,
+  esiRate: 0.75,
+  esiCeiling: 21000,
+  ptAmount: 200,
+};
+
+function normalizeStatutorySettings(source = {}) {
+  const number = (value, fallback, min, max) => {
+    const parsed = parseAmount(value);
+    return parsed === null ? fallback : Math.min(max, Math.max(min, parsed));
+  };
+  return {
+    pfRate: number(source.pfRate, DEFAULT_PAYROLL_STATUTORY.pfRate, 0, 100),
+    pfCeiling: number(source.pfCeiling, DEFAULT_PAYROLL_STATUTORY.pfCeiling, 0, 10000000),
+    esiRate: number(source.esiRate, DEFAULT_PAYROLL_STATUTORY.esiRate, 0, 100),
+    esiCeiling: number(source.esiCeiling, DEFAULT_PAYROLL_STATUTORY.esiCeiling, 0, 10000000),
+    ptAmount: number(source.ptAmount, DEFAULT_PAYROLL_STATUTORY.ptAmount, 0, 100000),
+  };
+}
+
 const PAYROLL_SEED_PAY_HEADS = [
   { name: 'Basic Salary', kind: 'Earning' },
   { name: 'House Rent Allowance', kind: 'Earning' },
@@ -4320,6 +4342,7 @@ function normalizePayroll(company) {
   const payable = payrollRoleLedger(company, 'salaryPayable');
   company.payroll = {
     enabled: Boolean(source.enabled),
+    statutory: normalizeStatutorySettings(source.statutory),
     payHeads,
     employees,
     runs,
@@ -4359,6 +4382,7 @@ function linkSeedPayHeadLedgers(company) {
 function savePayrollSettings(company, input = {}) {
   const enabled = input.enabled === true || input.enabled === 'true' || input.enabled === 'on';
   company.payroll = company.payroll ?? normalizePayroll(company).payroll;
+  company.payroll.statutory = normalizeStatutorySettings({ ...company.payroll.statutory, ...input });
   company.payroll.enabled = enabled;
   const created = [];
   if (!enabled) return { ok: true, payroll: company.payroll, created };
@@ -4396,6 +4420,75 @@ function savePayrollSettings(company, input = {}) {
     });
   }
   return { ok: true, payroll: company.payroll, created };
+}
+
+function payrollStatutoryRows(company, month = '') {
+  const payroll = company.payroll ?? {};
+  const settings = normalizeStatutorySettings(payroll.statutory);
+  const heads = new Map((payroll.payHeads ?? []).map((head) => [head.id, head]));
+  const statutoryHeads = new Map(
+    (payroll.payHeads ?? []).filter((head) => head.statutory).map((head) => [head.statutory, head.id]),
+  );
+  const monthEnd = payrollMonthEnd(month);
+  const monthDays = monthEnd ? Number(monthEnd.slice(8, 10)) : 30;
+  return (payroll.employees ?? [])
+    .filter((employee) => employee.active)
+    .map((employee) => {
+      const earnings = (employee.pay ?? [])
+        .map((entry) => ({ head: heads.get(entry.payHeadId), amount: round2(entry.amount) }))
+        .filter((entry) => entry.head?.kind === 'Earning');
+      const gross = round2(earnings.reduce((sum, entry) => sum + entry.amount, 0));
+      const basic = round2(
+        earnings
+          .filter((entry) => /basic/i.test(entry.head.name))
+          .reduce((sum, entry) => sum + entry.amount, 0),
+      );
+      const pfWage = Math.min(basic, settings.pfCeiling);
+      const pf = round2((pfWage * settings.pfRate) / 100);
+      const esi = gross > 0 && gross <= settings.esiCeiling ? round2((gross * settings.esiRate) / 100) : 0;
+      const pt = gross > 0 ? round2(settings.ptAmount) : 0;
+      return {
+        employeeId: employee.id,
+        name: employee.name,
+        ...(employee.code ? { code: employee.code } : {}),
+        monthDays,
+        basic,
+        gross,
+        pf,
+        esi,
+        pt,
+        total: round2(pf + esi + pt),
+        heads: {
+          PF: statutoryHeads.get('PF') ?? null,
+          ESI: statutoryHeads.get('ESI') ?? null,
+          PT: statutoryHeads.get('PT') ?? null,
+        },
+      };
+    });
+}
+
+/** Applies computed PF/ESI/PT amounts to employee pay structures. */
+function applyStatutoryDeductions(company, month = '') {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before applying statutory deductions.' };
+  const rows = payrollStatutoryRows(company, month);
+  let applied = 0;
+  for (const row of rows) {
+    for (const [kind, amount] of [['PF', row.pf], ['ESI', row.esi], ['PT', row.pt]]) {
+      const payHeadId = row.heads[kind];
+      if (!payHeadId) continue;
+      const employee = company.payroll.employees.find((entry) => entry.id === row.employeeId);
+      const existing = (employee.pay ?? []).find((entry) => entry.payHeadId === payHeadId);
+      if (amount > 0) {
+        if (existing) existing.amount = amount;
+        else employee.pay = [...(employee.pay ?? []), { payHeadId, amount }];
+        applied += 1;
+      } else if (existing) {
+        employee.pay = employee.pay.filter((entry) => entry.payHeadId !== payHeadId);
+        applied += 1;
+      }
+    }
+  }
+  return { ok: true, applied, rows };
 }
 
 function addPayHead(company, input = {}) {
@@ -20242,6 +20335,11 @@ function payrollScreen() {
         <input type="checkbox" name="enabled"${payroll.enabled ? ' checked' : ''}>
         <span>Run payroll for employees and post salary journals</span>
       </label>
+      <label class="field"><span>PF rate %</span><input name="pfRate" inputmode="decimal" value="${esc(payroll.statutory?.pfRate ?? 12)}"></label>
+      <label class="field"><span>PF wage ceiling</span><input name="pfCeiling" inputmode="decimal" value="${esc(payroll.statutory?.pfCeiling ?? 15000)}"></label>
+      <label class="field"><span>ESI rate %</span><input name="esiRate" inputmode="decimal" value="${esc(payroll.statutory?.esiRate ?? 0.75)}"></label>
+      <label class="field"><span>ESI wage ceiling</span><input name="esiCeiling" inputmode="decimal" value="${esc(payroll.statutory?.esiCeiling ?? 21000)}"></label>
+      <label class="field"><span>Professional tax</span><input name="ptAmount" inputmode="decimal" value="${esc(payroll.statutory?.ptAmount ?? 200)}"></label>
       <div class="field form-actions">
         <button class="btn primary" type="submit">Save payroll settings</button>
       </div>
@@ -20394,6 +20492,30 @@ function payrollScreen() {
       </tr>`,
     )
     .join('');
+  const statutory = payrollStatutoryRows(active, month);
+  const statutoryTable = statutory
+    .map((row) => `<tr>
+      <td><strong>${esc(row.name)}</strong>${row.code ? `<div class="muted small">${esc(row.code)}</div>` : ''}</td>
+      <td class="num">${money(row.basic)}</td>
+      <td class="num">${money(row.gross)}</td>
+      <td class="num">${money(row.pf)}</td>
+      <td class="num">${money(row.esi)}</td>
+      <td class="num">${money(row.pt)}</td>
+      <td class="num">${money(row.total)}</td>
+    </tr>`)
+    .join('');
+  const statutoryPanel = panel(
+    'Statutory calculator',
+    `${statutory.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
+          <thead><tr><th>Employee</th><th class="num">Basic</th><th class="num">Gross</th><th class="num">PF</th><th class="num">ESI</th><th class="num">PT</th><th class="num">Total</th></tr></thead>
+          <tbody>${statutoryTable}</tbody>
+        </table></div>
+        <div class="form-actions"><button class="btn small" type="button" data-action="apply-statutory">Apply to pay structures</button></div>`
+      : '<p class="muted">Add active employees with earnings to compute PF, ESI and PT.</p>'}`,
+    'PF uses Basic up to the wage ceiling, ESI applies to gross within its ceiling, and PT uses the fixed amount. Applying updates employee deduction amounts; a payroll run still posts explicitly.',
+  );
+
   const runsPanel = panel(
     'Payroll runs',
     `<form id="payroll-run-form" class="form-grid" novalidate>
@@ -20474,7 +20596,7 @@ function payrollScreen() {
   );
 
   if (!payroll.enabled) return setupPanel;
-  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${runsPanel}${report.count ? summaryPanel : ''}`;
+  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${statutoryPanel}${runsPanel}${report.count ? summaryPanel : ''}`;
 }
 
 function salaryRegisterPanel(report, from, to, standalone = false) {
@@ -26238,6 +26360,26 @@ async function handleClick(event) {
       logAudit('recurring.delete', `Deleted recurring voucher template "${result.template.name}".`, active, trigger.dataset.id);
       persist();
       setFlash('Recurring template deleted.');
+      render();
+      break;
+    }
+
+    case 'apply-statutory': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const month = active.payroll ? defaultPayrollMonth(active) : '';
+      const result = applyStatutoryDeductions(active, month);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit('payroll.statutory.apply', `Applied PF, ESI and PT to ${result.applied} deduction line(s).`, active, month);
+      persist();
+      setFlash(`Applied statutory deductions to ${result.applied} pay-structure line(s).`);
       render();
       break;
     }

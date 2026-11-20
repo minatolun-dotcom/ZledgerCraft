@@ -30,6 +30,7 @@ import {
   updateGstRate,
   addGroup,
   addLeaveRecord,
+  applyStatutoryDeductions,
   addLedger,
   addManufacture,
   addStockCount,
@@ -5440,6 +5441,26 @@ async function handleClick(event) {
       logAudit('recurring.delete', `Deleted recurring voucher template "${result.template.name}".`, active, trigger.dataset.id);
       persist();
       setFlash('Recurring template deleted.');
+      render();
+      break;
+    }
+
+    case 'apply-statutory': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const month = active.payroll ? defaultPayrollMonth(active) : '';
+      const result = applyStatutoryDeductions(active, month);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit('payroll.statutory.apply', `Applied PF, ESI and PT to ${result.applied} deduction line(s).`, active, month);
+      persist();
+      setFlash(`Applied statutory deductions to ${result.applied} pay-structure line(s).`);
       render();
       break;
     }

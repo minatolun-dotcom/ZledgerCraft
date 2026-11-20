@@ -4,6 +4,7 @@ import {
   addEmployee,
   addLeaveRecord,
   addPayHead,
+  applyStatutoryDeductions,
   createCompany,
   deleteEmployee,
   deleteLeaveRecord,
@@ -16,6 +17,7 @@ import {
   importState,
   payrollBankTransferRows,
   payrollLedgers,
+  payrollStatutoryRows,
   runPayroll,
   savePayrollSettings,
   updateEmployee,
@@ -221,6 +223,22 @@ test('leave records reduce balances and reject overlaps', () => {
   );
   assert.equal(deleteLeaveRecord(company, leave.record.id).ok, true);
   assert.equal(employeeLeaveBalance(company, asha.id).CL.remaining, 12);
+});
+
+test('statutory calculator applies capped PF and professional tax', () => {
+  const { company } = fixture();
+  standardEmployee(company);
+  const rows = payrollStatutoryRows(company, '2026-04');
+  assert.equal(rows[0].gross, 40000);
+  assert.equal(rows[0].pf, 1800);
+  assert.equal(rows[0].esi, 0);
+  assert.equal(rows[0].pt, 200);
+  const applied = applyStatutoryDeductions(company, '2026-04');
+  assert.equal(applied.ok, true, applied.error);
+  const pfHead = head(company, 'Provident Fund (Employee)');
+  assert.equal(company.payroll.employees[0].pay.find((entry) => entry.payHeadId === pfHead.id).amount, 1800);
+  assert.equal(savePayrollSettings(company, { enabled: true, pfRate: 10, pfCeiling: 10000 }).ok, true);
+  assert.equal(payrollStatutoryRows(company, '2026-04')[0].pf, 1000);
 });
 
 test('attendance CSV matches employees by name or code', () => {

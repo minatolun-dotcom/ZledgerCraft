@@ -1689,6 +1689,28 @@ export function deleteTaxChallan(company, challanId) {
 export const PAY_HEAD_KINDS = { Earning: 'Earning', Deduction: 'Deduction' };
 
 /** Pay heads seeded when payroll is first enabled; amounts are set per employee. */
+export const DEFAULT_PAYROLL_STATUTORY = {
+  pfRate: 12,
+  pfCeiling: 15000,
+  esiRate: 0.75,
+  esiCeiling: 21000,
+  ptAmount: 200,
+};
+
+function normalizeStatutorySettings(source = {}) {
+  const number = (value, fallback, min, max) => {
+    const parsed = parseAmount(value);
+    return parsed === null ? fallback : Math.min(max, Math.max(min, parsed));
+  };
+  return {
+    pfRate: number(source.pfRate, DEFAULT_PAYROLL_STATUTORY.pfRate, 0, 100),
+    pfCeiling: number(source.pfCeiling, DEFAULT_PAYROLL_STATUTORY.pfCeiling, 0, 10000000),
+    esiRate: number(source.esiRate, DEFAULT_PAYROLL_STATUTORY.esiRate, 0, 100),
+    esiCeiling: number(source.esiCeiling, DEFAULT_PAYROLL_STATUTORY.esiCeiling, 0, 10000000),
+    ptAmount: number(source.ptAmount, DEFAULT_PAYROLL_STATUTORY.ptAmount, 0, 100000),
+  };
+}
+
 export const PAYROLL_SEED_PAY_HEADS = [
   { name: 'Basic Salary', kind: 'Earning' },
   { name: 'House Rent Allowance', kind: 'Earning' },
@@ -1894,6 +1916,7 @@ export function normalizePayroll(company) {
   const payable = payrollRoleLedger(company, 'salaryPayable');
   company.payroll = {
     enabled: Boolean(source.enabled),
+    statutory: normalizeStatutorySettings(source.statutory),
     payHeads,
     employees,
     runs,
@@ -1933,6 +1956,7 @@ function linkSeedPayHeadLedgers(company) {
 export function savePayrollSettings(company, input = {}) {
   const enabled = input.enabled === true || input.enabled === 'true' || input.enabled === 'on';
   company.payroll = company.payroll ?? normalizePayroll(company).payroll;
+  company.payroll.statutory = normalizeStatutorySettings({ ...company.payroll.statutory, ...input });
   company.payroll.enabled = enabled;
   const created = [];
   if (!enabled) return { ok: true, payroll: company.payroll, created };
@@ -1970,6 +1994,75 @@ export function savePayrollSettings(company, input = {}) {
     });
   }
   return { ok: true, payroll: company.payroll, created };
+}
+
+export function payrollStatutoryRows(company, month = '') {
+  const payroll = company.payroll ?? {};
+  const settings = normalizeStatutorySettings(payroll.statutory);
+  const heads = new Map((payroll.payHeads ?? []).map((head) => [head.id, head]));
+  const statutoryHeads = new Map(
+    (payroll.payHeads ?? []).filter((head) => head.statutory).map((head) => [head.statutory, head.id]),
+  );
+  const monthEnd = payrollMonthEnd(month);
+  const monthDays = monthEnd ? Number(monthEnd.slice(8, 10)) : 30;
+  return (payroll.employees ?? [])
+    .filter((employee) => employee.active)
+    .map((employee) => {
+      const earnings = (employee.pay ?? [])
+        .map((entry) => ({ head: heads.get(entry.payHeadId), amount: round2(entry.amount) }))
+        .filter((entry) => entry.head?.kind === 'Earning');
+      const gross = round2(earnings.reduce((sum, entry) => sum + entry.amount, 0));
+      const basic = round2(
+        earnings
+          .filter((entry) => /basic/i.test(entry.head.name))
+          .reduce((sum, entry) => sum + entry.amount, 0),
+      );
+      const pfWage = Math.min(basic, settings.pfCeiling);
+      const pf = round2((pfWage * settings.pfRate) / 100);
+      const esi = gross > 0 && gross <= settings.esiCeiling ? round2((gross * settings.esiRate) / 100) : 0;
+      const pt = gross > 0 ? round2(settings.ptAmount) : 0;
+      return {
+        employeeId: employee.id,
+        name: employee.name,
+        ...(employee.code ? { code: employee.code } : {}),
+        monthDays,
+        basic,
+        gross,
+        pf,
+        esi,
+        pt,
+        total: round2(pf + esi + pt),
+        heads: {
+          PF: statutoryHeads.get('PF') ?? null,
+          ESI: statutoryHeads.get('ESI') ?? null,
+          PT: statutoryHeads.get('PT') ?? null,
+        },
+      };
+    });
+}
+
+/** Applies computed PF/ESI/PT amounts to employee pay structures. */
+export function applyStatutoryDeductions(company, month = '') {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before applying statutory deductions.' };
+  const rows = payrollStatutoryRows(company, month);
+  let applied = 0;
+  for (const row of rows) {
+    for (const [kind, amount] of [['PF', row.pf], ['ESI', row.esi], ['PT', row.pt]]) {
+      const payHeadId = row.heads[kind];
+      if (!payHeadId) continue;
+      const employee = company.payroll.employees.find((entry) => entry.id === row.employeeId);
+      const existing = (employee.pay ?? []).find((entry) => entry.payHeadId === payHeadId);
+      if (amount > 0) {
+        if (existing) existing.amount = amount;
+        else employee.pay = [...(employee.pay ?? []), { payHeadId, amount }];
+        applied += 1;
+      } else if (existing) {
+        employee.pay = employee.pay.filter((entry) => entry.payHeadId !== payHeadId);
+        applied += 1;
+      }
+    }
+  }
+  return { ok: true, applied, rows };
 }
 
 export function addPayHead(company, input = {}) {

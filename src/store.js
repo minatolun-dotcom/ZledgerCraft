@@ -506,6 +506,11 @@ export function normalizeBankReconciliations(company) {
         amount,
       });
     }
+    const opening = parseAmount(config.statement?.balances?.opening);
+    const closing = parseAmount(config.statement?.balances?.closing);
+    const balances = opening !== null && closing !== null
+      ? { opening: round2(opening), closing: round2(closing) }
+      : null;
     const matches = {};
     for (const [lineId, voucherId] of Object.entries(config.matches ?? {})) {
       const line = lines.find((entry) => entry.id === lineId);
@@ -517,6 +522,7 @@ export function normalizeBankReconciliations(company) {
       statement: {
         importedAt: config.statement?.importedAt || new Date().toISOString(),
         lines,
+        ...(balances ? { balances } : {}),
       },
       matches,
     };
@@ -533,6 +539,19 @@ export function saveBankStatement(company, ledgerId, lines, meta = {}) {
     return { ok: false, error: 'The statement has no lines.' };
   }
   if (lines.length > 5000) return { ok: false, error: 'Import at most 5,000 statement lines at a time.' };
+  const readBalance = (value, label) => {
+    if (value === undefined || value === null || String(value).trim() === '') return { ok: true, value: null };
+    const amount = parseAmount(value);
+    if (amount === null) return { ok: false, error: `${label} must be a valid amount.` };
+    return { ok: true, value: round2(amount) };
+  };
+  const opening = readBalance(meta.openingBalance, 'Opening balance');
+  if (!opening.ok) return opening;
+  const closing = readBalance(meta.closingBalance, 'Closing balance');
+  if (!closing.ok) return closing;
+  if ((opening.value === null) !== (closing.value === null)) {
+    return { ok: false, error: 'Provide both opening and closing balances, or neither.' };
+  }
   const normalized = [];
   const seen = new Set();
   for (const [index, line] of lines.entries()) {
@@ -560,6 +579,9 @@ export function saveBankStatement(company, ledgerId, lines, meta = {}) {
       importedAt: new Date().toISOString(),
       source: String(meta.source || '').slice(0, 120),
       lines: normalized,
+      ...(opening.value !== null
+        ? { balances: { opening: opening.value, closing: closing.value } }
+        : {}),
     },
     matches: {},
   };
@@ -5319,6 +5341,16 @@ function validateImportedCompany(company) {
       for (const line of config.statement.lines) {
         if (!line?.id || !isValidIsoDate(line.date) || !Number.isFinite(Number(line.amount)) || Number(line.amount) === 0) {
           return `Company "${name}": a bank statement line is invalid.`;
+        }
+      }
+      if (config.statement.balances !== undefined) {
+        const balances = config.statement.balances;
+        if (
+          !balances ||
+          !Number.isFinite(Number(balances.opening)) ||
+          !Number.isFinite(Number(balances.closing))
+        ) {
+          return `Company "${name}": bank statement balances are invalid.`;
         }
       }
       for (const [lineId, voucherId] of Object.entries(config.matches ?? {})) {

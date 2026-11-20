@@ -7,6 +7,7 @@ import {
   clearBankStatement,
   createCompany,
   deleteVoucher,
+  emptyState,
   exportState,
   findLedgerByName,
   importState,
@@ -56,6 +57,51 @@ function payment(company, bank, rent, amount, date, narration = '') {
   assert.equal(result.ok, true, result.error);
   return result.voucher;
 }
+
+test('statement opening and closing balances expose completeness gaps', () => {
+  const { company, bank } = bankFixture();
+  const lines = [
+    { date: '2026-04-10', description: 'Deposit', amount: 300 },
+    { date: '2026-04-11', description: 'Charge', amount: -50 },
+  ];
+  const saved = saveBankStatement(company, bank.id, lines, {
+    openingBalance: 1000,
+    closingBalance: 1250,
+  });
+  assert.equal(saved.ok, true, saved.error);
+  let report = bankReconciliation(company, bank.id);
+  assert.deepEqual(report.balances, { opening: 1000, closing: 1250 });
+  assert.equal(report.statementNet, 250);
+  assert.equal(report.statementDifference, 0);
+
+  saveBankStatement(company, bank.id, lines, { openingBalance: 1000, closingBalance: 1200 });
+  report = bankReconciliation(company, bank.id);
+  assert.equal(report.statementDifference, -50);
+
+  assert.equal(
+    saveBankStatement(company, bank.id, lines, { openingBalance: 1000 }).ok,
+    false,
+    'both balances are needed for validation',
+  );
+  assert.equal(
+    saveBankStatement(company, bank.id, lines, { openingBalance: 'not-a-number', closingBalance: 0 }).ok,
+    false,
+  );
+
+  saveBankStatement(company, bank.id, lines);
+  assert.equal(bankReconciliation(company, bank.id).balances, null);
+
+  saveBankStatement(company, bank.id, lines, { openingBalance: 1000, closingBalance: 1250 });
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  assert.deepEqual(
+    restored.state.companies[0].bankReconciliations[bank.id].statement.balances,
+    { opening: 1000, closing: 1250 },
+  );
+});
 
 test('auto-match pairs signed amounts within a week one-to-one', () => {
   const { company, bank, capital, rent } = bankFixture();

@@ -2849,6 +2849,11 @@ function normalizeBankReconciliations(company) {
         amount,
       });
     }
+    const opening = parseAmount(config.statement?.balances?.opening);
+    const closing = parseAmount(config.statement?.balances?.closing);
+    const balances = opening !== null && closing !== null
+      ? { opening: round2(opening), closing: round2(closing) }
+      : null;
     const matches = {};
     for (const [lineId, voucherId] of Object.entries(config.matches ?? {})) {
       const line = lines.find((entry) => entry.id === lineId);
@@ -2860,6 +2865,7 @@ function normalizeBankReconciliations(company) {
       statement: {
         importedAt: config.statement?.importedAt || new Date().toISOString(),
         lines,
+        ...(balances ? { balances } : {}),
       },
       matches,
     };
@@ -2876,6 +2882,19 @@ function saveBankStatement(company, ledgerId, lines, meta = {}) {
     return { ok: false, error: 'The statement has no lines.' };
   }
   if (lines.length > 5000) return { ok: false, error: 'Import at most 5,000 statement lines at a time.' };
+  const readBalance = (value, label) => {
+    if (value === undefined || value === null || String(value).trim() === '') return { ok: true, value: null };
+    const amount = parseAmount(value);
+    if (amount === null) return { ok: false, error: `${label} must be a valid amount.` };
+    return { ok: true, value: round2(amount) };
+  };
+  const opening = readBalance(meta.openingBalance, 'Opening balance');
+  if (!opening.ok) return opening;
+  const closing = readBalance(meta.closingBalance, 'Closing balance');
+  if (!closing.ok) return closing;
+  if ((opening.value === null) !== (closing.value === null)) {
+    return { ok: false, error: 'Provide both opening and closing balances, or neither.' };
+  }
   const normalized = [];
   const seen = new Set();
   for (const [index, line] of lines.entries()) {
@@ -2903,6 +2922,9 @@ function saveBankStatement(company, ledgerId, lines, meta = {}) {
       importedAt: new Date().toISOString(),
       source: String(meta.source || '').slice(0, 120),
       lines: normalized,
+      ...(opening.value !== null
+        ? { balances: { opening: opening.value, closing: closing.value } }
+        : {}),
     },
     matches: {},
   };
@@ -7664,6 +7686,16 @@ function validateImportedCompany(company) {
           return `Company "${name}": a bank statement line is invalid.`;
         }
       }
+      if (config.statement.balances !== undefined) {
+        const balances = config.statement.balances;
+        if (
+          !balances ||
+          !Number.isFinite(Number(balances.opening)) ||
+          !Number.isFinite(Number(balances.closing))
+        ) {
+          return `Company "${name}": bank statement balances are invalid.`;
+        }
+      }
       for (const [lineId, voucherId] of Object.entries(config.matches ?? {})) {
         if (!config.statement.lines.some((line) => line.id === lineId) || !voucherIds.has(voucherId)) {
           return `Company "${name}": a bank reconciliation match is invalid.`;
@@ -8162,6 +8194,11 @@ function bankReconciliation(company, ledgerId) {
   const unmatchedEntries = entries.filter((entry) => !entry.matchedLineId);
   const opening = signedOpening(ledger);
   const bookBalance = round2(opening + entries.reduce((sum, entry) => sum + entry.amount, 0));
+  const balances = config?.statement?.balances ?? null;
+  const statementNet = round2(lines.reduce((sum, line) => sum + line.amount, 0));
+  const statementDifference = balances
+    ? round2(balances.closing - (balances.opening + statementNet))
+    : null;
 
   return {
     ledger,
@@ -8180,6 +8217,9 @@ function bankReconciliation(company, ledgerId) {
     outflow: round2(lines.filter((line) => line.amount < 0).reduce((sum, line) => sum + line.amount, 0)),
     opening,
     bookBalance,
+    balances,
+    statementNet,
+    statementDifference,
     matchedPercent: lines.length ? Math.round((matchedLines.length / lines.length) * 100) : 0,
   };
 }
@@ -18049,6 +18089,9 @@ function bankReconScreen() {
         <div class="ratio-card"><span class="ratio-label">Book unmatched</span><strong>${report.unmatchedEntries.length}</strong><span class="muted small">${money(report.unmatchedBookAmount)} value</span></div>
         <div class="ratio-card"><span class="ratio-label">Bank balance</span><strong>${money(report.bookBalance)}</strong><span class="muted small">${report.importedAt ? `Statement imported ${esc(new Date(report.importedAt).toLocaleDateString('en-IN'))}` : 'No statement imported'}</span></div>
       </div>
+      ${report.balances
+        ? `<p class="${report.statementDifference === 0 ? 'muted small' : 'off-text'}">Statement balances: opening ${money(report.balances.opening)}, closing ${money(report.balances.closing)}, movement ${money(report.statementNet)}. ${report.statementDifference === 0 ? 'Opening plus movement equals closing.' : `Difference ${money(report.statementDifference)} — the statement may be incomplete or mistyped.`}</p>`
+        : ''}
       ${report.importedAt
         ? `<div class="form-actions">
              <button class="btn small primary" type="button" data-action="recon-auto"${canWrite ? '' : ' disabled'}>Auto-match by amount and date</button>
@@ -18061,6 +18104,11 @@ function bankReconScreen() {
       ? panel(
           'Import bank statement',
           `<p class="muted">CSV columns: <code>Date, Description, Reference, Debit, Credit</code>. Dates accept YYYY-MM-DD or DD/MM/YYYY. Debit is money out; credit is money in. Importing replaces the current statement and its matches.</p>
+          <div class="pay-grid">
+            <label class="field"><span>Opening balance (optional)</span><input id="bank-opening-balance" inputmode="decimal" placeholder="0.00"></label>
+            <label class="field"><span>Closing balance (optional)</span><input id="bank-closing-balance" inputmode="decimal" placeholder="0.00"></label>
+          </div>
+          <p class="muted small">Provide both balances to check that opening plus statement movement equals closing. This validates the statement file, not the book balance.</p>
           <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="bank-statement-csv"></label>
           <textarea id="bank-statement-csv" class="backup-box import-box" rows="7" placeholder="Date,Description,Reference,Debit,Credit\n10/05/2026,Customer receipt,R1,,1000\n11/05/2026,Supplier payment,P1,500," aria-label="Bank statement CSV"></textarea>
           <div class="form-actions"><button class="btn small primary" type="button" data-action="import-bank-statement">Import statement</button></div>`,
@@ -22038,7 +22086,11 @@ async function handleClick(event) {
         break;
       }
       if (active.bankReconciliations?.[ledgerId] && !window.confirm('Replace the current bank statement and its matches?')) break;
-      const result = saveBankStatement(active, ledgerId, parsed.lines);
+      const result = saveBankStatement(active, ledgerId, parsed.lines, {
+        source: 'CSV import',
+        openingBalance: document.getElementById('bank-opening-balance')?.value ?? '',
+        closingBalance: document.getElementById('bank-closing-balance')?.value ?? '',
+      });
       if (!result.ok) {
         setFlash(result.error, 'warn');
         render();

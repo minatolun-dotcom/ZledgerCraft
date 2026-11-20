@@ -445,8 +445,9 @@ disabled.
   (`Date,Description,Reference,Debit,Credit`), auto-match by signed amount and a
   seven-day date window, match or unmatch manually, and see matched, unmatched
   statement lines, unmatched bank vouchers, inflow/outflow and book balance.
-  Matching never alters a voucher; editing or deleting a matched voucher drops
-  the stale match.
+  Optional opening and closing balances check that the statement file is
+  complete; matching never alters a voucher, and editing or deleting a matched
+  voucher drops the stale match.
 - Cheque / DD register with period and as-on filters, post-dated/due/cleared
   status, instrument and party detail, totals and drill-down to the voucher.
   Cleared status comes from Bank Reconciliation matches; an instrument can also
@@ -667,7 +668,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way Part A drafts and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, Part B, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
 | Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit proration and bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV; no attendance/leave/arrears, formula or percentage pay heads, PF/ESI/PT computation, employer contributions, ECR/returns, Form 24Q/16 or bank payment workflow |
-| Bank reconciliation and statement import | Covered — CSV statement import, auto/manual matching and book balance; no OFX/QIF or live bank feeds |
+| Bank reconciliation and statement import | Covered — CSV statement import, optional opening/closing balance validation, auto/manual matching and book balance; no OFX/QIF or live bank feeds |
 | Cheque/DD details, cheque printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque preview/print, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no magnetic-ink cheque stationery presets |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary and break-up; no merging categories, split allocations or unallocated reconciliation |
 | Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance and over-budget status; no phased, revised, approval or cost-centre budgets |

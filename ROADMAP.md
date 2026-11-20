@@ -344,6 +344,17 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 40: statement balance validation
+
+- Bank statement import can take optional opening and closing balances; both
+  are required together and must be valid amounts. They are stored with the
+  statement and survive backup normalisation.
+- Bank Reconciliation shows the balances, statement movement and the difference,
+  with a warning when opening plus movement does not equal closing.
+- Verification: balanced and unbalanced statements, one-sided and non-numeric
+  balances, no-balance import and backup round trip; 283 tests (282 pass, 1
+  skipped) and a 940.0 kB build pass.
+
 ### 2026-11-20 — Phase 39: stock reorder levels
 
 - Stock items carry an optional reorder level (zero clears it), editable in the

@@ -367,6 +367,11 @@ export function bankReconciliation(company, ledgerId) {
   const unmatchedEntries = entries.filter((entry) => !entry.matchedLineId);
   const opening = signedOpening(ledger);
   const bookBalance = round2(opening + entries.reduce((sum, entry) => sum + entry.amount, 0));
+  const balances = config?.statement?.balances ?? null;
+  const statementNet = round2(lines.reduce((sum, line) => sum + line.amount, 0));
+  const statementDifference = balances
+    ? round2(balances.closing - (balances.opening + statementNet))
+    : null;
 
   return {
     ledger,
@@ -385,6 +390,9 @@ export function bankReconciliation(company, ledgerId) {
     outflow: round2(lines.filter((line) => line.amount < 0).reduce((sum, line) => sum + line.amount, 0)),
     opening,
     bookBalance,
+    balances,
+    statementNet,
+    statementDifference,
     matchedPercent: lines.length ? Math.round((matchedLines.length / lines.length) * 100) : 0,
   };
 }

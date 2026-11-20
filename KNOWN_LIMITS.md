@@ -86,7 +86,7 @@ README. When a new limit is introduced, add it here in the same change.
 | KL-32 | Bank statement import is CSV only | No OFX, QIF, MT940, Excel or live bank feed. |
 | KL-33 | Auto-match is narrow | Exact signed amount, one-to-one voucher, and a seven-day date window. No fuzzy narration, tolerance, split matching or many-to-one matching. |
 | KL-34 | Reconciliation does not post adjustments | Matched/unmatched is a separate layer. There are no bank charges, interest or adjustment vouchers created from the statement. |
-| KL-35 | No statement balance validation | The statement has no opening/closing balance fields, so the import cannot prove it is complete. |
+| KL-35 | Statement balance validation is optional | An imported statement can carry opening and closing balances, and reconciliation shows whether opening plus movement equals closing. The fields are optional, and the check proves only that the file is internally complete, not that it matches the bank or the book balance. |
 | KL-36 | Manual instrument status is a flag | A cheque/DD can be marked cleared, stopped or cancelled manually, or restored to the automatic post-dated/due/reconciliation status. These are flags only: they do not post entries, alter the voucher, or notify a bank. |
 | KL-37 | One instrument per voucher | A voucher can carry one cheque/DD. There are no cheque books, multiple instruments, split payments by cheque, or instrument history. |
 | KL-38 | Cheque print is a browser preview | Only cheque payments can be printed. Alignment depends on the browser and printer; there are no MICR, bank-specific stationery presets, overlay calibration or cheque-number pre-printing. |

@@ -4188,7 +4188,11 @@ async function handleClick(event) {
         break;
       }
       if (active.bankReconciliations?.[ledgerId] && !window.confirm('Replace the current bank statement and its matches?')) break;
-      const result = saveBankStatement(active, ledgerId, parsed.lines);
+      const result = saveBankStatement(active, ledgerId, parsed.lines, {
+        source: 'CSV import',
+        openingBalance: document.getElementById('bank-opening-balance')?.value ?? '',
+        closingBalance: document.getElementById('bank-closing-balance')?.value ?? '',
+      });
       if (!result.ok) {
         setFlash(result.error, 'warn');
         render();

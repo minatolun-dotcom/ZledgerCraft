@@ -304,6 +304,9 @@ export function bankReconScreen() {
         <div class="ratio-card"><span class="ratio-label">Book unmatched</span><strong>${report.unmatchedEntries.length}</strong><span class="muted small">${money(report.unmatchedBookAmount)} value</span></div>
         <div class="ratio-card"><span class="ratio-label">Bank balance</span><strong>${money(report.bookBalance)}</strong><span class="muted small">${report.importedAt ? `Statement imported ${esc(new Date(report.importedAt).toLocaleDateString('en-IN'))}` : 'No statement imported'}</span></div>
       </div>
+      ${report.balances
+        ? `<p class="${report.statementDifference === 0 ? 'muted small' : 'off-text'}">Statement balances: opening ${money(report.balances.opening)}, closing ${money(report.balances.closing)}, movement ${money(report.statementNet)}. ${report.statementDifference === 0 ? 'Opening plus movement equals closing.' : `Difference ${money(report.statementDifference)} — the statement may be incomplete or mistyped.`}</p>`
+        : ''}
       ${report.importedAt
         ? `<div class="form-actions">
              <button class="btn small primary" type="button" data-action="recon-auto"${canWrite ? '' : ' disabled'}>Auto-match by amount and date</button>
@@ -316,6 +319,11 @@ export function bankReconScreen() {
       ? panel(
           'Import bank statement',
           `<p class="muted">CSV columns: <code>Date, Description, Reference, Debit, Credit</code>. Dates accept YYYY-MM-DD or DD/MM/YYYY. Debit is money out; credit is money in. Importing replaces the current statement and its matches.</p>
+          <div class="pay-grid">
+            <label class="field"><span>Opening balance (optional)</span><input id="bank-opening-balance" inputmode="decimal" placeholder="0.00"></label>
+            <label class="field"><span>Closing balance (optional)</span><input id="bank-closing-balance" inputmode="decimal" placeholder="0.00"></label>
+          </div>
+          <p class="muted small">Provide both balances to check that opening plus statement movement equals closing. This validates the statement file, not the book balance.</p>
           <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="bank-statement-csv"></label>
           <textarea id="bank-statement-csv" class="backup-box import-box" rows="7" placeholder="Date,Description,Reference,Debit,Credit\n10/05/2026,Customer receipt,R1,,1000\n11/05/2026,Supplier payment,P1,500," aria-label="Bank statement CSV"></textarea>
           <div class="form-actions"><button class="btn small primary" type="button" data-action="import-bank-statement">Import statement</button></div>`,

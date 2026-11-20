@@ -764,6 +764,29 @@ export function costCentreMastersPanel(active) {
 
 export function currencyMastersPanel(active) {
   const currencies = active.currencies ?? [];
+  const editingRateCurrency = view.editingRateCode
+    ? currencies.find((currency) => currency.code === view.editingRateCode) ?? null
+    : null;
+  const editingRate = editingRateCurrency
+    ? (editingRateCurrency.rates ?? []).find((entry) => entry.date === view.editingRateDate) ?? null
+    : null;
+  const rateRows = currencies
+    .flatMap((currency) =>
+      (currency.rates ?? []).map((entry) => ({ ...entry, code: currency.code, name: currency.name })),
+    )
+    .sort((a, b) => b.date.localeCompare(a.date) || a.code.localeCompare(b.code))
+    .map(
+      (entry) => `<tr>
+        <td>${esc(dateLabel(entry.date))}</td>
+        <td><strong>${esc(entry.code)}</strong> <span class="muted">${esc(entry.name)}</span></td>
+        <td class="num">${money(entry.rate)}</td>
+        <td class="row-actions">
+          <button class="btn small" type="button" data-action="edit-currency-rate" data-code="${esc(entry.code)}" data-date="${esc(entry.date)}">Edit</button>
+          <button class="btn small danger" type="button" data-action="delete-currency-rate" data-code="${esc(entry.code)}" data-date="${esc(entry.date)}">Delete</button>
+        </td>
+      </tr>`,
+    )
+    .join('');
   const rows = currencies
     .map((currency) => {
       const latest = currency.rates?.[currency.rates.length - 1];
@@ -809,22 +832,25 @@ export function currencyMastersPanel(active) {
         </form>
       </div>
       <div>
-        <h3 class="column-title">Add a dated rate</h3>
+        <h3 class="column-title">${editingRate ? 'Edit rate' : 'Add a dated rate'}</h3>
         ${currencies.length
           ? `<form id="currency-rate-form" class="form-grid" novalidate>
               <label class="field"><span>Currency</span>
-                <select name="code" required>${currencies.map((currency) => `<option value="${esc(currency.code)}">${esc(currency.code)} · ${esc(currency.name)}</option>`).join('')}</select>
+                <select name="code" required${editingRate ? ' disabled' : ''}>${currencies.map((currency) => `<option value="${esc(currency.code)}"${editingRate && currency.code === editingRateCurrency.code ? ' selected' : ''}>${esc(currency.code)} · ${esc(currency.name)}</option>`).join('')}</select>
               </label>
               <label class="field"><span>Rate date</span>
-                <input name="date" type="date" value="${esc(todayIso())}" required>
+                <input name="date" type="date" value="${esc(editingRate?.date ?? todayIso())}" required>
               </label>
               <label class="field"><span>Rate in INR</span>
-                <input name="rate" inputmode="decimal" placeholder="83.00" required>
+                <input name="rate" inputmode="decimal" placeholder="83.00" value="${esc(editingRate?.rate ?? '')}" required>
               </label>
-              <div class="field form-actions"><button class="btn" type="submit">Save rate</button></div>
+              <div class="field form-actions">
+                <button class="btn" type="submit">${editingRate ? 'Save rate' : 'Add rate'}</button>
+                ${editingRate ? '<button class="btn ghost" type="button" data-action="cancel-rate-edit">Cancel</button>' : ''}
+              </div>
               <p id="currency-rate-error" class="form-error" role="alert"></p>
             </form>
-            <p class="muted small">A voucher uses the latest rate dated on or before the voucher date.</p>`
+            <p class="muted small">A voucher uses the latest rate dated on or before the voucher date. Editing a past rate changes nothing already posted.</p>`
           : '<p class="muted">Add a currency first, then keep its rates current here.</p>'}
       </div>
     </div>
@@ -833,7 +859,14 @@ export function currencyMastersPanel(active) {
           <thead><tr><th>Code</th><th>Name</th><th class="num">Latest rate</th><th class="num">Rates</th><th class="num">Vouchers</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table>`
-      : '<p class="muted">No foreign currencies yet.</p>'}`,
+      : '<p class="muted">No foreign currencies yet.</p>'}
+    ${rateRows
+      ? `<h3 class="column-title">Rate history <span class="count">${currencies.reduce((sum, currency) => sum + (currency.rates?.length ?? 0), 0)}</span></h3>
+        <div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Date</th><th>Currency</th><th class="num">INR per unit</th><th></th></tr></thead>
+          <tbody>${rateRows}</tbody>
+        </table></div>`
+      : ''}`,
   );
 }
 

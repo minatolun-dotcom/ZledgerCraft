@@ -1034,6 +1034,36 @@ export function addCurrencyRate(company, code, input = {}) {
   return { ok: true, currency, rate: { date, rate } };
 }
 
+export function updateCurrencyRate(company, code, originalDate, input = {}) {
+  const currency = currencyByCode(company, code);
+  if (!currency || currency.base) return { ok: false, error: 'Choose a foreign currency first.' };
+  const rateEntry = (currency.rates ?? []).find((entry) => entry.date === originalDate);
+  if (!rateEntry) return { ok: false, error: 'Exchange rate not found.' };
+  const date = String(input.date ?? rateEntry.date);
+  if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid exchange-rate date.' };
+  const rate = parseAmount(input.rate === undefined ? rateEntry.rate : input.rate);
+  if (rate === null || rate <= 0) return { ok: false, error: 'Exchange rate must be greater than zero.' };
+  if (
+    date !== originalDate &&
+    (currency.rates ?? []).some((entry) => entry.date === date)
+  ) {
+    return { ok: false, error: `A rate for ${currency.code} already exists on ${dateLabel(date)}.` };
+  }
+  rateEntry.date = date;
+  rateEntry.rate = rate;
+  currency.rates.sort((a, b) => a.date.localeCompare(b.date));
+  return { ok: true, currency, rate: rateEntry };
+}
+
+export function deleteCurrencyRate(company, code, date) {
+  const currency = currencyByCode(company, code);
+  if (!currency || currency.base) return { ok: false, error: 'Choose a foreign currency first.' };
+  const before = (currency.rates ?? []).length;
+  currency.rates = (currency.rates ?? []).filter((entry) => entry.date !== date);
+  if (currency.rates.length === before) return { ok: false, error: 'Exchange rate not found.' };
+  return { ok: true, currency, date };
+}
+
 export function deleteCurrency(company, currencyId) {
   const currency = (company.currencies ?? []).find((item) => item.id === currencyId);
   if (!currency) return { ok: false, error: 'Currency not found.' };

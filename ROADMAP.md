@@ -344,6 +344,16 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 28: exchange-rate history editing
+
+- The currency master now lists every dated rate and can edit its value, move it
+  to another date (rejecting a date that already has a rate) or delete it. Rates
+  stay sorted and are still applied as the latest rate on or before a voucher.
+- Base-currency and missing-rate edits are rejected, and future vouchers simply
+  fall back to the previous rate when a later one is deleted.
+- Verification: edit, redate, sort, clash, invalid date/rate, missing rate and
+  deletion cases; 269 tests (268 pass, 1 skipped) and a 913.3 kB build pass.
+
 ### 2026-11-20 — Phase 27: budget editing and duplication
 
 - Budget masters can now be edited in place (name, target, year and amount) and

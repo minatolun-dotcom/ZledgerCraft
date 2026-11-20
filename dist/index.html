@@ -3377,6 +3377,36 @@ function addCurrencyRate(company, code, input = {}) {
   return { ok: true, currency, rate: { date, rate } };
 }
 
+function updateCurrencyRate(company, code, originalDate, input = {}) {
+  const currency = currencyByCode(company, code);
+  if (!currency || currency.base) return { ok: false, error: 'Choose a foreign currency first.' };
+  const rateEntry = (currency.rates ?? []).find((entry) => entry.date === originalDate);
+  if (!rateEntry) return { ok: false, error: 'Exchange rate not found.' };
+  const date = String(input.date ?? rateEntry.date);
+  if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid exchange-rate date.' };
+  const rate = parseAmount(input.rate === undefined ? rateEntry.rate : input.rate);
+  if (rate === null || rate <= 0) return { ok: false, error: 'Exchange rate must be greater than zero.' };
+  if (
+    date !== originalDate &&
+    (currency.rates ?? []).some((entry) => entry.date === date)
+  ) {
+    return { ok: false, error: `A rate for ${currency.code} already exists on ${dateLabel(date)}.` };
+  }
+  rateEntry.date = date;
+  rateEntry.rate = rate;
+  currency.rates.sort((a, b) => a.date.localeCompare(b.date));
+  return { ok: true, currency, rate: rateEntry };
+}
+
+function deleteCurrencyRate(company, code, date) {
+  const currency = currencyByCode(company, code);
+  if (!currency || currency.base) return { ok: false, error: 'Choose a foreign currency first.' };
+  const before = (currency.rates ?? []).length;
+  currency.rates = (currency.rates ?? []).filter((entry) => entry.date !== date);
+  if (currency.rates.length === before) return { ok: false, error: 'Exchange rate not found.' };
+  return { ok: true, currency, date };
+}
+
 function deleteCurrency(company, currencyId) {
   const currency = (company.currencies ?? []).find((item) => item.id === currencyId);
   if (!currency) return { ok: false, error: 'Currency not found.' };
@@ -13113,6 +13143,29 @@ function costCentreMastersPanel(active) {
 
 function currencyMastersPanel(active) {
   const currencies = active.currencies ?? [];
+  const editingRateCurrency = view.editingRateCode
+    ? currencies.find((currency) => currency.code === view.editingRateCode) ?? null
+    : null;
+  const editingRate = editingRateCurrency
+    ? (editingRateCurrency.rates ?? []).find((entry) => entry.date === view.editingRateDate) ?? null
+    : null;
+  const rateRows = currencies
+    .flatMap((currency) =>
+      (currency.rates ?? []).map((entry) => ({ ...entry, code: currency.code, name: currency.name })),
+    )
+    .sort((a, b) => b.date.localeCompare(a.date) || a.code.localeCompare(b.code))
+    .map(
+      (entry) => `<tr>
+        <td>${esc(dateLabel(entry.date))}</td>
+        <td><strong>${esc(entry.code)}</strong> <span class="muted">${esc(entry.name)}</span></td>
+        <td class="num">${money(entry.rate)}</td>
+        <td class="row-actions">
+          <button class="btn small" type="button" data-action="edit-currency-rate" data-code="${esc(entry.code)}" data-date="${esc(entry.date)}">Edit</button>
+          <button class="btn small danger" type="button" data-action="delete-currency-rate" data-code="${esc(entry.code)}" data-date="${esc(entry.date)}">Delete</button>
+        </td>
+      </tr>`,
+    )
+    .join('');
   const rows = currencies
     .map((currency) => {
       const latest = currency.rates?.[currency.rates.length - 1];
@@ -13158,22 +13211,25 @@ function currencyMastersPanel(active) {
         </form>
       </div>
       <div>
-        <h3 class="column-title">Add a dated rate</h3>
+        <h3 class="column-title">${editingRate ? 'Edit rate' : 'Add a dated rate'}</h3>
         ${currencies.length
           ? `<form id="currency-rate-form" class="form-grid" novalidate>
               <label class="field"><span>Currency</span>
-                <select name="code" required>${currencies.map((currency) => `<option value="${esc(currency.code)}">${esc(currency.code)} · ${esc(currency.name)}</option>`).join('')}</select>
+                <select name="code" required${editingRate ? ' disabled' : ''}>${currencies.map((currency) => `<option value="${esc(currency.code)}"${editingRate && currency.code === editingRateCurrency.code ? ' selected' : ''}>${esc(currency.code)} · ${esc(currency.name)}</option>`).join('')}</select>
               </label>
               <label class="field"><span>Rate date</span>
-                <input name="date" type="date" value="${esc(todayIso())}" required>
+                <input name="date" type="date" value="${esc(editingRate?.date ?? todayIso())}" required>
               </label>
               <label class="field"><span>Rate in INR</span>
-                <input name="rate" inputmode="decimal" placeholder="83.00" required>
+                <input name="rate" inputmode="decimal" placeholder="83.00" value="${esc(editingRate?.rate ?? '')}" required>
               </label>
-              <div class="field form-actions"><button class="btn" type="submit">Save rate</button></div>
+              <div class="field form-actions">
+                <button class="btn" type="submit">${editingRate ? 'Save rate' : 'Add rate'}</button>
+                ${editingRate ? '<button class="btn ghost" type="button" data-action="cancel-rate-edit">Cancel</button>' : ''}
+              </div>
               <p id="currency-rate-error" class="form-error" role="alert"></p>
             </form>
-            <p class="muted small">A voucher uses the latest rate dated on or before the voucher date.</p>`
+            <p class="muted small">A voucher uses the latest rate dated on or before the voucher date. Editing a past rate changes nothing already posted.</p>`
           : '<p class="muted">Add a currency first, then keep its rates current here.</p>'}
       </div>
     </div>
@@ -13182,7 +13238,14 @@ function currencyMastersPanel(active) {
           <thead><tr><th>Code</th><th>Name</th><th class="num">Latest rate</th><th class="num">Rates</th><th class="num">Vouchers</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table>`
-      : '<p class="muted">No foreign currencies yet.</p>'}`,
+      : '<p class="muted">No foreign currencies yet.</p>'}
+    ${rateRows
+      ? `<h3 class="column-title">Rate history <span class="count">${currencies.reduce((sum, currency) => sum + (currency.rates?.length ?? 0), 0)}</span></h3>
+        <div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Date</th><th>Currency</th><th class="num">INR per unit</th><th></th></tr></thead>
+          <tbody>${rateRows}</tbody>
+        </table></div>`
+      : ''}`,
   );
 }
 
@@ -20678,18 +20741,30 @@ async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = addCurrencyRate(active, data.get('code'), {
-      date: data.get('date'),
-      rate: data.get('rate'),
-    });
+    const editingCode = view.editingRateCode;
+    const result = editingCode
+      ? updateCurrencyRate(active, editingCode, view.editingRateDate, {
+          date: data.get('date'),
+          rate: data.get('rate'),
+        })
+      : addCurrencyRate(active, data.get('code'), {
+          date: data.get('date'),
+          rate: data.get('rate'),
+        });
     if (!result.ok) {
       showFormError(result.error, 'currency-rate-error');
       return;
     }
-    logAudit('currency.rate', `Set ${result.currency.code} rate ${money(result.rate.rate)} from ${dateLabel(result.rate.date)}.`, active, result.currency.code);
+    logAudit(
+      editingCode ? 'currency.rate.update' : 'currency.rate',
+      `${editingCode ? 'Updated' : 'Set'} ${result.currency.code} rate ${money(result.rate.rate)} from ${dateLabel(result.rate.date)}.`,
+      active,
+      result.currency.code,
+    );
     persist();
-    setFlash(`${result.currency.code} rate saved for ${dateLabel(result.rate.date)}.`);
-    render();
+    setFlash(`${result.currency.code} rate ${editingCode ? 'updated' : 'saved'} for ${dateLabel(result.rate.date)}.`);
+    if (editingCode) navigate('masters');
+    else render();
     return;
   }
 
@@ -22535,6 +22610,36 @@ async function handleClick(event) {
         result.ok ? `Stock transfer ST-${result.transfer.no} deleted.` : result.error,
         result.ok ? 'ok' : 'warn',
       );
+      render();
+      break;
+    }
+    case 'edit-currency-rate':
+      navigate('masters', {
+        editingRateCode: trigger.dataset.code,
+        editingRateDate: trigger.dataset.date,
+      });
+      break;
+    case 'cancel-rate-edit':
+      navigate('masters');
+      break;
+    case 'delete-currency-rate': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm(`Delete the ${trigger.dataset.code} rate for ${dateLabel(trigger.dataset.date)}?`)) break;
+      const result = deleteCurrencyRate(active, trigger.dataset.code, trigger.dataset.date);
+      if (result.ok) {
+        logAudit(
+          'currency.rate.delete',
+          `Deleted ${trigger.dataset.code} rate for ${dateLabel(trigger.dataset.date)}.`,
+          active,
+          trigger.dataset.code,
+        );
+        persist();
+      }
+      setFlash(result.ok ? 'Exchange rate deleted.' : result.error, result.ok ? 'ok' : 'warn');
       render();
       break;
     }

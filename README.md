@@ -319,7 +319,8 @@ disabled.
 - Annual budgets per ledger or group for a financial year, with add, edit,
   delete and "duplicate next year" masters. One budget per target per year is
   enforced.
-- Foreign currencies with a code, name, symbol and dated INR exchange rates.
+- Foreign currencies with a code, name, symbol and dated INR exchange rates that
+  can be added, edited, redated or deleted from the rate history.
   INR remains the base currency; voucher amounts can be entered in a foreign
   currency and are posted to the books in INR. Currencies used by vouchers
   cannot be deleted.

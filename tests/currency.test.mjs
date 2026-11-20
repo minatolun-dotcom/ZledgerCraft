@@ -7,11 +7,13 @@ import {
   addVoucher,
   createCompany,
   deleteCurrency,
+  deleteCurrencyRate,
   exportState,
   findLedgerByName,
   importState,
   normalizeCurrencies,
   rateForCurrency,
+  updateCurrencyRate,
 } from '../src/store.js';
 import { forexRevaluation } from '../src/accounting.js';
 
@@ -70,6 +72,41 @@ test('currency masters validate codes, names and dated rates', () => {
   assert.equal(rateForCurrency(company, 'USD', '2026-04-10'), 84);
   assert.equal(addCurrencyRate(company, 'USD', { date: '2026-04-10', rate: 85 }).ok, false);
   assert.equal(addCurrencyRate(company, 'USD', { date: '2026-04-11', rate: -1 }).ok, false);
+});
+
+test('dated exchange rates can be edited, redated and deleted', () => {
+  const { company } = currencyFixture();
+  usd(company);
+  addCurrencyRate(company, 'USD', { date: '2026-04-10', rate: 84 });
+
+  const edited = updateCurrencyRate(company, 'USD', '2026-04-10', { rate: 85 });
+  assert.equal(edited.ok, true, edited.error);
+  assert.equal(rateForCurrency(company, 'USD', '2026-04-10'), 85);
+  assert.equal(rateForCurrency(company, 'USD', '2026-04-09'), 83, 'the earlier rate is untouched');
+
+  const redated = updateCurrencyRate(company, 'USD', '2026-04-10', { date: '2026-04-12', rate: 86 });
+  assert.equal(redated.ok, true, redated.error);
+  assert.equal(rateForCurrency(company, 'USD', '2026-04-11'), 83);
+  assert.equal(rateForCurrency(company, 'USD', '2026-04-12'), 86);
+  assert.deepEqual(
+    company.currencies[0].rates.map((entry) => entry.date),
+    ['2026-04-01', '2026-04-12'],
+    'rates stay sorted by date',
+  );
+
+  const clash = updateCurrencyRate(company, 'USD', '2026-04-12', { date: '2026-04-01' });
+  assert.equal(clash.ok, false);
+  assert.match(clash.error, /already exists/);
+  assert.equal(updateCurrencyRate(company, 'USD', '2026-04-12', { date: 'nope' }).ok, false);
+  assert.equal(updateCurrencyRate(company, 'USD', '2026-04-12', { rate: 0 }).ok, false);
+  assert.equal(updateCurrencyRate(company, 'USD', '2026-05-01', { rate: 90 }).ok, false);
+  assert.equal(updateCurrencyRate(company, 'INR', '2026-04-01', { rate: 2 }).ok, false);
+
+  const removed = deleteCurrencyRate(company, 'USD', '2026-04-12');
+  assert.equal(removed.ok, true, removed.error);
+  assert.equal(rateForCurrency(company, 'USD', '2026-04-12'), 83);
+  assert.equal(deleteCurrencyRate(company, 'USD', '2026-04-12').ok, false);
+  assert.equal(deleteCurrencyRate(company, 'INR', '2026-04-01').ok, false);
 });
 
 test('a foreign voucher stores base amounts and its currency detail', () => {

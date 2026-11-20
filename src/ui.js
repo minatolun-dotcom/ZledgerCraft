@@ -50,6 +50,7 @@ import {
   duplicateBudget,
   deleteCompany,
   deleteCurrency,
+  deleteCurrencyRate,
   deleteCostCategory,
   deleteCostCentre,
   deleteEmployee,
@@ -110,6 +111,7 @@ import {
   updateLedger,
   updateStockItem,
   updateBudget,
+  updateCurrencyRate,
   updatePendingVoucher,
   updateVoucher,
   withdrawPendingVoucher,
@@ -3207,18 +3209,30 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = addCurrencyRate(active, data.get('code'), {
-      date: data.get('date'),
-      rate: data.get('rate'),
-    });
+    const editingCode = view.editingRateCode;
+    const result = editingCode
+      ? updateCurrencyRate(active, editingCode, view.editingRateDate, {
+          date: data.get('date'),
+          rate: data.get('rate'),
+        })
+      : addCurrencyRate(active, data.get('code'), {
+          date: data.get('date'),
+          rate: data.get('rate'),
+        });
     if (!result.ok) {
       showFormError(result.error, 'currency-rate-error');
       return;
     }
-    logAudit('currency.rate', `Set ${result.currency.code} rate ${money(result.rate.rate)} from ${dateLabel(result.rate.date)}.`, active, result.currency.code);
+    logAudit(
+      editingCode ? 'currency.rate.update' : 'currency.rate',
+      `${editingCode ? 'Updated' : 'Set'} ${result.currency.code} rate ${money(result.rate.rate)} from ${dateLabel(result.rate.date)}.`,
+      active,
+      result.currency.code,
+    );
     persist();
-    setFlash(`${result.currency.code} rate saved for ${dateLabel(result.rate.date)}.`);
-    render();
+    setFlash(`${result.currency.code} rate ${editingCode ? 'updated' : 'saved'} for ${dateLabel(result.rate.date)}.`);
+    if (editingCode) navigate('masters');
+    else render();
     return;
   }
 
@@ -5064,6 +5078,36 @@ async function handleClick(event) {
         result.ok ? `Stock transfer ST-${result.transfer.no} deleted.` : result.error,
         result.ok ? 'ok' : 'warn',
       );
+      render();
+      break;
+    }
+    case 'edit-currency-rate':
+      navigate('masters', {
+        editingRateCode: trigger.dataset.code,
+        editingRateDate: trigger.dataset.date,
+      });
+      break;
+    case 'cancel-rate-edit':
+      navigate('masters');
+      break;
+    case 'delete-currency-rate': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm(`Delete the ${trigger.dataset.code} rate for ${dateLabel(trigger.dataset.date)}?`)) break;
+      const result = deleteCurrencyRate(active, trigger.dataset.code, trigger.dataset.date);
+      if (result.ok) {
+        logAudit(
+          'currency.rate.delete',
+          `Deleted ${trigger.dataset.code} rate for ${dateLabel(trigger.dataset.date)}.`,
+          active,
+          trigger.dataset.code,
+        );
+        persist();
+      }
+      setFlash(result.ok ? 'Exchange rate deleted.' : result.error, result.ok ? 'ok' : 'warn');
       render();
       break;
     }

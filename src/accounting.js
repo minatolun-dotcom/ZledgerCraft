@@ -6,6 +6,7 @@ import {
   groupById,
   gstStateName,
   isValidIsoDate,
+  orderRemainingItems,
   primaryGroupOf,
   rateForCurrency,
   round2,
@@ -1887,6 +1888,7 @@ function applyStockEvent(states, event) {
 export function stockSummary(company, filters = {}) {
   const from = filters.from || company.fyStart;
   const to = filters.to || company.fyEnd;
+  const reserved = openSalesOrderReservations(company, to);
   const items = company.stockItems ?? [];
   const units = new Map((company.units ?? []).map((unit) => [unit.id, unit]));
   const stockGroups = new Map((company.stockGroups ?? []).map((group) => [group.id, group]));
@@ -1930,6 +1932,8 @@ export function stockSummary(company, filters = {}) {
       closingValue: state.value,
       averageRate: state.qty > 0 ? round2(state.value / state.qty) : state.lastCost,
       reorderLevel: round3(item.reorderLevel ?? 0),
+      reservedQty: round3(reserved.get(item.id) ?? 0),
+      availableQty: round3(state.qty - (reserved.get(item.id) ?? 0)),
       lowStock: (item.reorderLevel ?? 0) > 0 && state.qty <= (item.reorderLevel ?? 0),
     };
   });
@@ -1958,10 +1962,10 @@ export function reorderReport(company, filters = {}) {
   });
   const items = new Map((company.stockItems ?? []).map((item) => [item.id, item]));
   const rows = summary.rows
-    .filter((row) => row.lowStock)
+    .filter((row) => row.lowStock || (row.reorderLevel > 0 && row.availableQty <= row.reorderLevel))
     .map((row) => {
       const item = items.get(row.itemId);
-      const shortfall = round3(Math.max(0, row.reorderLevel - row.closingQty));
+      const shortfall = round3(Math.max(0, row.reorderLevel - row.availableQty));
       return {
         ...row,
         shortfall,
@@ -2039,6 +2043,20 @@ export function priceList(company, filters = {}) {
       hasPrice: Number(item[field] ?? 0) > 0,
     }));
   return { priceType, rows, priced: rows.filter((row) => row.hasPrice).length };
+}
+
+export function openSalesOrderReservations(company, to = company.fyEnd) {
+  const reservations = new Map();
+  for (const order of company.orders ?? []) {
+    if (order.kind || order.type !== 'Sales' || order.status !== 'Open' || order.date > to) continue;
+    for (const line of orderRemainingItems(order)) {
+      reservations.set(
+        line.stockItemId,
+        round3((reservations.get(line.stockItemId) ?? 0) + line.qty),
+      );
+    }
+  }
+  return reservations;
 }
 
 function stockQuantityEvents(company, to) {

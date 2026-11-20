@@ -10502,6 +10502,7 @@ function applyStockEvent(states, event) {
 function stockSummary(company, filters = {}) {
   const from = filters.from || company.fyStart;
   const to = filters.to || company.fyEnd;
+  const reserved = openSalesOrderReservations(company, to);
   const items = company.stockItems ?? [];
   const units = new Map((company.units ?? []).map((unit) => [unit.id, unit]));
   const stockGroups = new Map((company.stockGroups ?? []).map((group) => [group.id, group]));
@@ -10545,6 +10546,8 @@ function stockSummary(company, filters = {}) {
       closingValue: state.value,
       averageRate: state.qty > 0 ? round2(state.value / state.qty) : state.lastCost,
       reorderLevel: round3(item.reorderLevel ?? 0),
+      reservedQty: round3(reserved.get(item.id) ?? 0),
+      availableQty: round3(state.qty - (reserved.get(item.id) ?? 0)),
       lowStock: (item.reorderLevel ?? 0) > 0 && state.qty <= (item.reorderLevel ?? 0),
     };
   });
@@ -10573,10 +10576,10 @@ function reorderReport(company, filters = {}) {
   });
   const items = new Map((company.stockItems ?? []).map((item) => [item.id, item]));
   const rows = summary.rows
-    .filter((row) => row.lowStock)
+    .filter((row) => row.lowStock || (row.reorderLevel > 0 && row.availableQty <= row.reorderLevel))
     .map((row) => {
       const item = items.get(row.itemId);
-      const shortfall = round3(Math.max(0, row.reorderLevel - row.closingQty));
+      const shortfall = round3(Math.max(0, row.reorderLevel - row.availableQty));
       return {
         ...row,
         shortfall,
@@ -10654,6 +10657,20 @@ function priceList(company, filters = {}) {
       hasPrice: Number(item[field] ?? 0) > 0,
     }));
   return { priceType, rows, priced: rows.filter((row) => row.hasPrice).length };
+}
+
+function openSalesOrderReservations(company, to = company.fyEnd) {
+  const reservations = new Map();
+  for (const order of company.orders ?? []) {
+    if (order.kind || order.type !== 'Sales' || order.status !== 'Open' || order.date > to) continue;
+    for (const line of orderRemainingItems(order)) {
+      reservations.set(
+        line.stockItemId,
+        round3((reservations.get(line.stockItemId) ?? 0) + line.qty),
+      );
+    }
+  }
+  return reservations;
 }
 
 function stockQuantityEvents(company, to) {
@@ -17216,6 +17233,8 @@ function inventoryScreen() {
         <td class="num">${row.inQty ? fmtQty(row.inQty) : '—'}</td>
         <td class="num">${row.outQty ? fmtQty(row.outQty) : '—'}</td>
         <td class="num ${row.closingQty < 0 ? 'neg' : ''}"><strong>${fmtQty(row.closingQty)}</strong>${row.lowStock ? ' <span class="badge attention">Low</span>' : ''}</td>
+        <td class="num">${row.reservedQty ? fmtQty(row.reservedQty) : '—'}</td>
+        <td class="num ${row.availableQty < 0 ? 'neg' : ''}">${fmtQty(row.availableQty)}</td>
         <td class="num">${row.reorderLevel ? fmtQty(row.reorderLevel) : '—'}</td>
         <td class="num">${money(row.averageRate)}</td>
         <td class="num">${money(row.closingValue)}</td>
@@ -17448,12 +17467,11 @@ function inventoryScreen() {
         : ''}
       ${report.rows.length
         ? `<table class="data-table">
-            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">Opening</th><th class="num">Inward</th><th class="num">Outward</th><th class="num">Closing</th><th class="num">Reorder</th><th class="num">Rate</th><th class="num">Value</th></tr></thead>
+            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">Opening</th><th class="num">Inward</th><th class="num">Outward</th><th class="num">Closing</th><th class="num">Committed</th><th class="num">Available</th><th class="num">Reorder</th><th class="num">Rate</th><th class="num">Value</th></tr></thead>
             <tbody>${summaryRows}</tbody>
-            <tfoot><tr><td colspan="9">Closing stock value</td><td class="num">${money(report.totals.closingValue)}</td></tr></tfoot>
+            <tfoot><tr><td colspan="11">Closing stock value</td><td class="num">${money(report.totals.closingValue)}</td></tr></tfoot>
           </table>`
-        : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,
-      'Click an item to see its voucher-wise movement.',
+        : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,          'Committed is the unfulfilled quantity on open sales orders up to the report date; Available is physical closing stock less committed. Click an item to see its voucher-wise movement.',
     )}
     ${valueAnalysis.totalValue > 0
       ? panel(
@@ -17482,18 +17500,20 @@ function inventoryScreen() {
       ? panel(
           'Reorder watch',
           `<table class="data-table compact">
-            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">In stock</th><th class="num">Reorder at</th><th class="num">Shortfall</th><th class="num">Buy price</th><th class="num">Estimated cost</th></tr></thead>
+            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">In stock</th><th class="num">Committed</th><th class="num">Available</th><th class="num">Reorder at</th><th class="num">Shortfall</th><th class="num">Buy price</th><th class="num">Estimated cost</th></tr></thead>
             <tbody>${reorder.rows.map((row) => `<tr>
               <td><strong>${esc(row.name)}</strong></td>
               <td class="muted">${esc(row.groupName)}</td>
               <td>${esc(row.unit)}</td>
               <td class="num">${fmtQty(row.closingQty)}</td>
+              <td class="num">${row.reservedQty ? fmtQty(row.reservedQty) : '—'}</td>
+              <td class="num ${row.availableQty < 0 ? 'neg' : ''}">${fmtQty(row.availableQty)}</td>
               <td class="num">${fmtQty(row.reorderLevel)}</td>
               <td class="num">${fmtQty(row.shortfall)}</td>
               <td class="num">${row.purchasePrice ? money(row.purchasePrice) : '—'}</td>
               <td class="num">${money(row.estimatedCost)}</td>
             </tr>`).join('')}</tbody>
-            <tfoot><tr><td colspan="7">${reorder.totals.items} item(s) to reorder</td><td class="num">${money(reorder.totals.estimatedCost)}</td></tr></tfoot>
+            <tfoot><tr><td colspan="9">${reorder.totals.items} item(s) to reorder</td><td class="num">${money(reorder.totals.estimatedCost)}</td></tr></tfoot>
           </table>`,
           'Items at or below their reorder level. Estimated cost uses the item purchase price, falling back to average stock rate.',
         )

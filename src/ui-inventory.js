@@ -383,6 +383,8 @@ export function inventoryScreen() {
         <td class="num">${row.inQty ? fmtQty(row.inQty) : '—'}</td>
         <td class="num">${row.outQty ? fmtQty(row.outQty) : '—'}</td>
         <td class="num ${row.closingQty < 0 ? 'neg' : ''}"><strong>${fmtQty(row.closingQty)}</strong>${row.lowStock ? ' <span class="badge attention">Low</span>' : ''}</td>
+        <td class="num">${row.reservedQty ? fmtQty(row.reservedQty) : '—'}</td>
+        <td class="num ${row.availableQty < 0 ? 'neg' : ''}">${fmtQty(row.availableQty)}</td>
         <td class="num">${row.reorderLevel ? fmtQty(row.reorderLevel) : '—'}</td>
         <td class="num">${money(row.averageRate)}</td>
         <td class="num">${money(row.closingValue)}</td>
@@ -615,12 +617,11 @@ export function inventoryScreen() {
         : ''}
       ${report.rows.length
         ? `<table class="data-table">
-            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">Opening</th><th class="num">Inward</th><th class="num">Outward</th><th class="num">Closing</th><th class="num">Reorder</th><th class="num">Rate</th><th class="num">Value</th></tr></thead>
+            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">Opening</th><th class="num">Inward</th><th class="num">Outward</th><th class="num">Closing</th><th class="num">Committed</th><th class="num">Available</th><th class="num">Reorder</th><th class="num">Rate</th><th class="num">Value</th></tr></thead>
             <tbody>${summaryRows}</tbody>
-            <tfoot><tr><td colspan="9">Closing stock value</td><td class="num">${money(report.totals.closingValue)}</td></tr></tfoot>
+            <tfoot><tr><td colspan="11">Closing stock value</td><td class="num">${money(report.totals.closingValue)}</td></tr></tfoot>
           </table>`
-        : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,
-      'Click an item to see its voucher-wise movement.',
+        : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,          'Committed is the unfulfilled quantity on open sales orders up to the report date; Available is physical closing stock less committed. Click an item to see its voucher-wise movement.',
     )}
     ${valueAnalysis.totalValue > 0
       ? panel(
@@ -649,18 +650,20 @@ export function inventoryScreen() {
       ? panel(
           'Reorder watch',
           `<table class="data-table compact">
-            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">In stock</th><th class="num">Reorder at</th><th class="num">Shortfall</th><th class="num">Buy price</th><th class="num">Estimated cost</th></tr></thead>
+            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">In stock</th><th class="num">Committed</th><th class="num">Available</th><th class="num">Reorder at</th><th class="num">Shortfall</th><th class="num">Buy price</th><th class="num">Estimated cost</th></tr></thead>
             <tbody>${reorder.rows.map((row) => `<tr>
               <td><strong>${esc(row.name)}</strong></td>
               <td class="muted">${esc(row.groupName)}</td>
               <td>${esc(row.unit)}</td>
               <td class="num">${fmtQty(row.closingQty)}</td>
+              <td class="num">${row.reservedQty ? fmtQty(row.reservedQty) : '—'}</td>
+              <td class="num ${row.availableQty < 0 ? 'neg' : ''}">${fmtQty(row.availableQty)}</td>
               <td class="num">${fmtQty(row.reorderLevel)}</td>
               <td class="num">${fmtQty(row.shortfall)}</td>
               <td class="num">${row.purchasePrice ? money(row.purchasePrice) : '—'}</td>
               <td class="num">${money(row.estimatedCost)}</td>
             </tr>`).join('')}</tbody>
-            <tfoot><tr><td colspan="7">${reorder.totals.items} item(s) to reorder</td><td class="num">${money(reorder.totals.estimatedCost)}</td></tr></tfoot>
+            <tfoot><tr><td colspan="9">${reorder.totals.items} item(s) to reorder</td><td class="num">${money(reorder.totals.estimatedCost)}</td></tr></tfoot>
           </table>`,
           'Items at or below their reorder level. Estimated cost uses the item purchase price, falling back to average stock rate.',
         )

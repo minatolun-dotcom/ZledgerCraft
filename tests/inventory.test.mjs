@@ -880,6 +880,8 @@ test('orders record sales and purchase commitments without moving stock', () => 
   assert.equal(order.order.total, 450);
   assert.equal(order.order.status, 'Open');
   assert.equal(stockSummary(company).rows[0].closingQty, before, 'orders do not move stock');
+  assert.equal(stockSummary(company).rows[0].reservedQty, 3);
+  assert.equal(stockSummary(company).rows[0].availableQty, 7);
 
   const wrongParty = addOrder(company, {
     type: 'Purchase',
@@ -907,6 +909,8 @@ test('orders record sales and purchase commitments without moving stock', () => 
   const closed = setOrderStatus(company, order.order.id, 'Closed');
   assert.equal(closed.ok, true);
   assert.equal(closed.order.status, 'Closed');
+  assert.equal(stockSummary(company).rows[0].reservedQty, 0);
+  assert.equal(stockSummary(company).rows[0].availableQty, 10);
   assert.equal(setOrderStatus(company, order.order.id, 'Unknown').ok, false);
 
   const purchase = addOrder(company, {

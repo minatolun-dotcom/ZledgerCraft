@@ -415,8 +415,9 @@ disabled.
   register, audit events and deletion. Transfers move quantity and cost but do
   not change total stock value or post to the ledger.
 - Stock Summary with opening, inward, outward, closing quantity and value at
-  weighted-average cost, plus a reorder level per item and Low badges when the
-  closing quantity is at or below it; Godown balances with transfer-aware quantities; Batch
+  weighted-average cost, open-sales-order commitments, available-to-sell
+  quantity, plus a reorder level per item and Low badges when the closing
+  quantity is at or below it; Godown balances with transfer-aware quantities; Batch
   balances with expiry and value at item average cost; and a per-item movement
   report with running balances. Opening stock can be split into named batches
   with expiry dates, either in the item form or from Tally batch masters, and

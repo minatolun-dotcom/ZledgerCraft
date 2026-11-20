@@ -325,17 +325,17 @@ disabled.
   currency and are posted to the books in INR. Currencies used by vouchers
   cannot be deleted.
 - GST registration with GSTIN, legal/trade name, registered address, city, PIN
-  and home state, plus a rate master (add/delete, optional cess). Enabling GST
+  and home state, plus a rate master (add, edit or delete, optional cess). Enabling GST
   creates or reuses CGST, SGST, IGST and Cess ledgers under Duties & Taxes.
 - TDS/TCS registration with a TAN and a section master (kind, code, description,
   rate and threshold; seeded with common 194C/194J/194I/194H and two TCS
   sections). Enabling it creates or reuses TDS Payable and TCS Payable ledgers.
 - Payroll with a pay-head master (earning or deduction, posting ledger and an
   optional PF/ESI/PT tag) and an employee master (code, designation, PAN and
-  joining date). Enabling payroll creates or reuses the Salaries and Salary
-  Payable ledgers and seeds Basic Salary, HRA, conveyance, PF, ESI and
+  joining/exit dates). Enabling payroll creates or reuses the Salaries and
+  Salary Payable ledgers and seeds Basic Salary, HRA, conveyance, PF, ESI and
   professional tax pay heads; each employee stores a fixed monthly amount per
-  pay head.
+  pay head, prorated by calendar days in the month the employee joins or exits.
 - Ledgers with opening Dr/Cr, optional party GSTIN/GST state, optional party
   address/city/PIN for e-invoices and optional PAN for deductee reporting. Alter
   a ledger's name, group or opening; delete a ledger only when no voucher uses
@@ -658,7 +658,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | GST registration, rates and tax on vouchers | Partial — GSTIN and home state, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and invoice-level tax on four voucher types; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way Part A drafts and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, Part B, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
-| Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, one journal-posting run per month, employee-wise salary register and printable payslips; no attendance/leave/arrears, formula or percentage pay heads, PF/ESI/PT computation, employer contributions, ECR/returns, Form 24Q/16 or salary payment workflow |
+| Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts and joining/exit proration, one journal-posting run per month, employee-wise salary register and printable payslips; no attendance/leave/arrears, formula or percentage pay heads, PF/ESI/PT computation, employer contributions, ECR/returns, Form 24Q/16 or salary payment workflow |
 | Bank reconciliation and statement import | Covered — CSV statement import, auto/manual matching and book balance; no OFX/QIF or live bank feeds |
 | Cheque/DD details, cheque printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque preview/print and a reconciliation-aware Cheque / DD register; no magnetic-ink cheque stationery presets |
 | Cost centres and cost-category reports | Covered — categories, centres, one centre per voucher line, summary and break-up; no split allocations or unallocated reconciliation |

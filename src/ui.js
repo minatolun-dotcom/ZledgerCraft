@@ -3145,6 +3145,7 @@ export async function handleSubmit(event) {
       designation: data.get('designation'),
       pan: data.get('pan'),
       dateOfJoining: data.get('dateOfJoining'),
+      dateOfExit: data.get('dateOfExit'),
       active: data.get('active') === 'on',
       pay,
     };

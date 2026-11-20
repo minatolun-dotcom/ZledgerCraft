@@ -3926,6 +3926,15 @@ function payrollMonthEnd(month) {
   return `${month}-${String(day).padStart(2, '0')}`;
 }
 
+function payrollDaysBetween(start, end) {
+  const [startYear, startMonth, startDay] = start.split('-').map(Number);
+  const [endYear, endMonth, endDay] = end.split('-').map(Number);
+  const days =
+    (Date.UTC(endYear, endMonth - 1, endDay) - Date.UTC(startYear, startMonth - 1, startDay)) /
+    86400000;
+  return Math.round(days) + 1;
+}
+
 /** Normalises payroll setup, pay heads, employee pay structures and past runs. */
 function normalizePayroll(company) {
   const source = company.payroll && typeof company.payroll === 'object' ? company.payroll : {};
@@ -3977,6 +3986,7 @@ function normalizePayroll(company) {
         ...(employee.designation ? { designation: String(employee.designation).trim().slice(0, 60) } : {}),
         ...(isValidPan(employee.pan) ? { pan: String(employee.pan).trim().toUpperCase() } : {}),
         ...(isValidIsoDate(String(employee.dateOfJoining ?? '')) ? { dateOfJoining: String(employee.dateOfJoining) } : {}),
+        ...(isValidIsoDate(String(employee.dateOfExit ?? '')) ? { dateOfExit: String(employee.dateOfExit) } : {}),
         active: employee.active !== false,
         pay,
       };
@@ -4196,6 +4206,13 @@ function addEmployee(company, input = {}) {
   if (dateOfJoining && !isValidIsoDate(dateOfJoining)) {
     return { ok: false, error: 'Enter a valid date of joining.' };
   }
+  const dateOfExit = String(input.dateOfExit ?? '').trim();
+  if (dateOfExit && !isValidIsoDate(dateOfExit)) {
+    return { ok: false, error: 'Enter a valid date of exit.' };
+  }
+  if (dateOfJoining && dateOfExit && dateOfExit < dateOfJoining) {
+    return { ok: false, error: 'The date of exit cannot be before the date of joining.' };
+  }
   const checked = employeePayEntries(company, input.pay);
   if (checked.error) return { ok: false, error: checked.error };
   const employee = {
@@ -4210,6 +4227,7 @@ function addEmployee(company, input = {}) {
   if (designation) employee.designation = designation;
   if (pan) employee.pan = pan;
   if (dateOfJoining) employee.dateOfJoining = dateOfJoining;
+  if (dateOfExit) employee.dateOfExit = dateOfExit;
   company.payroll.employees.push(employee);
   return { ok: true, employee };
 }
@@ -4232,6 +4250,13 @@ function updateEmployee(company, employeeId, input = {}) {
   if (dateOfJoining && !isValidIsoDate(dateOfJoining)) {
     return { ok: false, error: 'Enter a valid date of joining.' };
   }
+  const dateOfExit = String(input.dateOfExit ?? '').trim();
+  if (dateOfExit && !isValidIsoDate(dateOfExit)) {
+    return { ok: false, error: 'Enter a valid date of exit.' };
+  }
+  if (dateOfJoining && dateOfExit && dateOfExit < dateOfJoining) {
+    return { ok: false, error: 'The date of exit cannot be before the date of joining.' };
+  }
   const checked = employeePayEntries(company, input.pay);
   if (checked.error) return { ok: false, error: checked.error };
   employee.name = name;
@@ -4247,6 +4272,8 @@ function updateEmployee(company, employeeId, input = {}) {
   else delete employee.pan;
   if (dateOfJoining) employee.dateOfJoining = dateOfJoining;
   else delete employee.dateOfJoining;
+  if (dateOfExit) employee.dateOfExit = dateOfExit;
+  else delete employee.dateOfExit;
   return { ok: true, employee };
 }
 
@@ -4280,14 +4307,26 @@ function runPayroll(company, input = {}) {
   const employees = (company.payroll.employees ?? []).filter((employee) => employee.active);
   if (!employees.length) return { ok: false, error: 'Add an active employee before running payroll.' };
 
+  const monthDays = Number(end.slice(8, 10));
+  const monthStart = `${month}-01`;
   const rows = [];
   for (const employee of employees) {
+    const joined = employee.dateOfJoining && employee.dateOfJoining > monthStart ? employee.dateOfJoining : monthStart;
+    const exited = employee.dateOfExit && employee.dateOfExit < end ? employee.dateOfExit : end;
+    const workedDays = joined > exited ? 0 : payrollDaysBetween(joined, exited);
+    if (workedDays === 0) continue;
+    const prorated = workedDays < monthDays;
+    const factor = prorated ? workedDays / monthDays : 1;
     const earnings = [];
     const deductions = [];
     for (const entry of employee.pay ?? []) {
       const head = heads.get(entry.payHeadId);
       if (!head) continue;
-      const line = { payHeadId: head.id, name: head.name, amount: round2(entry.amount) };
+      const line = {
+        payHeadId: head.id,
+        name: head.name,
+        amount: round2(round2(entry.amount) * factor),
+      };
       if (head.statutory) line.statutory = head.statutory;
       if (head.kind === 'Earning') earnings.push(line);
       else deductions.push(line);
@@ -4304,12 +4343,16 @@ function runPayroll(company, input = {}) {
       employeeId: employee.id,
       name: employee.name,
       ...(employee.code ? { code: employee.code } : {}),
+      ...(prorated ? { workedDays, monthDays } : {}),
       earnings,
       deductions,
       gross,
       deductionTotal,
       net: round2(gross - deductionTotal),
     });
+  }
+  if (!rows.length) {
+    return { ok: false, error: `No employee worked during ${month}. Check joining and exit dates.` };
   }
 
   const totals = {
@@ -17226,6 +17269,7 @@ function payrollScreen() {
         <label class="field"><span>Designation</span><input name="designation" maxlength="60" value="${esc(editing?.designation ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>PAN</span><input name="pan" maxlength="10" value="${esc(editing?.pan ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Date of joining</span><input name="dateOfJoining" type="date" value="${esc(editing?.dateOfJoining ?? '')}"></label>
+        <label class="field"><span>Date of exit</span><input name="dateOfExit" type="date" value="${esc(editing?.dateOfExit ?? '')}"><span class="muted small">Optional. Pay is prorated by calendar days in the joining and exit months.</span></label>
         <label class="field gst-check">
           <input type="checkbox" name="active"${editing && editing.active === false ? '' : ' checked'}>
           <span>Include in payroll runs</span>
@@ -17494,7 +17538,8 @@ function payslipScreen() {
       <div><span class="muted small">Designation</span><strong>${esc(employee?.designation || '—')}</strong></div>
       <div><span class="muted small">PAN</span><strong>${esc(employee?.pan || '—')}</strong></div>
       <div><span class="muted small">Date of joining</span><strong>${esc(employee?.dateOfJoining ? dateLabel(employee.dateOfJoining) : '—')}</strong></div>
-      <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}</strong></div>
+      <div><span class="muted small">Date of exit</span><strong>${esc(employee?.dateOfExit ? dateLabel(employee.dateOfExit) : '—')}</strong></div>
+      <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}${row.workedDays ? ` · ${row.workedDays}/${row.monthDays} days` : ''}</strong></div>
     </div>
     <div class="payslip-grid">
       <table class="data-table compact">
@@ -20748,6 +20793,7 @@ async function handleSubmit(event) {
       designation: data.get('designation'),
       pan: data.get('pan'),
       dateOfJoining: data.get('dateOfJoining'),
+      dateOfExit: data.get('dateOfExit'),
       active: data.get('active') === 'on',
       pay,
     };

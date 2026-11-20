@@ -273,6 +273,65 @@ test('runs can be deleted with their voucher, and employees with history cannot'
   assert.equal(deleteEmployee(company, asha.id).ok, true);
 });
 
+test('joining and exit dates prorate pay by calendar days', () => {
+  const joinedMidMonth = fixture().company;
+  standardEmployee(joinedMidMonth, 'Asha Menon', { dateOfJoining: '2026-04-16' });
+  const joined = runPayroll(joinedMidMonth, { month: '2026-04' });
+  assert.equal(joined.ok, true, joined.error);
+  const joinedRow = joined.run.rows[0];
+  assert.equal(joinedRow.workedDays, 15);
+  assert.equal(joinedRow.monthDays, 30);
+  assert.equal(joinedRow.gross, 20000);
+  assert.equal(joinedRow.deductionTotal, 2200);
+  assert.equal(joinedRow.net, 17800);
+  assert.equal(joined.run.totals.gross, 20000);
+  assert.equal(joined.voucher.total, 20000);
+
+  const exitedMidMonth = fixture().company;
+  standardEmployee(exitedMidMonth, 'Asha Menon', {
+    dateOfJoining: '2025-06-01',
+    dateOfExit: '2026-04-15',
+  });
+  const exited = runPayroll(exitedMidMonth, { month: '2026-04' });
+  assert.equal(exited.ok, true, exited.error);
+  assert.equal(exited.run.rows[0].workedDays, 15);
+  assert.equal(exited.run.rows[0].gross, 20000);
+
+  const exitedBeforeMonth = fixture().company;
+  standardEmployee(exitedBeforeMonth, 'Asha Menon', { dateOfExit: '2026-03-31' });
+  const empty = runPayroll(exitedBeforeMonth, { month: '2026-04' });
+  assert.equal(empty.ok, false);
+  assert.match(empty.error, /No employee worked during 2026-04/);
+});
+
+test('employee exit dates are validated and survive a backup round trip', () => {
+  const { company } = fixture();
+  const pay = [{ payHeadId: head(company, 'Basic Salary').id, amount: 30000 }];
+  assert.equal(
+    addEmployee(company, { name: 'Bad Exit', dateOfJoining: '2026-04-10', dateOfExit: '2026-04-01', pay }).ok,
+    false,
+  );
+  assert.equal(
+    addEmployee(company, { name: 'Bad Date', dateOfExit: '2026-02-30', pay }).ok,
+    false,
+  );
+  const added = addEmployee(company, {
+    name: 'Asha Menon',
+    dateOfJoining: '2025-06-01',
+    dateOfExit: '2026-04-15',
+    pay,
+  });
+  assert.equal(added.ok, true, added.error);
+  assert.equal(added.employee.dateOfExit, '2026-04-15');
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  assert.equal(restored.state.companies[0].payroll.employees[0].dateOfExit, '2026-04-15');
+});
+
 test('payroll settings, employees and runs survive a backup round trip', () => {
   const { company } = fixture();
   standardEmployee(company, 'Asha Menon', { pan: 'ABCDE1234F', dateOfJoining: '2025-06-01' });

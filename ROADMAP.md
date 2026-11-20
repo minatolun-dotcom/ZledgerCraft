@@ -344,6 +344,18 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 33: joining and exit proration
+
+- Employees can carry an optional date of exit (validated as a real date not
+  before joining), shown in the employee form and payslip.
+- A payroll run now prorates every earning and deduction by calendar days when
+  an employee joins or exits inside the payroll month, recording
+  `workedDays`/`monthDays` on the row. Employees who did not work that month are
+  skipped, and a run with no remaining rows fails with a clear message.
+- Verification: mid-month joining and exit totals away from full-month pay,
+  exit-before-month skipping, exit-date validation and backup round trip; 275
+  tests (274 pass, 1 skipped) and a 920.5 kB build pass.
+
 ### 2026-11-20 — Phase 32: editable GST rates
 
 - The GST rate master now supports editing the label, rate and cess in place,

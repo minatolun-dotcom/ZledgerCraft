@@ -174,6 +174,7 @@ export function payrollScreen() {
         <label class="field"><span>Designation</span><input name="designation" maxlength="60" value="${esc(editing?.designation ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>PAN</span><input name="pan" maxlength="10" value="${esc(editing?.pan ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Date of joining</span><input name="dateOfJoining" type="date" value="${esc(editing?.dateOfJoining ?? '')}"></label>
+        <label class="field"><span>Date of exit</span><input name="dateOfExit" type="date" value="${esc(editing?.dateOfExit ?? '')}"><span class="muted small">Optional. Pay is prorated by calendar days in the joining and exit months.</span></label>
         <label class="field gst-check">
           <input type="checkbox" name="active"${editing && editing.active === false ? '' : ' checked'}>
           <span>Include in payroll runs</span>
@@ -442,7 +443,8 @@ export function payslipScreen() {
       <div><span class="muted small">Designation</span><strong>${esc(employee?.designation || '—')}</strong></div>
       <div><span class="muted small">PAN</span><strong>${esc(employee?.pan || '—')}</strong></div>
       <div><span class="muted small">Date of joining</span><strong>${esc(employee?.dateOfJoining ? dateLabel(employee.dateOfJoining) : '—')}</strong></div>
-      <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}</strong></div>
+      <div><span class="muted small">Date of exit</span><strong>${esc(employee?.dateOfExit ? dateLabel(employee.dateOfExit) : '—')}</strong></div>
+      <div><span class="muted small">Pay period</span><strong>${esc(payrollMonthLabel(run.month))}${row.workedDays ? ` · ${row.workedDays}/${row.monthDays} days` : ''}</strong></div>
     </div>
     <div class="payslip-grid">
       <table class="data-table compact">

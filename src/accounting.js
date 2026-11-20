@@ -784,6 +784,7 @@ export function postDatedRegister(company, filters = {}) {
         no: voucher.no,
         voucherDate: voucher.date,
         party: partyForVoucher(company, voucher),
+        bankLedgerId: instrument.bankLedgerId,
         bank: bank?.name ?? 'Unknown bank',
         kind: instrument.kind,
         number: instrument.number,
@@ -795,6 +796,8 @@ export function postDatedRegister(company, filters = {}) {
       };
     })
     .filter((row) => !filters.status || filters.status === 'All' || row.status === filters.status)
+    .filter((row) => !filters.bankLedgerId || row.bankLedgerId === filters.bankLedgerId)
+    .filter((row) => !filters.party || row.party.toLowerCase().includes(String(filters.party).toLowerCase()))
     .sort(
       (a, b) =>
         b.instrumentDate.localeCompare(a.instrumentDate) ||

@@ -145,11 +145,25 @@ export function postDatedScreen() {
   const from = current.from || active.fyStart;
   const to = current.to || active.fyEnd;
   const asOn = current.asOn || todayIso();
-  const report = postDatedRegister(active, { from, to, asOn, status: current.status });
+  const report = postDatedRegister(active, {
+    from,
+    to,
+    asOn,
+    status: current.status,
+    bankLedgerId: current.bankLedgerId,
+    party: current.party,
+  });
   const canWrite = can('voucher.write');
   const statusOptions = ['All', 'Post-dated', 'Due', 'Cleared', 'Stopped', 'Cancelled']
     .map((status) => `<option value="${status}"${current.status === status ? ' selected' : ''}>${status === 'All' ? 'All instruments' : status}</option>`)
     .join('');
+  const bankOptions = [
+    '<option value="">All banks</option>',
+    ...active.ledgers
+      .filter((ledger) => groupChainKeys(active, ledger.groupId).includes('bank'))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((ledger) => `<option value="${esc(ledger.id)}"${current.bankLedgerId === ledger.id ? ' selected' : ''}>${esc(ledger.name)}</option>`),
+  ].join('');
   const rows = report.rows
     .map((row) => {
       const timing = row.manualStatus
@@ -187,6 +201,8 @@ export function postDatedScreen() {
       <label class="field inline-field"><span>To</span><input name="to" type="date" value="${esc(to)}" data-period></label>
       <label class="field inline-field"><span>As on</span><input name="asOn" type="date" value="${esc(asOn)}" data-period></label>
       <label class="field inline-field"><span>Status</span><select name="status">${statusOptions}</select></label>
+      <label class="field inline-field"><span>Bank</span><select name="bankLedgerId">${bankOptions}</select></label>
+      <label class="field inline-field"><span>Party</span><input name="party" maxlength="80" placeholder="Any party" value="${esc(current.party ?? '')}"></label>
       <button class="btn small" type="submit">Apply</button>
     </form>
     <div class="ratio-grid">
@@ -201,7 +217,7 @@ export function postDatedScreen() {
           <tbody>${rows}</tbody>
         </table></div>`
       : '<p class="muted">No cheque or DD instruments in this period. Add instrument details on a payment, receipt or contra voucher.</p>'}`,
-    'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation unless the instrument was marked cleared, stopped or cancelled manually.',
+    'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation unless the instrument was marked cleared, stopped or cancelled manually. Bank and party filters narrow the same register without changing status logic.',
   );
 }
 

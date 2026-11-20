@@ -376,7 +376,7 @@ export let filters = {
   cashBook: { ledgerId: '', from: '', to: '' },
   stock: { from: '', to: '' },
   orders: { from: '', to: '', status: 'All' },
-  postDated: { from: '', to: '', asOn: '', status: 'All' },
+  postDated: { from: '', to: '', asOn: '', status: 'All', bankLedgerId: '', party: '' },
   costCentres: { from: '', to: '' },
   budget: { yearId: '', asOn: '' },
   forex: { asOn: '' },
@@ -3782,6 +3782,8 @@ export async function handleSubmit(event) {
       to: data.get('to') || '',
       asOn: data.get('asOn') || '',
       status: data.get('status') || 'All',
+      bankLedgerId: data.get('bankLedgerId') || '',
+      party: data.get('party') || '',
     };
     render();
     return;

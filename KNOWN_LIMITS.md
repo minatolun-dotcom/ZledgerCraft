@@ -91,7 +91,7 @@ README. When a new limit is introduced, add it here in the same change.
 | KL-37 | One instrument per voucher | A voucher can carry one cheque/DD. There are no cheque books, multiple instruments, split payments by cheque, or instrument history. |
 | KL-38 | Cheque print is a browser preview | Only cheque payments can be printed. Alignment depends on the browser and printer; there are no MICR, bank-specific stationery presets, overlay calibration or cheque-number pre-printing. |
 | KL-39 | Instrument printing is a browser preview | Cheques, DD payments and receipt instruments have print previews (cheque, DD advice, deposit slip). They are not bank-issued formats or validated receipts, alignment is printer-dependent, and contra instruments have no separate advice. |
-| KL-40 | Register scope | Cheque / DD register covers post-dated, due, cleared, stopped and cancelled instruments. No separate issued-cheque-book, party-wise cheque or bank-wise instrument register. |
+| KL-40 | Register scope | Cheque / DD register covers post-dated, due, cleared, stopped and cancelled instruments and can be filtered by bank or party text. There is no separate issued-cheque-book, instrument history or fixed party ledger picker. |
 
 ## Inventory and manufacturing
 

@@ -2893,10 +2893,32 @@ export function validateVoucherInput(company, type, input, options = {}) {
   };
 }
 
+function orderLinkFor(company, type, orderId) {
+  if (!orderId) return { ok: true, order: null };
+  const order = (company.orders ?? []).find((entry) => entry.id === orderId);
+  if (!order) return { ok: false, error: 'The linked order no longer exists.' };
+  const label = `${order.type === 'Sales' ? 'SO' : 'PO'}-${order.no}`;
+  if (order.type !== type) {
+    return {
+      ok: false,
+      error: `${label} is a ${order.type.toLowerCase()} order and cannot be linked to a ${type.toLowerCase()} voucher.`,
+    };
+  }
+  if ((company.vouchers ?? []).some((voucher) => voucher.orderId === orderId)) {
+    return { ok: false, error: `${label} is already linked to another voucher.` };
+  }
+  if (order.status !== 'Open') {
+    return { ok: false, error: `${label} is ${order.status.toLowerCase()}; only an open order can be linked.` };
+  }
+  return { ok: true, order };
+}
+
 export function addVoucher(company, input) {
   const type = input.type;
   const checked = validateVoucherInput(company, type, input);
   if (!checked.ok) return checked;
+  const orderLink = orderLinkFor(company, type, input.orderId);
+  if (!orderLink.ok) return orderLink;
 
   company.counters = company.counters ?? {};
   const pending = Boolean(input.pending);
@@ -2923,6 +2945,7 @@ export function addVoucher(company, input) {
   if (checked.instrument) voucher.instrument = checked.instrument;
   if (checked.gst) voucher.gst = checked.gst;
   if (checked.tds) voucher.tds = checked.tds;
+  if (orderLink.order) voucher.orderId = orderLink.order.id;
   if (pending) {
     const submittedBy = input.submittedBy && typeof input.submittedBy === 'object'
       ? {
@@ -2941,6 +2964,7 @@ export function addVoucher(company, input) {
   if (input.submittedBy) voucher.submittedBy = input.submittedBy;
   if (input.approval) voucher.approval = input.approval;
   company.vouchers.push(voucher);
+  if (orderLink.order) orderLink.order.status = 'Closed';
   return { ok: true, voucher };
 }
 
@@ -3091,6 +3115,15 @@ export function updateVoucher(company, voucherId, input) {
   const type = VOUCHER_TYPES[input.type] ? input.type : voucher.type;
   const checked = validateVoucherInput(company, type, input, { excludeVoucherId: voucherId });
   if (!checked.ok) return checked;
+  if (voucher.orderId) {
+    const linkedOrder = (company.orders ?? []).find((order) => order.id === voucher.orderId);
+    if (linkedOrder && linkedOrder.type !== type) {
+      return {
+        ok: false,
+        error: `This voucher is linked to ${linkedOrder.type === 'Sales' ? 'SO' : 'PO'}-${linkedOrder.no}; change the voucher type back or remove the link in the order first.`,
+      };
+    }
+  }
 
   const settled = allocationsAgainst(company, voucherId);
   if (settled.size > 0) {
@@ -3167,6 +3200,10 @@ export function deleteVoucher(company, voucherId) {
   const before = company.vouchers.length;
   company.vouchers = company.vouchers.filter((voucher) => voucher.id !== voucherId);
   pruneBankReconciliations(company);
+  if (company.vouchers.length !== before && existing?.orderId) {
+    const order = (company.orders ?? []).find((entry) => entry.id === existing.orderId);
+    if (order && order.status === 'Closed') order.status = 'Open';
+  }
   return company.vouchers.length !== before;
 }
 
@@ -3256,6 +3293,31 @@ export function deleteStockGroup(company, groupId) {
   return { ok: true, group };
 }
 
+function normaliseOpeningBatches(raw) {
+  if (raw === undefined || raw === null) return { ok: true, batches: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: 'Opening batches must be a list.' };
+  if (raw.length > 200) return { ok: false, error: 'A stock item can have at most 200 opening batches.' };
+  const batches = [];
+  const seen = new Set();
+  for (const entry of raw) {
+    const batchNo = String(entry?.batchNo ?? '').trim().slice(0, 30);
+    if (!batchNo) return { ok: false, error: 'Every opening batch needs a batch name.' };
+    const key = batchNo.toLowerCase();
+    if (seen.has(key)) return { ok: false, error: `Opening batch "${batchNo}" is repeated.` };
+    const qty = parseQty(entry?.qty);
+    if (qty === null || qty <= 0) {
+      return { ok: false, error: `Opening batch "${batchNo}" needs a quantity greater than zero.` };
+    }
+    const expiryDate = String(entry?.expiryDate ?? '').trim();
+    if (expiryDate && !isValidIsoDate(expiryDate)) {
+      return { ok: false, error: `Opening batch "${batchNo}" has an invalid expiry date.` };
+    }
+    seen.add(key);
+    batches.push({ batchNo, qty: round3(qty), ...(expiryDate ? { expiryDate } : {}) });
+  }
+  return { ok: true, batches };
+}
+
 function validateStockItemInput(company, input, ignoreId) {
   const name = String(input.name ?? '').trim();
   if (!name) return { ok: false, error: 'Stock item name is required.' };
@@ -3268,9 +3330,23 @@ function validateStockItemInput(company, input, ignoreId) {
   if (!group) return { ok: false, error: 'Choose a stock group for the item.' };
   const unit = (company.units ?? []).find((item) => item.id === input.unitId);
   if (!unit) return { ok: false, error: 'Choose a unit for the item.' };
-  const openingQty = parseQty(input.openingQty ?? 0);
+  const batches = normaliseOpeningBatches(input.openingBatches);
+  if (!batches.ok) return batches;
+  const batchTracking = Boolean(input.batchTracking) || batches.batches.length > 0;
+  let openingQty = parseQty(input.openingQty ?? 0);
   if (openingQty === null || openingQty < 0) {
     return { ok: false, error: 'Opening quantity must be zero or more.' };
+  }
+  if (batches.batches.length) {
+    const batchQty = round3(batches.batches.reduce((sum, batch) => sum + batch.qty, 0));
+    const supplied = input.openingQty !== undefined && input.openingQty !== '';
+    if (supplied && Math.abs(openingQty - batchQty) >= 0.0005) {
+      return {
+        ok: false,
+        error: `Opening quantity ${openingQty} does not match the ${batchQty} in its batches.`,
+      };
+    }
+    openingQty = batchQty;
   }
   const openingRate = parseAmount(input.openingRate ?? 0);
   if (openingRate === null || openingRate < 0) {
@@ -3288,7 +3364,8 @@ function validateStockItemInput(company, input, ignoreId) {
     openingQty,
     openingRate,
     hsn,
-    batchTracking: Boolean(input.batchTracking),
+    batchTracking,
+    openingBatches: batches.batches,
   };
 }
 
@@ -3303,6 +3380,7 @@ export function addStockItem(company, input) {
     openingQty: checked.openingQty,
     openingRate: checked.openingRate,
     batchTracking: checked.batchTracking,
+    ...(checked.openingBatches.length ? { openingBatches: checked.openingBatches } : {}),
     ...(checked.hsn ? { hsn: checked.hsn } : {}),
     createdAt: new Date().toISOString(),
   };
@@ -3313,6 +3391,14 @@ export function addStockItem(company, input) {
 export function updateStockItem(company, itemId, input) {
   const item = (company.stockItems ?? []).find((entry) => entry.id === itemId);
   if (!item) return { ok: false, error: 'Stock item not found.' };
+  let requestedBatches = input.openingBatches;
+  if (requestedBatches === undefined && item.openingBatches?.length) {
+    const nextQty = parseQty(input.openingQty ?? item.openingQty);
+    const batchQty = round3(
+      item.openingBatches.reduce((sum, batch) => sum + (Number(batch.qty) || 0), 0),
+    );
+    if (nextQty === null || Math.abs(batchQty - nextQty) >= 0.0005) requestedBatches = [];
+  }
   const checked = validateStockItemInput(company, {
     name: input.name ?? item.name,
     stockGroupId: input.stockGroupId ?? item.stockGroupId,
@@ -3321,6 +3407,7 @@ export function updateStockItem(company, itemId, input) {
     openingRate: input.openingRate ?? item.openingRate,
     hsn: input.hsn ?? item.hsn,
     batchTracking: input.batchTracking ?? item.batchTracking,
+    openingBatches: requestedBatches ?? item.openingBatches,
   }, itemId);
   if (!checked.ok) return checked;
   item.name = checked.name;
@@ -3329,6 +3416,8 @@ export function updateStockItem(company, itemId, input) {
   item.openingQty = checked.openingQty;
   item.openingRate = checked.openingRate;
   item.batchTracking = checked.batchTracking;
+  if (checked.openingBatches.length) item.openingBatches = checked.openingBatches;
+  else delete item.openingBatches;
   if (checked.hsn) item.hsn = checked.hsn;
   else delete item.hsn;
   return { ok: true, item };
@@ -3347,9 +3436,17 @@ export function stockOnHand(company, itemId, asOn, options = {}) {
   const mainGodown = defaultGodownId(company);
   const godownFilter = options.godownId || '';
   const batchFilter = options.batchNo ?? null;
-  let qty = round3(item.openingQty ?? 0);
-  if (godownFilter && godownFilter !== mainGodown) qty = 0;
-  if (batchFilter !== null && batchFilter !== OPENING_BATCH) qty = 0;
+  const openingInGodown = !godownFilter || godownFilter === mainGodown;
+  const openingBatches = item.openingBatches ?? [];
+  let qty = openingInGodown ? round3(item.openingQty ?? 0) : 0;
+  if (batchFilter !== null) {
+    if (openingBatches.length) {
+      const batch = openingBatches.find((entry) => entry.batchNo === batchFilter);
+      qty = openingInGodown && batch ? round3(batch.qty) : 0;
+    } else if (batchFilter !== OPENING_BATCH) {
+      qty = 0;
+    }
+  }
   const vouchers = company.vouchers
     .filter((voucher) => voucher.date <= asOn && voucher.id !== options.excludeVoucherId)
     .sort((a, b) => a.date.localeCompare(b.date) || (Number(a.no) || 0) - (Number(b.no) || 0));
@@ -3575,6 +3672,12 @@ export function setOrderStatus(company, orderId, status) {
 export function deleteOrder(company, orderId) {
   const order = (company.orders ?? []).find((entry) => entry.id === orderId);
   if (!order) return { ok: false, error: 'Order not found.' };
+  const linked = [...(company.vouchers ?? []), ...(company.pendingVouchers ?? [])].some(
+    (voucher) => voucher.orderId === orderId,
+  );
+  if (linked) {
+    return { ok: false, error: 'This order is linked to a voucher. Delete that voucher before deleting the order.' };
+  }
   company.orders = (company.orders ?? []).filter((entry) => entry.id !== orderId);
   return { ok: true, order };
 }
@@ -4394,6 +4497,37 @@ function validateImportedCompany(company) {
     }
     if (parseAmount(item.openingRate ?? 0) === null || parseAmount(item.openingRate ?? 0) < 0) {
       return `Company "${name}": stock item "${item.name}" has an invalid opening rate.`;
+    }
+    if (item.openingBatches !== undefined) {
+      if (!Array.isArray(item.openingBatches)) {
+        return `Company "${name}": stock item "${item.name}" has invalid opening batches.`;
+      }
+      if (item.openingBatches.length && !item.batchTracking) {
+        return `Company "${name}": stock item "${item.name}" has opening batches but does not track batches.`;
+      }
+      const names = new Set();
+      let total = 0;
+      for (const batch of item.openingBatches) {
+        const batchNo = String(batch?.batchNo ?? '').trim();
+        const qty = parseQty(batch?.qty);
+        if (!batchNo || qty === null || qty <= 0) {
+          return `Company "${name}": stock item "${item.name}" has an invalid opening batch.`;
+        }
+        if (names.has(batchNo.toLowerCase())) {
+          return `Company "${name}": stock item "${item.name}" repeats opening batch "${batchNo}".`;
+        }
+        if (batch.expiryDate && !isValidIsoDate(batch.expiryDate)) {
+          return `Company "${name}": stock item "${item.name}" has an invalid opening batch expiry.`;
+        }
+        names.add(batchNo.toLowerCase());
+        total += qty;
+      }
+      if (
+        item.openingBatches.length &&
+        Math.abs(round3(total) - (parseQty(item.openingQty ?? 0) ?? 0)) >= 0.0005
+      ) {
+        return `Company "${name}": stock item "${item.name}" opening batches do not add up to its opening quantity.`;
+      }
     }
     if (item.hsn !== undefined && !/^[0-9A-Z]{4,8}$/.test(String(item.hsn))) {
       return `Company "${name}": stock item "${item.name}" has an invalid HSN/SAC.`;

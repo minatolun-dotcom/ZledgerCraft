@@ -20,6 +20,7 @@ import {
   deleteStockItem,
   deleteStockTransfer,
   deleteUnit,
+  deleteVoucher,
   defaultGodownId,
   exportState,
   findLedgerByName,
@@ -557,7 +558,38 @@ test('batch-tracked items require batches and report batch balances', () => {
   assert.equal(lot.expiryDate, '2027-03-31');
   assert.equal(opening.closingQty, 5);
   assert.equal(batches.totals.closingQty, 6);
-});test('orders record sales and purchase commitments without moving stock', () => {
+});test('opening batches split opening stock and survive an opening quantity edit', () => {
+  const company = createCompany('Opening Batch Co', '2026-04-01').company;
+  const unit = company.units.find((entry) => entry.symbol === 'Nos');
+  const item = addStockItem(company, {
+    name: 'Capsule Box',
+    stockGroupId: company.stockGroups[0].id,
+    unitId: unit.id,
+    openingRate: 20,
+    batchTracking: true,
+    openingBatches: [
+      { batchNo: 'LOT-A', qty: 3, expiryDate: '2027-01-31' },
+      { batchNo: 'LOT-B', qty: 2 },
+    ],
+  }).item;
+  assert.equal(item.openingQty, 5, 'opening quantity comes from the batches');
+  assert.equal(stockOnHand(company, item.id, '2026-04-01', { batchNo: 'LOT-A' }), 3);
+  assert.equal(stockOnHand(company, item.id, '2026-04-01', { batchNo: 'LOT-B' }), 2);
+  assert.equal(stockOnHand(company, item.id, '2026-04-01', { batchNo: 'Other' }), 0);
+
+  const rows = batchStockSummary(company).rows;
+  assert.equal(rows.find((row) => row.batchNo === 'LOT-A').expiryDate, '2027-01-31');
+  assert.equal(rows.find((row) => row.batchNo === 'LOT-B').closingQty, 2);
+
+  assert.equal(updateStockItem(company, item.id, { openingQty: 8 }).ok, true);
+  assert.equal(item.openingBatches, undefined, 'an edited total falls back to the Opening batch');
+  const after = batchStockSummary(company).rows;
+  assert.equal(after.length, 1);
+  assert.equal(after[0].batchNo, 'Opening');
+  assert.equal(after[0].openingQty, 8);
+});
+
+test('orders record sales and purchase commitments without moving stock', () => {
   const { company, item, cash } = inventoryFixture();
   const customer = addLedger(company, {
     name: 'Order Customer',
@@ -625,6 +657,79 @@ test('batch-tracked items require batches and report batch balances', () => {
   assert.equal(purchase.ok, true, purchase.error);
   assert.equal(purchase.order.no, 1, 'purchase orders have their own sequence');
   assert.equal(deleteOrder(company, purchase.order.id).ok, true);
+});
+
+test('a voucher created from an order links it, closes it and reopens it on delete', () => {
+  const { company, item } = inventoryFixture();
+  const customer = addLedger(company, {
+    name: 'Linked Customer',
+    groupId: company.groups.find((group) => group.key === 'sundryDebtors').id,
+    opening: 0,
+  }).ledger;
+  const sales = findLedgerByName(company, 'Sales');
+  const order = addOrder(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    partyLedgerId: customer.id,
+    stockItemId: item.id,
+    qty: 3,
+    rate: 150,
+  }).order;
+
+  const voucher = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    orderId: order.id,
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 450 },
+      { ledgerId: sales.id, side: 'Cr', amount: 450 },
+    ],
+    items: [{ stockItemId: item.id, qty: 3, rate: 150 }],
+  });
+  assert.equal(voucher.ok, true, voucher.error);
+  assert.equal(voucher.voucher.orderId, order.id);
+  assert.equal(order.status, 'Closed');
+
+  const again = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-06',
+    orderId: order.id,
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 150 },
+      { ledgerId: sales.id, side: 'Cr', amount: 150 },
+    ],
+  });
+  assert.equal(again.ok, false);
+  assert.match(again.error, /already linked|only an open order/);
+
+  const wrongType = addOrder(company, {
+    type: 'Purchase',
+    date: '2026-04-06',
+    partyLedgerId: addLedger(company, {
+      name: 'Linked Supplier',
+      groupId: company.groups.find((group) => group.key === 'sundryCreditors').id,
+      opening: 0,
+    }).ledger.id,
+    stockItemId: item.id,
+    qty: 1,
+    rate: 100,
+  }).order;
+  const mismatch = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-06',
+    orderId: wrongType.id,
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 100 },
+      { ledgerId: sales.id, side: 'Cr', amount: 100 },
+    ],
+  });
+  assert.equal(mismatch.ok, false);
+  assert.match(mismatch.error, /purchase order/);
+
+  assert.equal(deleteOrder(company, order.id).ok, false, 'a linked order is protected');
+  assert.equal(deleteVoucher(company, voucher.voucher.id), true);
+  assert.equal(order.status, 'Open', 'deleting the voucher reopens the order');
+  assert.equal(deleteOrder(company, order.id).ok, true);
 });
 
 test('orders survive a backup round trip and keep their sequences', () => {

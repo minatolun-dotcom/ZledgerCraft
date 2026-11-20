@@ -1224,6 +1224,7 @@ export function prepareDraft(type, source = null) {
     },
     currencyCode: source?.currencyCode ?? 'INR',
     exchangeRate: source?.exchangeRate != null ? String(source.exchangeRate) : '',
+    orderId: null,
     lines: source
       ? source.lines.map((line) => ({
           ...line,
@@ -1316,6 +1317,7 @@ export function orderToVoucher(orderId) {
     return;
   }
   prepareDraft(type);
+  draft.orderId = order.id;
   draft.date = order.date;
   draft.lines = type === 'Sales'
     ? [
@@ -1493,6 +1495,7 @@ export function readVoucherForm() {
   const itemTable = document.getElementById('stock-items');
   return {
     type: draft.type,
+    ...(draft.orderId ? { orderId: draft.orderId } : {}),
     date: form.querySelector('[name="date"]').value,
     narration: form.querySelector('[name="narration"]').value,
     currencyCode: form.querySelector('[name="currencyCode"]')?.value ?? 'INR',
@@ -4123,6 +4126,7 @@ async function handleClick(event) {
         parts.push(`${result.stockGroups} stock group${result.stockGroups === 1 ? '' : 's'}`);
       }
       if (result.stockItems) parts.push(`${result.stockItems} stock item${result.stockItems === 1 ? '' : 's'}`);
+      if (result.batches) parts.push(`${result.batches} opening batch${result.batches === 1 ? '' : 'es'}`);
       if (result.vouchers) parts.push(`${result.vouchers} voucher${result.vouchers === 1 ? '' : 's'}`);
       if (result.stockLines) parts.push(`${result.stockLines} stock line${result.stockLines === 1 ? '' : 's'}`);
       const summary = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] || 'no entries';

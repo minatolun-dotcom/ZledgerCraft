@@ -1243,6 +1243,9 @@ export function voucherNewScreen() {
     : null;
   const editing = pendingEditing || (view.editId ? active.vouchers.find((item) => item.id === view.editId) : null);
   const nextNo = pendingEditing ? 'Pending' : editing ? editing.no : (active.counters[draft.type] ?? 0) + 1;
+  const linkedOrder = draft.orderId
+    ? (active.orders ?? []).find((order) => order.id === draft.orderId)
+    : null;
 
   const rows = draft.lines
     .map(
@@ -1385,6 +1388,9 @@ export function voucherNewScreen() {
         <div>
           <p class="eyebrow">${pendingEditing ? 'Pending approval' : editing ? 'Voucher alteration' : 'Voucher entry'}</p>
           <h1>${pendingEditing ? 'Revise' : editing ? 'Alter' : 'New'} ${esc(meta.label)} voucher <span class="badge">${meta.shortcut}</span></h1>
+          ${linkedOrder
+            ? `<p class="muted small">Against ${linkedOrder.type === 'Sales' ? 'SO' : 'PO'}-${linkedOrder.no}. ${pendingEditing ? 'The order closes when this voucher is approved.' : 'Saving this voucher closes the order.'}</p>`
+            : ''}
         </div>
         <div class="voucher-meta">
           <span class="label">No.</span><strong>${nextNo}</strong>

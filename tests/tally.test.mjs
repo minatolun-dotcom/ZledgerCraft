@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { addStockItem, createCompany, findLedgerByName } from '../src/store.js';
+import { batchStockSummary } from '../src/accounting.js';
 import { importTallyXml, parseTallyXml } from '../src/tally.js';
 
 function tallyFixture() {
@@ -205,6 +206,61 @@ test('Tally stock import rejects unknown units without changing the company', ()
   assert.match(result.error, /Barrels/);
   assert.equal(company.stockGroups.length, beforeGroups);
   assert.equal(company.stockItems.length, beforeItems);
+});
+
+test('Tally batch masters become opening batches with expiry dates', () => {
+  const company = tallyFixture();
+  const xml = `<ENVELOPE><BODY><TALLYMESSAGE>
+    <STOCKGROUP NAME="Tally Pharma"><PARENT>Primary</PARENT></STOCKGROUP>
+    <STOCKITEM NAME="Tally Syrup"><PARENT>Tally Pharma</PARENT><BASEUNITS>Nos</BASEUNITS><OPENINGBALANCE>12</OPENINGBALANCE><OPENINGRATE>80</OPENINGRATE></STOCKITEM>
+    <BATCH NAME="LOT-A"><PARENT>Tally Syrup</PARENT><OPENINGBALANCE>5 Nos</OPENINGBALANCE><OPENINGRATE>80/Nos</OPENINGRATE><EXPIRYDATE>20270430</EXPIRYDATE></BATCH>
+    <BATCH NAME="LOT-B"><PARENT>Tally Syrup</PARENT><OPENINGBALANCE>7 Nos</OPENINGBALANCE><OPENINGRATE>80/Nos</OPENINGRATE></BATCH>
+  </TALLYMESSAGE></BODY></ENVELOPE>`;
+  const parsed = parseTallyXml(xml);
+  assert.equal(parsed.ok, true, parsed.error);
+  assert.equal(parsed.stockItems[0].batches.length, 2);
+
+  const result = importTallyXml(company, xml);
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.batches, 2);
+  const item = company.stockItems.find((entry) => entry.name === 'Tally Syrup');
+  assert.equal(item.batchTracking, true);
+  assert.equal(item.openingQty, 12);
+  assert.equal(item.openingRate, 80);
+  assert.deepEqual(item.openingBatches, [
+    { batchNo: 'LOT-A', qty: 5, expiryDate: '2027-04-30' },
+    { batchNo: 'LOT-B', qty: 7 },
+  ]);
+
+  const rows = batchStockSummary(company).rows.filter((row) => row.itemId === item.id);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find((row) => row.batchNo === 'LOT-A').expiryDate, '2027-04-30');
+  assert.equal(rows.find((row) => row.batchNo === 'LOT-A').openingQty, 5);
+  assert.equal(rows.find((row) => row.batchNo === 'LOT-B').openingQty, 7);
+});
+
+test('Tally batch masters reject an unknown stock item or bad expiry', () => {
+  const company = tallyFixture();
+  const xml = `<ENVELOPE><BODY><TALLYMESSAGE>
+    <STOCKGROUP NAME="Tally Pharma"><PARENT>Primary</PARENT></STOCKGROUP>
+    <STOCKITEM NAME="Tally Syrup"><PARENT>Tally Pharma</PARENT><BASEUNITS>Nos</BASEUNITS><OPENINGBALANCE>5</OPENINGBALANCE><OPENINGRATE>80</OPENINGRATE></STOCKITEM>
+    <BATCH NAME="LOT-A"><PARENT>Missing Item</PARENT><OPENINGBALANCE>5</OPENINGBALANCE></BATCH>
+  </TALLYMESSAGE></BODY></ENVELOPE>`;
+  const missing = importTallyXml(company, xml);
+  assert.equal(missing.ok, false);
+  assert.match(missing.error, /Missing Item/);
+  assert.equal(company.stockItems.length, 0, 'a bad batch writes nothing');
+
+  const badExpiry = importTallyXml(
+    company,
+    xml.replace('<PARENT>Missing Item</PARENT>', '<PARENT>Tally Syrup</PARENT>').replace(
+      '<OPENINGBALANCE>5</OPENINGBALANCE></BATCH>',
+      '<OPENINGBALANCE>5</OPENINGBALANCE><EXPIRYDATE>2026-02-30</EXPIRYDATE></BATCH>',
+    ),
+  );
+  assert.equal(badExpiry.ok, false);
+  assert.match(badExpiry.error, /invalid expiry date/);
+  assert.equal(company.stockItems.length, 0);
 });
 
 test('Tally XML attaches a stock line to a sales voucher', () => {

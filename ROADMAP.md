@@ -286,7 +286,7 @@ Status: **Done**, **Partial**, **Missing**.
 | Backend database instead of browser storage | Partial — local SQLite with a dedicated table for every top-level company collection, atomic revisioned saves and automatic legacy migration; no offsite persistence |
 | Multi-user concurrency and cloud sync | Partial — LAN auth, revision checks, conservative merge (including scoped accounts), normalized collection rows and enforced voucher edit leases are done; no field-level conflict history or cloud sync |
 | Scheduled/offsite backups and retention | Partial — verified daily backups, retention, manual backup/download/restore, pre-restore snapshots, R2 upload, remote listing/download/restore and failure email are done; no client-side backup encryption |
-| Tally XML and Excel master/voucher import | Partial — Tally XML account groups, ledgers, stock groups, stock items with opening stock, balanced vouchers and matching voucher stock lines import; batch names/expiry attach to locally batch-tracked items; Excel `.xlsx` ledgers and vouchers load into the reviewed CSV path; custom Tally groups need a standard parent and units must pre-exist; skipped stock lines do not roll back the voucher; no batch masters, bill allocations, cost centres, GST/TDS detail, voucher numbers, APIs or webhooks |
+| Tally XML and Excel master/voucher import | Partial — Tally XML account groups, ledgers, stock groups, stock items with opening stock, balanced vouchers and matching voucher stock lines import; batch names/expiry attach to locally batch-tracked items and batch masters create opening batches; Excel `.xlsx` ledgers and vouchers load into the reviewed CSV path; custom Tally groups need a standard parent and units must pre-exist; skipped stock lines do not roll back the voucher; no bill allocations, cost centres, GST/TDS detail, voucher numbers, APIs or webhooks |
 | API/webhooks and integrations | Missing |
 | Mobile-first layout | Partial (responsive desktop web) |
 
@@ -335,7 +335,7 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 - [x] Inventory: godowns, batches, BOM/manufacturing, orders, transfers — 2026-11-18 (batch/expiry, transfers, orders and production; no physical count, wastage, job work or WIP posting)
 - [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, normalized collection rows, conservative three-way merge (including scoped accounts), revision-checked writes, conflict/reload flow, enforced voucher edit leases, LAN server authentication and company-level scoping done 2026-11-19; Neon Postgres workspace, Postgres profiles/sessions/login state, shared Postgres login/reset rate limits, Postgres JSON backups with R2 listing/restore, Neon Auth login, same-origin auth proxy, Neon Function deployment, Cloudflare Worker API proxy, branch integration test, production smoke test and field-level merge audit done 2026-11-19
-- [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; read-only token API with company-scoped tokens, shared rate limits and OpenAPI contract added 2026-11-19; Tally batch masters/opening batches, GST/discount stock-line splits, write APIs and webhooks pending
+- [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; read-only token API with company-scoped tokens, shared rate limits and OpenAPI contract added 2026-11-19; GST/discount stock-line splits, write APIs and webhooks pending
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
@@ -343,6 +343,35 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
+
+### 2026-11-20 — Phase 22: order-to-voucher linking
+
+- A voucher created from an order now stores `orderId`, closes the order when
+  the voucher is accepted and reopens it if that voucher is deleted.
+- The link is validated before writing: the order must exist, be open, match the
+  voucher type and not already be linked. A pending-approval voucher keeps the
+  order open until it is approved.
+- A linked order cannot be deleted; delete its voucher first. Changing a linked
+  voucher to the other type is rejected.
+- The voucher form shows the order it came from, and the order register already
+  hides Create voucher once an order is closed.
+- Verification: link/close/reopen, duplicate link, type mismatch and delete
+  guard tests; 262 tests (261 pass, 1 skipped) and an 893.0 kB build pass.
+
+### 2026-11-20 — Phase 21: Tally batch masters and opening batches
+
+- Tally `<BATCH>` masters import with their stock item, opening quantity,
+  opening rate and expiry date. Each imported item is marked batch-tracked and
+  its opening stock is split into those batches instead of one `Opening` row.
+- Added `openingBatches` to stock items. Opening stock remains one total;
+  batch splits must add up to it, and `stockOnHand`/batch balances read the
+  split by batch. Editing an item's opening quantity drops a stale split back to
+  the `Opening` batch rather than leaving mismatched quantities.
+- Import validation rejects unknown stock-item parents, duplicate batch names,
+  non-positive quantities and invalid expiry dates before writing anything.
+- Verification: batch master import, expiry, per-batch balances, all-or-nothing
+  rejection and opening-quantity edit tests; 261 tests (260 pass, 1 skipped) and
+  a 890.6 kB build pass.
 
 ### 2026-11-20 — Phase 20: multi-line stock transfers
 

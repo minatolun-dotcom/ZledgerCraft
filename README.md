@@ -407,8 +407,9 @@ disabled.
   report with running balances.
 - Sales and purchase orders with party, delivery date, item, godown, batch,
   quantity, rate, status (Open/Closed/Cancelled), filters and a Create voucher
-  action that prefills the matching invoice. Orders do not post to the ledger or
-  move stock.
+  action that prefills the matching invoice, links it to the order and closes
+  it. Deleting that voucher reopens the order. Orders do not post to the ledger
+  or move stock.
 - BOM recipes with a finished item, output quantity and up to twenty component
   items. Production consumes components in proportion to the output quantity
   from a chosen godown and brings finished goods into a chosen godown, with an
@@ -590,10 +591,10 @@ disabled.
   custom top-level groups and units must already exist, and stock groups are
   created automatically. Stock lines attach when the item and godown exist and
   their total matches the voucher; batch names and expiry attach when the local
-  item is batch-tracked. Otherwise the accounting voucher imports and skipped
-  stock lines are reported. Batch masters/opening batches, bill allocations,
-  cost centres, GST/TDS detail, original voucher numbers and APIs are not
-  imported. Cost-centre allocations, cheque/DD details, currency masters/rates
+  item is batch-tracked, and Tally batch masters create opening batches with
+  their quantities and expiry dates. Otherwise the accounting voucher imports
+  and skipped stock lines are reported. Bill allocations, cost centres,
+  GST/TDS detail, original voucher numbers and APIs are not imported. Cost-centre allocations, cheque/DD details, currency masters/rates
   and bank matches are also outside CSV and Excel import.
 - A daily automatic snapshot is taken after the first voucher of the day, and
   the last ten manual, daily and pre-restore snapshots are kept in the browser.
@@ -658,7 +659,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | Multiple financial years per company, year-end closing and carry-forward | Covered — year selector, close/reopen and automatic next year; no closing journal is written because balances are cumulative |
 | Bill-wise entry and allocation | Covered — bill refs, due dates, explicit/FIFO settlements, ageing, bill-wise register and party statement with bill detail; no bill-wise opening allocation or bill interest |
 | User roles, TallyVault, edit log, cloud sync | Partial — local profiles plus password-backed LAN accounts or Neon Auth, owner/accountant/viewer roles, company-level server scoping, TOTP MFA in SQLite mode, hash-chained server audit, append-only app audit, SQLite or Neon Postgres workspace with conservative and scoped merge; Neon Auth mode has no MFA and uses Postgres profiles/sessions; no vault encryption |
-| Tally XML and Excel import | Partial — Tally XML account groups, ledgers, stock groups, stock items with opening stock, balanced vouchers and matching voucher stock lines import; batch names/expiry attach to locally batch-tracked items; Excel `.xlsx` ledgers and vouchers load into the reviewed CSV path; custom Tally groups need a standard parent and units must pre-exist; skipped stock lines do not roll back the voucher; no batch masters, bill allocations, cost centres, GST/TDS detail, voucher numbers, APIs or webhooks |
+| Tally XML and Excel import | Partial — Tally XML account groups, ledgers, stock groups, stock items with opening stock, balanced vouchers and matching voucher stock lines import; batch names/expiry attach to locally batch-tracked items and batch masters create opening batches; Excel `.xlsx` ledgers and vouchers load into the reviewed CSV path; custom Tally groups need a standard parent and units must pre-exist; skipped stock lines do not roll back the voucher; no bill allocations, cost centres, GST/TDS detail, voucher numbers, APIs or webhooks |
 | Custom printing layouts | Print view plus CSV and Excel export; no layout designer |
 
 Semantic notes: sub-period P&L excludes ledger opening balances (they belong to

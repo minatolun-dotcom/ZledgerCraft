@@ -12,6 +12,7 @@ import {
   parseAmount,
   parseQty,
   round2,
+  round3,
 } from './store.js';
 
 const MAX_TALLY_CHARS = 20 * 1024 * 1024;
@@ -216,7 +217,65 @@ export function parseTallyXml(xml) {
       openingQty,
       openingRate,
       hsn: tagText(body, 'HSNCODE') || tagText(body, 'HSN'),
+      batches: [],
     });
+  }
+
+  const batchMasters = [];
+  for (const match of text.matchAll(/<BATCH\b([^>]*)>([\s\S]*?)<\/BATCH\s*>/gi)) {
+    const body = match[2];
+    const name = attrValue(match[1], 'NAME') || tagText(body, 'NAME');
+    if (!name) return { ok: false, error: 'A Tally batch is missing its NAME attribute.' };
+    const parent = tagText(body, 'PARENT');
+    if (!parent) {
+      return { ok: false, error: `Tally batch "${name}" is missing its stock item PARENT.` };
+    }
+    const openingRaw = tagText(body, 'OPENINGBALANCE');
+    const qty = openingRaw ? tallyNumber(openingRaw, parseQty) : 0;
+    if (qty === null || qty < 0) {
+      return { ok: false, error: `Tally batch "${name}" has an invalid opening quantity.` };
+    }
+    const rateRaw = tagText(body, 'OPENINGRATE');
+    const rate = rateRaw ? tallyNumber(rateRaw, parseAmount) : null;
+    if (rate !== null && rate < 0) {
+      return { ok: false, error: `Tally batch "${name}" has an invalid opening rate.` };
+    }
+    const expiryRaw = tagText(body, 'EXPIRYDATE');
+    const expiryDate = expiryRaw ? isoFromTallyDate(expiryRaw) : '';
+    if (expiryRaw && !expiryDate) {
+      return { ok: false, error: `Tally batch "${name}" has an invalid expiry date.` };
+    }
+    batchMasters.push({ name, parent, qty: qty ?? 0, rate, expiryDate });
+  }
+
+  for (const master of batchMasters) {
+    const item = stockItems.find(
+      (entry) => entry.name.trim().toLowerCase() === master.parent.trim().toLowerCase(),
+    );
+    if (!item) {
+      return {
+        ok: false,
+        error: `Tally batch "${master.name}" uses stock item "${master.parent}", which is not in the import.`,
+      };
+    }
+    if (!master.qty) continue;
+    if (item.batches.some((batch) => batch.batchNo.toLowerCase() === master.name.toLowerCase())) {
+      return { ok: false, error: `Tally stock item "${item.name}" repeats batch "${master.name}".` };
+    }
+    item.batches.push({
+      batchNo: master.name,
+      qty: master.qty,
+      ...(master.expiryDate ? { expiryDate: master.expiryDate } : {}),
+      ...(master.rate !== null ? { rate: master.rate } : {}),
+    });
+  }
+  for (const item of stockItems) {
+    if (!item.batches.length) continue;
+    const batchQty = item.batches.reduce((sum, batch) => sum + batch.qty, 0);
+    const batchValue = item.batches.reduce((sum, batch) => sum + batch.qty * (batch.rate ?? 0), 0);
+    item.openingQty = round3(batchQty);
+    if (!item.openingRate && batchValue > 0) item.openingRate = round2(batchValue / batchQty);
+    item.batches = item.batches.map(({ rate, ...batch }) => batch);
   }
 
   const ledgers = [];
@@ -442,6 +501,7 @@ export function importTallyXml(company, xml) {
       openingQty: item.openingQty,
       openingRate: item.openingRate,
       hsn: item.hsn,
+      ...(item.batches?.length ? { batchTracking: true, openingBatches: item.batches } : {}),
     });
     if (!result.ok) return { ok: false, error: `Tally stock item "${item.name}": ${result.error}` };
     stockItemPayloads.push(item);
@@ -555,6 +615,7 @@ export function importTallyXml(company, xml) {
       openingQty: item.openingQty,
       openingRate: item.openingRate,
       hsn: item.hsn,
+      ...(item.batches?.length ? { batchTracking: true, openingBatches: item.batches } : {}),
     });
     if (!result.ok) return { ok: false, error: result.error };
   }
@@ -588,6 +649,7 @@ export function importTallyXml(company, xml) {
     vouchers: voucherPayloads.length,
     stockGroups: stockGroupNames.length,
     stockItems: stockItemPayloads.length,
+    batches: stockItemPayloads.reduce((sum, item) => sum + (item.batches?.length ?? 0), 0),
     stockLines,
     stockLinesSkipped,
     stockWarning: stockWarnings[0] ?? '',

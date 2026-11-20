@@ -1857,7 +1857,17 @@ export function batchStockSummary(company, filters = {}) {
     const inward = new Map();
     const outward = new Map();
     const expiry = new Map();
-    if ((item.openingQty ?? 0) > 0) opening.set(OPENING_BATCH, round3(item.openingQty));
+    const openingBatches = (item.openingBatches ?? []).filter(
+      (batch) => String(batch.batchNo ?? '').trim() && Number(batch.qty) > 0,
+    );
+    if (openingBatches.length) {
+      for (const batch of openingBatches) {
+        opening.set(batch.batchNo, round3(batch.qty));
+        if (batch.expiryDate) expiry.set(batch.batchNo, batch.expiryDate);
+      }
+    } else if ((item.openingQty ?? 0) > 0) {
+      opening.set(OPENING_BATCH, round3(item.openingQty));
+    }
     const keyFor = (batchNo) => batchNo || OPENING_BATCH;
 
     for (const event of events) {

@@ -1675,13 +1675,15 @@ export function voucherViewScreen() {
       <div class="form-actions">
         <button class="btn ghost" type="button" data-screen="daybook">Back to Day Book</button>
         <button class="btn" type="button" data-action="alter-voucher" data-id="${esc(voucher.id)}">Alter voucher</button>
-        ${['Payment', 'Receipt'].includes(voucher.type) && ['Cheque', 'DD'].includes(voucher.instrument?.kind)
+        ${['Payment', 'Receipt', 'Contra'].includes(voucher.type) && ['Cheque', 'DD'].includes(voucher.instrument?.kind)
           ? `<button class="btn" type="button" data-action="print-cheque" data-id="${esc(voucher.id)}">${
               voucher.type === 'Receipt'
                 ? 'Print deposit slip'
-                : voucher.instrument.kind === 'DD'
-                  ? 'Print DD advice'
-                  : 'Print cheque'
+                : voucher.type === 'Contra'
+                  ? 'Print contra advice'
+                  : voucher.instrument.kind === 'DD'
+                    ? 'Print DD advice'
+                    : 'Print cheque'
             }</button>`
           : ''}
         <button class="btn" type="button" data-action="duplicate-voucher" data-id="${esc(voucher.id)}">Duplicate</button>

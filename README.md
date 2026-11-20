@@ -508,7 +508,8 @@ disabled.
   shown in the row.
 - Instrument preview and print: cheque payments show bank, cheque number, date,
   payee, Indian-numbering amount in words, figures and A/c Payee crossing; DD
-  payments get a DD advice and receipt instruments a deposit slip.
+  payments get a DD advice, receipt instruments a deposit slip and contra
+  instruments a deposit-or-withdrawal advice.
 - Cost centre summary by category and centre, with debit/credit/net, voucher
   counts, period filter, a category P&L for tagged income and expense, an
   unallocated-line reconciliation and click-through to a cost-centre break-up
@@ -760,7 +761,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
 | Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit and paid-days proration, casual/sick/earned leave balances and a leave register, bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV; no automatic leave-to-paid-days link, overtime, arrears, formula or percentage pay heads, employer PF/ESI contributions, state PT slabs, ECR/returns, Form 24Q/16 or bank payment workflow |
 | Bank reconciliation and statement import | Covered — CSV, OFX, QIF and MT940 statement import, optional opening/closing balance validation, auto/manual matching, adjustment posting and book balance; no Excel or live bank feeds |
-| Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque/DD advice and receipt deposit-slip previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no magnetic-ink cheque stationery presets or bank-issued advice formats |
+| Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque/DD advice, receipt deposit-slip and contra advice previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no magnetic-ink cheque stationery presets or bank-issued advice formats |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary, break-up and an unallocated-line reconciliation; no merging categories or split allocations |
 | Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance, over-budget status and a short amount history; no phased revision workflow, approval or cost-centre budgets |
 | Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting, a postable unrealised forex revaluation and postable simple overdue interest; no realised gain/loss posting, foreign inventory/bill allocations, interest compounding or reminders that post charges |

@@ -305,26 +305,49 @@ export function chequePrintScreen() {
   ) {
     return panel(
       'Instrument print',
-      `<p class="muted">Printing is available for payment vouchers with cheque or DD details and receipt vouchers with instrument details.</p>
+      `<p class="muted">Printing is available for payment, receipt and contra vouchers with cheque or DD details.</p>
        <button class="btn" type="button" data-screen="gateway">Back to Gateway</button>`,
     );
   }
   const instrument = voucher.instrument;
   const bank = active.ledgers.find((ledger) => ledger.id === instrument.bankLedgerId);
   const isPayment = voucher.type === 'Payment';
+  const isContra = voucher.type === 'Contra';
+  const bankLine = voucher.lines.find((line) => line.ledgerId === instrument.bankLedgerId);
   const party =
     voucher.lines
-      .filter((line) => line.side === (isPayment ? 'Dr' : 'Cr') && line.ledgerId !== instrument.bankLedgerId)
+      .filter(
+        (line) =>
+          line.ledgerId !== instrument.bankLedgerId &&
+          (isContra || line.side === (isPayment ? 'Dr' : 'Cr')),
+      )
       .map((line) => active.ledgers.find((ledger) => ledger.id === line.ledgerId)?.name)
       .filter(Boolean)
       .join(' / ') || '—';
   const date = instrument.date;
   const bankName = esc(bank?.name ?? 'Bank');
   const kindLabel = instrument.kind === 'DD' ? 'Demand Draft' : 'Cheque';
-  const printLabel = !isPayment ? 'Print deposit slip' : instrument.kind === 'DD' ? 'Print DD advice' : 'Print cheque';
+  const printLabel = isContra
+    ? 'Print contra advice'
+    : !isPayment
+      ? 'Print deposit slip'
+      : instrument.kind === 'DD'
+        ? 'Print DD advice'
+        : 'Print cheque';
 
   let preview;
-  if (isPayment && instrument.kind === 'Cheque') {
+  if (isContra) {
+    const deposit = bankLine?.side === 'Dr';
+    preview = `<div class="cheque-sheet">
+        <div class="cheque-head"><strong>${bankName}</strong><span class="cheque-number">Contra advice</span></div>
+        <div class="cheque-date">Date <strong>${esc(dateLabel(date))}</strong></div>
+        <div class="cheque-payee">${deposit ? 'Deposit to' : 'Withdrawal from'} <strong>${bankName}</strong> ${deposit ? 'from' : 'to'} <strong>${esc(party)}</strong></div>
+        <div class="cheque-payee">Instrument <strong>${esc(instrument.kind)} ${esc(instrument.number)}</strong></div>
+        <div class="cheque-words">${esc(amountInWords(voucher.total))}</div>
+        <div class="cheque-footer"><span class="cheque-amount">${money(voucher.total)}</span><span class="cheque-sign">Authorised signatory</span></div>
+        <div class="cheque-cross">${esc(voucherLabel(voucher.type))} ${voucher.no}</div>
+      </div>`;
+  } else if (isPayment && instrument.kind === 'Cheque') {
     preview = `<div class="cheque-sheet">
         <div class="cheque-head"><strong>${bankName}</strong><span class="cheque-number">Cheque ${esc(instrument.number)}</span></div>
         <div class="cheque-date">Date <strong>${esc(dateLabel(date))}</strong></div>
@@ -355,13 +378,13 @@ export function chequePrintScreen() {
   }
 
   return panel(
-    `${isPayment ? kindLabel : 'Deposit slip'} print · ${esc(instrument.number)}`,
+    `${isContra ? 'Contra advice' : isPayment ? kindLabel : 'Deposit slip'} print · ${esc(instrument.number)}`,
     `<div class="cheque-preview">${preview}</div>
     <div class="form-actions">
       <button class="btn primary" type="button" data-action="print-report">${printLabel}</button>
       <button class="btn ghost" type="button" data-action="open-voucher" data-id="${esc(voucher.id)}">Back to voucher</button>
     </div>`,
-    'Preview only. Use your browser print dialog; alignment depends on the printer and stationery. It is not a bank-issued advice or a validated deposit receipt.',
+    'Preview only. Use your browser print dialog; alignment depends on the printer and stationery. It is not a bank-issued advice or a validated receipt.',
   );
 }
 

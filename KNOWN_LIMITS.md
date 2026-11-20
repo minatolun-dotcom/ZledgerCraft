@@ -47,7 +47,7 @@ README. When a new limit is introduced, add it here in the same change.
 | KL-16 | Import is all-or-nothing | One invalid row rejects the whole file; there is no partial import wizard, mapping UI or dry-run report beyond the error. |
 | KL-17 | Restore is whole-installation | A restore replaces the active data set; there is no company-only, period-only or merge restore. |
 | KL-18 | Backup format is version 1 | No migration framework beyond tolerant normalisation. Older backups may lose unsupported fields. |
-| KL-19 | Snapshot scope | Snapshots are browser-local, not encrypted, not exportable individually, and capped at ten. |
+| KL-19 | Snapshot scope | Snapshots are browser-local, unencrypted and capped at ten, but any listed snapshot can be downloaded individually as JSON. There is no automatic pruning policy beyond the cap or client-side encryption of automatic snapshots. |
 
 ## Accounting and reporting
 
@@ -57,7 +57,7 @@ README. When a new limit is introduced, add it here in the same change.
 | KL-21 | Budgets are annual and single-target | One budget per ledger/group per financial year. No monthly/quarterly phasing, revisions, approval workflow, locking or carry-forward. |
 | KL-22 | Cost centres are single-allocation per line | Each voucher line can carry one cost centre; there is no split across multiple centres or percentage allocation. |
 | KL-23 | Unallocated cost is reconciled | Cost-centre rows still include only allocated lines, and the summary now shows unallocated debit, credit and net totals plus a ledger-wise unallocated table for the same period. There is no automatic allocation or per-voucher reconciliation between the two views. |
-| KL-24 | No cost-centre closing or payroll/stock budget | Cost reports include a category P&L limited to tagged income and expense, and budgets can target a centre or category. There is no cost-centre trial balance/closing, allocation of untagged income or expense, or payroll/stock budget by centre. |
+| KL-24 | No opening-adjusted cost-centre closing or payroll/stock budget | Cost reports include a category P&L and a ledger-wise movement break-up for each centre, both limited to tagged lines. Cost-centre opening balances are not modelled, so there is no opening-adjusted trial balance/closing; untagged income/expense allocation and payroll/stock budget by centre are also absent. |
 | KL-59 | Resolved — cost categories and centres can be merged 2026-11-20 | A category or centre can be merged into another master; centres, category budgets, centre budgets and voucher-line allocations are reassigned before the source is removed. A merge is refused when both sides already have a budget for the same year. There is no bulk merge or bulk reallocation across several sources. |
 | KL-60 | Overlapping budgets are summarised, not reconciled | A group budget and a ledger budget inside it can both exist. The report still lists both rows but totals exclude the nested budget and label it "Inside a group budget", so totals are not double-counted; there is no per-target reconciliation of the overlap. |
 | KL-61 | Budget actuals exclude openings | Actual is net voucher movement from the financial-year start to the as-on date; ledger opening balances and prior-year activity are excluded. |

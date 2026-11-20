@@ -140,6 +140,16 @@ export function costCentreDetailScreen() {
   const to = current.to || active.fyEnd;
   const report = costCentreBreakup(active, view.id, { from, to });
   if (!report) return panel('Cost centre', '<p class="muted">That cost centre no longer exists.</p>');
+  const ledgerRows = report.ledgerRows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.ledger)}</strong></td>
+        <td class="num">${money(row.debit)}</td>
+        <td class="num">${money(row.credit)}</td>
+        <td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td>
+      </tr>`,
+    )
+    .join('');
   const rows = report.rows
     .map(
       (row) => `<tr class="clickable" data-action="open-voucher" data-id="${esc(row.voucherId)}">
@@ -161,6 +171,15 @@ export function costCentreDetailScreen() {
       <div class="ratio-card"><span class="ratio-label">Credit</span><strong>${money(report.credit)}</strong><span class="muted small">Total credits</span></div>
       <div class="ratio-card"><span class="ratio-label">Net</span><strong>${money(report.net)}</strong><span class="muted small">Debit less credit</span></div>
     </div>
+    <h3 class="column-title">Ledger movement</h3>
+    ${report.ledgerRows.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Ledger</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
+          <tbody>${ledgerRows}</tbody>
+        </table></div>`
+      : '<p class="muted">No lines are allocated to this centre in the period.</p>'}
+    <p class="muted small">Ledger movement covers this period only; cost-centre opening balances are not modelled.</p>
+    <h3 class="column-title">Voucher lines</h3>
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
           <thead><tr><th>Date</th><th>Voucher</th><th>Ledger</th><th>Side</th><th class="num">Amount</th><th>Narration</th></tr></thead>

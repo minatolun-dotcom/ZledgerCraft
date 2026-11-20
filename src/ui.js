@@ -4535,6 +4535,17 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'download-snapshot': {
+      const snapshot = loadSnapshots()[Number(trigger.dataset.index)];
+      if (!snapshot) {
+        setFlash('That snapshot is no longer available.', 'warn');
+        render();
+        break;
+      }
+      downloadJsonFile(`zledgercraft-snapshot-${String(snapshot.at).slice(0, 10)}.json`, snapshot.payload);
+      setFlash('Snapshot downloaded as a JSON backup.');
+      break;
+    }
     case 'restore-snapshot': {
       if (!can('data.restore')) {
         requirePermission('data.restore');

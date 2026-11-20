@@ -315,9 +315,15 @@ test('cost centre break-up lists only the chosen centre and honours its period',
   assert.equal(april.debit, 1000);
   assert.equal(april.credit, 0);
   assert.equal(april.net, 1000);
+  assert.equal(april.ledgerCount, 1);
+  assert.equal(april.ledgerRows[0].ledger, 'Rent');
+  assert.equal(april.ledgerRows[0].debit, 1000);
+  assert.equal(april.ledgerRows[0].credit, 0);
+  assert.equal(april.ledgerRows[0].net, 1000);
 
   const may = costCentreBreakup(company, admin.id, { from: '2026-05-01', to: '2026-05-31' });
   assert.equal(may.count, 0);
+  assert.equal(may.ledgerRows.length, 0);
   assert.equal(costCentreBreakup(company, 'missing', {}), null);
 });
 

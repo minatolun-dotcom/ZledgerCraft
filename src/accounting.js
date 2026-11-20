@@ -1029,32 +1029,52 @@ export function costCentreBreakup(company, centreId, filters = {}) {
   if (!centre) return null;
   const category = (company.costCategories ?? []).find((item) => item.id === centre.categoryId);
   const { from, to } = dateRange(company, filters);
+  const ledgerById = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
+  const byLedger = new Map();
   const rows = [];
   for (const voucher of vouchersSorted(company)) {
     if (voucher.date < from || voucher.date > to) continue;
     for (const line of voucher.lines ?? []) {
       if (line.costCentreId !== centreId) continue;
+      const ledger = ledgerById.get(line.ledgerId);
+      const ledgerName = ledger?.name ?? 'Unknown';
+      const amount = round2(line.amount);
       rows.push({
         voucherId: voucher.id,
         date: voucher.date,
         type: voucher.type,
         no: voucher.no,
         narration: voucher.narration ?? '',
-        ledger: company.ledgers.find((ledger) => ledger.id === line.ledgerId)?.name ?? 'Unknown',
+        ledgerId: line.ledgerId,
+        ledger: ledgerName,
         side: line.side,
-        amount: round2(line.amount),
+        amount,
       });
+      const summary = byLedger.get(line.ledgerId) ?? {
+        ledgerId: line.ledgerId,
+        ledger: ledgerName,
+        debit: 0,
+        credit: 0,
+      };
+      if (line.side === 'Cr') summary.credit = round2(summary.credit + amount);
+      else summary.debit = round2(summary.debit + amount);
+      byLedger.set(line.ledgerId, summary);
     }
   }
   rows.sort((a, b) => a.date.localeCompare(b.date) || (Number(a.no) || 0) - (Number(b.no) || 0));
   const debit = round2(rows.filter((row) => row.side === 'Dr').reduce((sum, row) => sum + row.amount, 0));
   const credit = round2(rows.filter((row) => row.side === 'Cr').reduce((sum, row) => sum + row.amount, 0));
+  const ledgerRows = [...byLedger.values()]
+    .map((row) => ({ ...row, net: round2(row.debit - row.credit) }))
+    .sort((a, b) => Math.abs(b.net) - Math.abs(a.net) || a.ledger.localeCompare(b.ledger));
   return {
     centre,
     category: category?.name ?? 'Unknown category',
     from,
     to,
     rows,
+    ledgerRows,
+    ledgerCount: ledgerRows.length,
     count: rows.length,
     debit,
     credit,

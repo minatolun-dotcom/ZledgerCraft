@@ -103,7 +103,7 @@ export function snapshotHtml() {
   const snapshots = loadSnapshots();
   return panel(
     'Automatic snapshots',
-    `<p class="muted">A daily snapshot is taken after the first meaningful change, and every restore saves the current data first. The last ${SNAPSHOT_LIMIT} are kept in this browser.</p>
+    `<p class="muted">A daily snapshot is taken after the first meaningful change, and every restore saves the current data first. The last ${SNAPSHOT_LIMIT} are kept in this browser; any one can be downloaded as a JSON backup.</p>
     ${snapshots.length
       ? `<table class="data-table compact">
           <thead><tr><th>Saved</th><th>Type</th><th class="num">Companies</th><th class="num">Vouchers</th><th></th></tr></thead>
@@ -114,7 +114,10 @@ export function snapshotHtml() {
                 <td><span class="badge">${esc(snapshot.kind === 'auto' ? 'daily' : snapshot.kind === 'pre-restore' ? 'pre-restore' : 'manual')}</span></td>
                 <td class="num">${snapshot.companies}</td>
                 <td class="num">${snapshot.vouchers}</td>
-                <td class="row-actions">${can('data.restore') ? `<button class="btn small" type="button" data-action="restore-snapshot" data-index="${index}">Restore</button>` : ''}</td>
+                <td class="row-actions">
+                  <button class="btn small ghost" type="button" data-action="download-snapshot" data-index="${index}">Download</button>
+                  ${can('data.restore') ? `<button class="btn small" type="button" data-action="restore-snapshot" data-index="${index}">Restore</button>` : ''}
+                </td>
               </tr>`,
             )
             .join('')}</tbody>

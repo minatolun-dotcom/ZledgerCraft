@@ -509,7 +509,7 @@ disabled.
 - Cost centre summary by category and centre, with debit/credit/net, voucher
   counts, period filter, a category P&L for tagged income and expense, an
   unallocated-line reconciliation and click-through to a cost-centre break-up
-  of voucher lines.
+  with ledger-wise movement and voucher lines.
 - Budget vs Actual by ledger, group, cost centre or cost category for a
   financial year and as-on date: budget, actual, variance, used percentage,
   over-budget status and Print/CSV. Actuals use period voucher movement and
@@ -621,7 +621,7 @@ disabled.
   and their matches) before anything is replaced.
 - Restore shows a preview of what the backup contains and snapshots the current
   data first; the last ten manual, daily and pre-restore snapshots can be
-  restored or superseded.
+  downloaded individually, restored or superseded.
 - Passphrase-encrypted JSON downloads are available from **Backup & restore**.
   The browser encrypts the backup with AES-256-GCM and a PBKDF2-derived key; the
   passphrase is never stored or uploaded. Encrypted downloads require a secure
@@ -695,7 +695,8 @@ disabled.
   GST/TDS detail, original voucher numbers and APIs are not imported. Cost-centre allocations, cheque/DD details, currency masters/rates
   and bank matches are also outside CSV and Excel import.
 - A daily automatic snapshot is taken after the first voucher of the day, and
-  the last ten manual, daily and pre-restore snapshots are kept in the browser.
+  the last ten manual, daily and pre-restore snapshots are kept in the browser
+  with individual JSON downloads.
 
 ## Shortcuts
 

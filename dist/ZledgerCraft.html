@@ -10444,32 +10444,52 @@ function costCentreBreakup(company, centreId, filters = {}) {
   if (!centre) return null;
   const category = (company.costCategories ?? []).find((item) => item.id === centre.categoryId);
   const { from, to } = dateRange(company, filters);
+  const ledgerById = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
+  const byLedger = new Map();
   const rows = [];
   for (const voucher of vouchersSorted(company)) {
     if (voucher.date < from || voucher.date > to) continue;
     for (const line of voucher.lines ?? []) {
       if (line.costCentreId !== centreId) continue;
+      const ledger = ledgerById.get(line.ledgerId);
+      const ledgerName = ledger?.name ?? 'Unknown';
+      const amount = round2(line.amount);
       rows.push({
         voucherId: voucher.id,
         date: voucher.date,
         type: voucher.type,
         no: voucher.no,
         narration: voucher.narration ?? '',
-        ledger: company.ledgers.find((ledger) => ledger.id === line.ledgerId)?.name ?? 'Unknown',
+        ledgerId: line.ledgerId,
+        ledger: ledgerName,
         side: line.side,
-        amount: round2(line.amount),
+        amount,
       });
+      const summary = byLedger.get(line.ledgerId) ?? {
+        ledgerId: line.ledgerId,
+        ledger: ledgerName,
+        debit: 0,
+        credit: 0,
+      };
+      if (line.side === 'Cr') summary.credit = round2(summary.credit + amount);
+      else summary.debit = round2(summary.debit + amount);
+      byLedger.set(line.ledgerId, summary);
     }
   }
   rows.sort((a, b) => a.date.localeCompare(b.date) || (Number(a.no) || 0) - (Number(b.no) || 0));
   const debit = round2(rows.filter((row) => row.side === 'Dr').reduce((sum, row) => sum + row.amount, 0));
   const credit = round2(rows.filter((row) => row.side === 'Cr').reduce((sum, row) => sum + row.amount, 0));
+  const ledgerRows = [...byLedger.values()]
+    .map((row) => ({ ...row, net: round2(row.debit - row.credit) }))
+    .sort((a, b) => Math.abs(b.net) - Math.abs(a.net) || a.ledger.localeCompare(b.ledger));
   return {
     centre,
     category: category?.name ?? 'Unknown category',
     from,
     to,
     rows,
+    ledgerRows,
+    ledgerCount: ledgerRows.length,
     count: rows.length,
     debit,
     credit,
@@ -18992,7 +19012,7 @@ function snapshotHtml() {
   const snapshots = loadSnapshots();
   return panel(
     'Automatic snapshots',
-    `<p class="muted">A daily snapshot is taken after the first meaningful change, and every restore saves the current data first. The last ${SNAPSHOT_LIMIT} are kept in this browser.</p>
+    `<p class="muted">A daily snapshot is taken after the first meaningful change, and every restore saves the current data first. The last ${SNAPSHOT_LIMIT} are kept in this browser; any one can be downloaded as a JSON backup.</p>
     ${snapshots.length
       ? `<table class="data-table compact">
           <thead><tr><th>Saved</th><th>Type</th><th class="num">Companies</th><th class="num">Vouchers</th><th></th></tr></thead>
@@ -19003,7 +19023,10 @@ function snapshotHtml() {
                 <td><span class="badge">${esc(snapshot.kind === 'auto' ? 'daily' : snapshot.kind === 'pre-restore' ? 'pre-restore' : 'manual')}</span></td>
                 <td class="num">${snapshot.companies}</td>
                 <td class="num">${snapshot.vouchers}</td>
-                <td class="row-actions">${can('data.restore') ? `<button class="btn small" type="button" data-action="restore-snapshot" data-index="${index}">Restore</button>` : ''}</td>
+                <td class="row-actions">
+                  <button class="btn small ghost" type="button" data-action="download-snapshot" data-index="${index}">Download</button>
+                  ${can('data.restore') ? `<button class="btn small" type="button" data-action="restore-snapshot" data-index="${index}">Restore</button>` : ''}
+                </td>
               </tr>`,
             )
             .join('')}</tbody>
@@ -21403,6 +21426,16 @@ function costCentreDetailScreen() {
   const to = current.to || active.fyEnd;
   const report = costCentreBreakup(active, view.id, { from, to });
   if (!report) return panel('Cost centre', '<p class="muted">That cost centre no longer exists.</p>');
+  const ledgerRows = report.ledgerRows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.ledger)}</strong></td>
+        <td class="num">${money(row.debit)}</td>
+        <td class="num">${money(row.credit)}</td>
+        <td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td>
+      </tr>`,
+    )
+    .join('');
   const rows = report.rows
     .map(
       (row) => `<tr class="clickable" data-action="open-voucher" data-id="${esc(row.voucherId)}">
@@ -21424,6 +21457,15 @@ function costCentreDetailScreen() {
       <div class="ratio-card"><span class="ratio-label">Credit</span><strong>${money(report.credit)}</strong><span class="muted small">Total credits</span></div>
       <div class="ratio-card"><span class="ratio-label">Net</span><strong>${money(report.net)}</strong><span class="muted small">Debit less credit</span></div>
     </div>
+    <h3 class="column-title">Ledger movement</h3>
+    ${report.ledgerRows.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Ledger</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
+          <tbody>${ledgerRows}</tbody>
+        </table></div>`
+      : '<p class="muted">No lines are allocated to this centre in the period.</p>'}
+    <p class="muted small">Ledger movement covers this period only; cost-centre opening balances are not modelled.</p>
+    <h3 class="column-title">Voucher lines</h3>
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
           <thead><tr><th>Date</th><th>Voucher</th><th>Ledger</th><th>Side</th><th class="num">Amount</th><th>Narration</th></tr></thead>
@@ -26007,6 +26049,17 @@ async function handleClick(event) {
         saved ? 'ok' : 'warn',
       );
       render();
+      break;
+    }
+    case 'download-snapshot': {
+      const snapshot = loadSnapshots()[Number(trigger.dataset.index)];
+      if (!snapshot) {
+        setFlash('That snapshot is no longer available.', 'warn');
+        render();
+        break;
+      }
+      downloadJsonFile(`zledgercraft-snapshot-${String(snapshot.at).slice(0, 10)}.json`, snapshot.payload);
+      setFlash('Snapshot downloaded as a JSON backup.');
       break;
     }
     case 'restore-snapshot': {

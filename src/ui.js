@@ -100,6 +100,7 @@ import {
   payrollLedgers,
   payrollMonthEnd,
   postForexRevaluation,
+  postOverdueInterest,
   postStockCount,
   rateForCurrency,
   reopenFinancialYear,
@@ -163,6 +164,7 @@ import {
   groupVouchers,
   groupChainKeys,
   inGroupKey,
+  interestWorkingPaper,
   ledgerStatement,
   ledgerTotals,
   outstanding,
@@ -5616,6 +5618,34 @@ async function handleClick(event) {
 
     case 'cancel-stock-count': {
       view.stockCountDraft = null;
+      render();
+      break;
+    }
+
+    case 'post-interest': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      const side = trigger.dataset.side === 'payable' ? 'payable' : 'receivable';
+      const date = trigger.dataset.date;
+      if (!active || !window.confirm('Post overdue interest as a journal for this date?')) break;
+      const report = interestWorkingPaper(active, { side, asOn: date });
+      const result = postOverdueInterest(active, { date, side, rows: report.rows });
+      if (result.ok) {
+        logAudit(
+          'interest.post',
+          `Posted ${side} overdue interest for ${date} as voucher ${result.voucher.no}.`,
+          active,
+          `Journal ${result.voucher.no}`,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok ? `Overdue interest posted as Journal ${result.voucher.no}.` : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
       render();
       break;
     }

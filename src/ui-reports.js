@@ -676,13 +676,16 @@ export function outstandingScreen() {
     ${reminderPanel}
     ${interest.rows.length
       ? panel(
-          side === 'receivable' ? 'Interest receivable working paper' : 'Interest payable working paper',
-          `<table class="data-table compact">
+          side === 'receivable' ? 'Interest receivable' : 'Interest payable',
+          `${can('voucher.write')
+            ? `<div class="form-actions"><button class="btn small primary" type="button" data-action="post-interest" data-side="${side}" data-date="${esc(asOn)}">Post interest</button></div>`
+            : ''}
+          <table class="data-table compact">
             <thead><tr><th>${partyLabel}</th><th>Bill</th><th>Due date</th><th class="num">Overdue days</th><th class="num">Principal</th><th class="num">Rate</th><th class="num">Simple interest</th></tr></thead>
             <tbody>${interestRows}</tbody>
             <tfoot><tr><td colspan="4">Total</td><td class="num">${money(interest.totals.principal)}</td><td></td><td class="num">${money(interest.totals.interest)}</td></tr></tfoot>
           </table>`,
-          'Simple interest on overdue bill balances at each party\'s stored annual rate. This is a working paper; no interest is posted to the ledger.',
+          'Simple interest on overdue bill balances at each party\'s stored annual rate. Posting creates a Journal on the selected date; later runs only propose interest accrued since the last posting.',
         )
       : ''}`;
 }

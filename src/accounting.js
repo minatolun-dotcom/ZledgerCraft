@@ -1423,6 +1423,12 @@ export function interestWorkingPaper(company, filters = {}) {
   const side = filters.side === 'payable' ? 'payable' : 'receivable';
   const report = outstanding(company, { side, asOn });
   const ledgers = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
+  const posted = new Map();
+  for (const posting of company.interestPostings ?? []) {
+    if (posting.side !== side || posting.date > asOn) continue;
+    const key = `${posting.partyId}|${posting.bill}`;
+    posted.set(key, round2((posted.get(key) ?? 0) + (Number(posting.amount) || 0)));
+  }
   const rows = [];
   for (const party of report.parties) {
     const rate = round2(ledgers.get(party.ledgerId)?.interestRate ?? 0);
@@ -1430,7 +1436,9 @@ export function interestWorkingPaper(company, filters = {}) {
     for (const bill of party.bills) {
       if (!bill.overdue || !bill.dueDate) continue;
       const days = Math.max(0, Number(bill.overdueDays) || 0);
-      const interest = round2((bill.amount * rate * days) / 36500);
+      const accrued = round2((bill.amount * rate * days) / 36500);
+      const alreadyPosted = posted.get(`${party.ledgerId}|${bill.ref}`) ?? 0;
+      const interest = round2(Math.max(0, accrued - alreadyPosted));
       if (interest <= 0) continue;
       rows.push({
         partyId: party.ledgerId,
@@ -1440,6 +1448,8 @@ export function interestWorkingPaper(company, filters = {}) {
         overdueDays: days,
         amount: bill.amount,
         rate,
+        accrued,
+        alreadyPosted,
         interest,
       });
     }

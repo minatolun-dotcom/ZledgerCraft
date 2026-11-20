@@ -8,6 +8,7 @@ import {
   exportState,
   findLedgerByName,
   importState,
+  postOverdueInterest,
   updateLedger,
   updateVoucher,
 } from '../src/store.js';
@@ -113,6 +114,32 @@ test('overdue interest is computed as a simple working paper', () => {
   assert.equal(report.rows[0].interest, 3.29);
   assert.equal(report.totals.interest, 3.29);
   assert.equal(company.vouchers.length, 1, 'the working paper posts nothing');
+});
+
+test('posting overdue interest creates a journal and does not double count', () => {
+  const { company, customer, sales } = billsFixture();
+  updateLedger(company, customer.id, { interestRate: '12' });
+  sale(company, customer, sales, 1000, '2026-04-05', { ref: 'INV-INT', dueDate: '2026-04-15' });
+  const report = interestWorkingPaper(company, { asOn: '2026-04-25' });
+  const posted = postOverdueInterest(company, {
+    date: '2026-04-25',
+    side: 'receivable',
+    rows: report.rows,
+  });
+  assert.equal(posted.ok, true, posted.error);
+  assert.equal(posted.voucher.type, 'Journal');
+  assert.equal(posted.total, 3.29);
+  assert.equal(findLedgerByName(company, 'Interest Income').name, 'Interest Income');
+  const partyLine = posted.voucher.lines.find((line) => line.ledgerId === customer.id);
+  assert.deepEqual({ side: partyLine.side, amount: partyLine.amount }, { side: 'Dr', amount: 3.29 });
+  assert.equal(interestWorkingPaper(company, { asOn: '2026-04-25' }).rows.length, 0);
+  assert.equal(
+    postOverdueInterest(company, { date: '2026-04-25', side: 'receivable', rows: report.rows }).ok,
+    false,
+  );
+  const next = interestWorkingPaper(company, { asOn: '2026-04-26' });
+  assert.equal(next.rows[0].alreadyPosted, 3.29);
+  assert.equal(next.rows[0].interest, 0.33);
 });
 
 test('an explicit receipt allocation settles only the chosen bill', () => {

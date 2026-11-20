@@ -546,9 +546,10 @@ disabled.
   separate status-as-on date: original, settled and outstanding amounts, status,
   overdue days, totals and drill-down to the voucher or the party statement.
   Fully settled bills remain listed.
-- Party credit limits, a printable payment reminder per customer, and a simple
-  overdue-interest working paper at each party's stored annual rate. These are
-  informational; no interest or reminder charge is posted.
+- Party credit limits, a printable payment reminder per customer, and simple
+  overdue interest at each party's stored annual rate. Interest can be posted
+  as a Journal with incremental accrual and duplicate-date protection; reminder
+  letters remain informational and post no charge.
 - Comparative P&L: current period against the immediately preceding period of
   the same length, with change by direct income, expenses, gross profit,
   indirect income, expenses and net profit.
@@ -731,7 +732,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque/DD advice and receipt deposit-slip previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no magnetic-ink cheque stationery presets or bank-issued advice formats |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary and break-up; no merging categories, split allocations or unallocated reconciliation |
 | Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance and over-budget status; no phased, revised, approval or cost-centre budgets |
-| Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting, a postable unrealised forex revaluation and a simple overdue-interest working paper; no realised gain/loss posting, foreign inventory/bill allocations or interest posting |
+| Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting, a postable unrealised forex revaluation and postable simple overdue interest; no realised gain/loss posting, foreign inventory/bill allocations, interest compounding or reminders that post charges |
 | Multiple financial years per company, year-end closing and carry-forward | Covered — year selector, close/reopen and automatic next year; no closing journal is written because balances are cumulative |
 | Bill-wise entry and allocation | Covered — bill refs, due dates, explicit/FIFO settlements, ageing, bill-wise register and party statement with bill detail; no bill-wise opening allocation or bill interest |
 | User roles, TallyVault, edit log, cloud sync | Partial — local profiles plus password-backed LAN accounts or Neon Auth, owner/accountant/viewer roles, company-level server scoping, TOTP MFA in SQLite mode, hash-chained server audit, append-only app audit, SQLite or Neon Postgres workspace with conservative and scoped merge; Neon Auth mode has no MFA and uses Postgres profiles/sessions; no vault encryption |

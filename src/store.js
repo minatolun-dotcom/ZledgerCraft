@@ -2615,6 +2615,7 @@ function seedInventoryMasters(company) {
   if (!Array.isArray(company.stockTransfers)) company.stockTransfers = [];
   if (!Array.isArray(company.stockCounts)) company.stockCounts = [];
   if (!Array.isArray(company.stockAdjustments)) company.stockAdjustments = [];
+  if (!Array.isArray(company.interestPostings)) company.interestPostings = [];
   if (!Array.isArray(company.orders)) company.orders = [];
   if (!Array.isArray(company.boms)) company.boms = [];
   if (!Array.isArray(company.manufactures)) company.manufactures = [];
@@ -3467,7 +3468,7 @@ export function setNextVoucherNumber(company, type, nextValue) {
   return { ok: true, next };
 }
 
-function ensureForexLedger(company, name, groupKey) {
+function ensureNamedLedger(company, name, groupKey) {
   const existing = findLedgerByName(company, name);
   if (existing) return existing;
   const group = company.groups.find((entry) => entry.key === groupKey);
@@ -3502,8 +3503,8 @@ export function postForexRevaluation(company, input = {}) {
   if (rows.some((row) => !ledgers.has(row.ledgerId))) {
     return { ok: false, error: 'A revaluation ledger no longer exists. Refresh the report.' };
   }
-  const gainLedger = ensureForexLedger(company, 'Forex Gain', 'indirectIncomes');
-  const lossLedger = ensureForexLedger(company, 'Forex Loss', 'indirectExpenses');
+  const gainLedger = ensureNamedLedger(company, 'Forex Gain', 'indirectIncomes');
+  const lossLedger = ensureNamedLedger(company, 'Forex Loss', 'indirectExpenses');
   if (!gainLedger || !lossLedger) return { ok: false, error: 'Forex gain/loss ledger groups are missing.' };
   const lines = [];
   let gain = 0;
@@ -3529,6 +3530,67 @@ export function postForexRevaluation(company, input = {}) {
   posted.voucher.fxRevaluationDate = date;
   posted.voucher.fxRevaluationRows = rows.map((row) => ({ ...row }));
   return { ok: true, voucher: posted.voucher, gain, loss };
+}
+
+export function postOverdueInterest(company, input = {}) {
+  const date = String(input.date ?? '');
+  if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid interest posting date.' };
+  const side = input.side === 'payable' ? 'payable' : 'receivable';
+  seedYears(company);
+  const year = yearForDate(company, date);
+  if (!year) return { ok: false, error: 'The interest date must fall inside a financial year.' };
+  if (year.closed) return { ok: false, error: 'The financial year is closed. Reopen it before posting interest.' };
+  if ((company.vouchers ?? []).some((voucher) => voucher.interestPostingDate === date && voucher.interestPostingSide === side)) {
+    return { ok: false, error: `Overdue interest is already posted for this date (${side}).` };
+  }
+  const rows = (Array.isArray(input.rows) ? input.rows : [])
+    .map((row) => ({
+      partyId: String(row.partyId ?? ''),
+      bill: String(row.bill ?? ''),
+      amount: round2(Number(row.interest) || 0),
+    }))
+    .filter((row) => row.partyId && row.amount > 0);
+  if (!rows.length) return { ok: false, error: 'There is no overdue interest to post.' };
+  const ledgers = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
+  if (rows.some((row) => !ledgers.has(row.partyId))) {
+    return { ok: false, error: 'An interest party no longer exists. Refresh the report.' };
+  }
+  const income = side === 'receivable' ? ensureNamedLedger(company, 'Interest Income', 'indirectIncomes') : null;
+  const expense = side === 'payable' ? ensureNamedLedger(company, 'Interest Expense', 'indirectExpenses') : null;
+  if ((side === 'receivable' && !income) || (side === 'payable' && !expense)) {
+    return { ok: false, error: 'Interest income/expense ledger groups are missing.' };
+  }
+  const byParty = new Map();
+  for (const row of rows) byParty.set(row.partyId, round2((byParty.get(row.partyId) ?? 0) + row.amount));
+  const total = round2(rows.reduce((sum, row) => sum + row.amount, 0));
+  const lines = [];
+  for (const [partyId, amount] of byParty) {
+    lines.push({ ledgerId: partyId, side: side === 'receivable' ? 'Dr' : 'Cr', amount });
+  }
+  lines.push({
+    ledgerId: side === 'receivable' ? income.id : expense.id,
+    side: side === 'receivable' ? 'Cr' : 'Dr',
+    amount: total,
+  });
+  const posted = addVoucher(company, {
+    type: 'Journal',
+    date,
+    narration: `Overdue interest ${side === 'receivable' ? 'receivable' : 'payable'} as on ${date}`,
+    lines,
+  });
+  if (!posted.ok) return posted;
+  company.interestPostings = company.interestPostings ?? [];
+  const postingRows = rows.map((row) => ({
+    ...row,
+    side,
+    date,
+    voucherId: posted.voucher.id,
+  }));
+  company.interestPostings.push(...postingRows);
+  posted.voucher.interestPostingDate = date;
+  posted.voucher.interestPostingSide = side;
+  posted.voucher.interestPostingRows = postingRows.map((row) => ({ ...row }));
+  return { ok: true, voucher: posted.voucher, total, rows: postingRows };
 }
 
 export function addVoucher(company, input) {

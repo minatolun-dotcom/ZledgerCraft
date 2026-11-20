@@ -35,8 +35,8 @@ papers, inventory depth, SQLite and Neon Postgres workspaces, LAN authentication
 Neon Auth sign-in, MFA in SQLite mode, company scoping, conservative merge,
 backup/restore, shared Postgres profiles/sessions and hash-chained server audit
 are implemented and tested. Exported JSON backups can be passphrase-encrypted
-in the browser, while the live workspace and server/R2 snapshots remain
-plaintext. The app is suitable for a trusted single-office LAN
+in the browser, and new server/R2 backups can be encrypted at rest with
+`ZL_BACKUP_PASSPHRASE`, while the live workspace remains plaintext. The app is suitable for a trusted single-office LAN
 or a shared Neon-backed team with an operator who understands its limits. The
 Cloudflare Pages site and Neon Function API are live at
 `https://books.lengkhawm.online/` with HTTPS, secure HttpOnly session cookies
@@ -46,9 +46,10 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 
 **Recommended next work:** follow the free-path order in
 [KNOWN_LIMITS.md § Remaining limits and free paths](KNOWN_LIMITS.md#remaining-limits-and-free-paths):
-App-level encryption (passphrase-encrypted JSON backups are complete; live
-workspace and server/R2 snapshot encryption remain), incremental
-master-column promotion, APIs/webhooks and statutory integrations. Voucher
+App-level encryption (passphrase-encrypted JSON downloads and optional
+AES-256-GCM encryption for server/R2 backups are complete; live-workspace
+encryption remains), incremental master-column promotion, APIs/webhooks and
+statutory integrations. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
 now complete.
 
@@ -163,11 +164,11 @@ Working now:
   closing value, top items by value and items with no issues during the year;
   working capital; top expense heads; plus Print/CSV/Excel from the Statistics
   screen.
-- Verification: 242/242 engine tests, including server scoping, scoped merge,
+- Verification: 247/247 engine tests, including server scoping, scoped merge,
   login history, lockout, single-use MFA, save/event audit chains and
-  backup/restore coverage plus encrypted-backup round trip, wrong-passphrase
-  and tamper checks; the existing browser suites were not rerun in this phase;
-  single-file build 880.1 kB.
+  backup/restore coverage plus encrypted JSON and server-backup round trips,
+  wrong-passphrase, missing-key and tamper checks; the existing browser suites
+  were not rerun in this phase; single-file build 880.5 kB.
 
 Why it is not production-ready: browser mode still lives in one browser's local
 storage with unprotected access-control profiles, the app audit trail is not
@@ -332,6 +333,22 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 ## Progress log
 
+### 2026-11-20 — Phase 10: encrypted server backups
+
+- New SQLite and Postgres server backup files are encrypted at rest when
+  `ZL_BACKUP_PASSPHRASE` (12+ characters) is configured. The server derives a
+  key with scrypt and seals each file with AES-256-GCM, including R2 uploads.
+- Encrypted backups use a `.enc` suffix, keep downloads encrypted, and restore
+  only with the same passphrase. Existing plaintext backups still restore.
+- The owner backup panel marks encrypted files and explains whether encryption
+  is configured. Plaintext temporary files from interrupted encrypted
+  backup/restore runs are cleaned up instead of being listed or served.
+- Missing keys fail restore with a clear error rather than falling back to
+  plaintext. The live SQLite/Postgres workspace is still not encrypted.
+- Verification: server backup crypto and end-to-end encrypted create/list/
+  download/restore-without-key tests; 247/247 engine tests and an 880.5 kB
+  single-file build pass.
+
 ### 2026-11-20 — Phase 9: encrypted backup downloads
 
 - Added a passphrase-encrypted JSON backup download to **Backup & restore**.
@@ -342,8 +359,9 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - Restore accepts plain or encrypted backups and reports a wrong passphrase or
   modified file without changing current books.
 - Added round-trip, fresh-salt/IV, wrong-passphrase, tamper-detection and
-  parameter-validation tests. This is a first app-level-encryption slice; the
-  live workspace and server/R2 snapshots are still unencrypted at rest.
+  parameter-validation tests. This was the first app-level-encryption slice;
+  Phase 10 added optional server/R2 backup encryption, while the live workspace
+  remains unencrypted at rest.
 
 ### 2026-11-19 — Phase 8: API usage visibility
 

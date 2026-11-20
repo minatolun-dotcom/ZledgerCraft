@@ -13,6 +13,12 @@ import { emailConfiguration, sendBackupFailureEmail, sendEmail, sendPasswordRese
 import { neonAuthConfiguration, neonForgotPassword, neonResetPassword, neonSignIn, neonSignUp } from './server-neon-auth.js';
 import { createPostgresPool, PostgresWorkspaceStore } from './server-pg.js';
 import {
+  backupPassphrase,
+  decryptBackupBuffer,
+  encryptBackupBuffer,
+  MIN_BACKUP_PASSPHRASE,
+} from './server-backup-crypto.js';
+import {
   backupObjectKey,
   downloadBackup,
   listBackupObjects,
@@ -63,6 +69,11 @@ const workspaceDbFile = join(dataDir, 'workspace.sqlite');
 const backupDir = process.env.ZL_BACKUP_DIR ? resolve(process.env.ZL_BACKUP_DIR) : join(dataDir, 'backups');
 const backupKeep = Math.min(100, Math.max(1, Number(process.env.ZL_BACKUP_KEEP) || 7));
 const backupHours = Math.min(168, Math.max(1, Number(process.env.ZL_BACKUP_HOURS) || 24));
+const backupEncryptionPassphrase = backupPassphrase(process.env.ZL_BACKUP_PASSPHRASE);
+if (backupEncryptionPassphrase && backupEncryptionPassphrase.length < MIN_BACKUP_PASSPHRASE) {
+  console.error(`ZL_BACKUP_PASSPHRASE must be at least ${MIN_BACKUP_PASSPHRASE} characters.`);
+  process.exit(1);
+}
 const allowedNetworks = String(process.env.ZL_ALLOWED_IPS || '')
   .split(',')
   .map((entry) => entry.trim())
@@ -778,7 +789,7 @@ async function verifyServerEventChain() {
   return { ok: true, checked: rows.length };
 }
 
-const BACKUP_NAME = /^workspace-\d{8}-\d{6}-[a-z]+(?:-\d+)?\.(?:sqlite|json)$/;
+const BACKUP_NAME = /^workspace-\d{8}-\d{6}-[a-z]+(?:-\d+)?\.(?:sqlite|json)(?:\.enc)?$/;
 let backupQueue = Promise.resolve();
 
 function backupStamp(date = new Date()) {
@@ -793,14 +804,26 @@ async function listLocalServerBackups() {
     if (error.code === 'ENOENT') return [];
     throw error;
   }
+  // Remove plaintext temporary files left by an interrupted encrypted backup
+  // or restore. They are never listed or served.
+  for (const name of entries) {
+    if (name.endsWith('.plain.tmp') || name.startsWith('.restore-')) {
+      await unlink(join(backupDir, name)).catch(() => {});
+    }
+  }
   const backups = [];
   const extension = postgresStore ? '.json' : '.sqlite';
   for (const name of entries) {
-    if (!BACKUP_NAME.test(name) || !name.endsWith(extension)) continue;
+    if (!BACKUP_NAME.test(name) || !name.includes(extension)) continue;
     try {
       const info = await stat(join(backupDir, name));
       if (!info.isFile()) continue;
-      backups.push({ name, bytes: info.size, createdAt: info.mtime.toISOString() });
+      backups.push({
+        name,
+        bytes: info.size,
+        createdAt: info.mtime.toISOString(),
+        encrypted: name.endsWith('.enc'),
+      });
     } catch {
       // A backup may be removed by another operator between listing and stat.
     }
@@ -814,12 +837,13 @@ async function listRemoteServerBackups() {
   try {
     const objects = await listBackupObjects({ config: r2Config });
     return objects
-      .filter((object) => BACKUP_NAME.test(object.name) && object.name.endsWith(extension))
+      .filter((object) => BACKUP_NAME.test(object.name) && object.name.includes(extension))
       .map((object) => ({
         name: object.name,
         bytes: object.bytes,
         createdAt: object.createdAt,
         offsite: true,
+        encrypted: object.name.endsWith('.enc'),
       }));
   } catch (error) {
     console.error(`Could not list R2 backups: ${error.message}`);
@@ -855,17 +879,37 @@ async function readServerBackupBytes(name) {
   }
 }
 
+async function decryptServerBackupBody(name, body) {
+  if (!name.endsWith('.enc')) return body;
+  if (!backupEncryptionPassphrase) {
+    throw new Error('This backup is encrypted. Set ZL_BACKUP_PASSPHRASE to restore it.');
+  }
+  return decryptBackupBuffer(body, backupEncryptionPassphrase);
+}
+
+async function writeServerBackupBody(target, body) {
+  if (!backupEncryptionPassphrase) {
+    await writeFile(target, body, { mode: 0o600 });
+    return;
+  }
+  const encrypted = await encryptBackupBuffer(body, backupEncryptionPassphrase);
+  const check = await decryptBackupBuffer(encrypted, backupEncryptionPassphrase);
+  if (!check.equals(body)) throw new Error('The encrypted backup failed its integrity check.');
+  await writeFile(target, encrypted, { mode: 0o600 });
+}
+
 async function createServerBackupOnce(reason = 'manual') {
   if (!workspaceStore) throw new Error('Server backups require a server workspace.');
   if (!postgresStore && (!db || !sqliteBackup)) throw new Error('Server backups require SQLite.');
   await mkdir(backupDir, { recursive: true, mode: 0o700 });
   const base = `workspace-${backupStamp()}-${String(reason).replace(/[^a-z]/gi, '').toLowerCase() || 'manual'}`;
   const extension = postgresStore ? 'json' : 'sqlite';
-  let name = `${base}.${extension}`;
+  const encryptedSuffix = backupEncryptionPassphrase ? '.enc' : '';
+  let name = `${base}.${extension}${encryptedSuffix}`;
   for (let suffix = 1; ; suffix += 1) {
     try {
       await stat(join(backupDir, name));
-      name = `${base}-${suffix}.${extension}`;
+      name = `${base}-${suffix}.${extension}${encryptedSuffix}`;
     } catch (error) {
       if (error.code === 'ENOENT') break;
       throw error;
@@ -877,17 +921,18 @@ async function createServerBackupOnce(reason = 'manual') {
     if (!saved.state || !Array.isArray(saved.state.companies)) {
       throw new Error('There is no Postgres workspace to back up.');
     }
-    await writeFile(
-      target,
-      JSON.stringify({ version: 2, rev: saved.rev, updatedAt: saved.updatedAt, state: saved.state }),
-      { encoding: 'utf8', mode: 0o600 },
-    );
+    const serialized = JSON.stringify({ version: 2, rev: saved.rev, updatedAt: saved.updatedAt, state: saved.state });
     try {
-      const copy = JSON.parse(await readFile(target, 'utf8'));
+      const copy = JSON.parse(serialized);
       if (!copy.state || !Array.isArray(copy.state.companies)) throw new Error('missing state');
     } catch {
-      await unlink(target).catch(() => {});
       throw new Error('The backup failed its integrity check.');
+    }
+    try {
+      await writeServerBackupBody(target, Buffer.from(serialized));
+    } catch (error) {
+      await unlink(target).catch(() => {});
+      throw error;
     }
     const info = await stat(target);
     const offsite = await uploadVerifiedBackup(name, target);
@@ -903,13 +948,15 @@ async function createServerBackupOnce(reason = 'manual') {
       createdAt: info.mtime.toISOString(),
       kept: backupKeep,
       offsite,
+      encrypted: Boolean(backupEncryptionPassphrase),
     };
   }
-  await sqliteBackup(db, target);
-  await chmod(target, 0o600).catch(() => {});
+  const plainTarget = backupEncryptionPassphrase ? `${target}.plain.tmp` : target;
+  await sqliteBackup(db, plainTarget);
+  await chmod(plainTarget, 0o600).catch(() => {});
   let verified = false;
   try {
-    const copy = new DatabaseSync(target, { readOnly: true });
+    const copy = new DatabaseSync(plainTarget, { readOnly: true });
     try {
       const check = copy.prepare('PRAGMA integrity_check').get();
       verified = String(Object.values(check ?? {})[0] ?? '').toLowerCase() === 'ok';
@@ -920,9 +967,22 @@ async function createServerBackupOnce(reason = 'manual') {
     verified = false;
   }
   if (!verified) {
+    await unlink(plainTarget).catch(() => {});
     await unlink(target).catch(() => {});
     throw new Error('The backup failed its integrity check.');
   }
+  if (backupEncryptionPassphrase) {
+    try {
+      const body = await readFile(plainTarget);
+      await writeServerBackupBody(target, body);
+    } catch (error) {
+      await unlink(target).catch(() => {});
+      throw error;
+    } finally {
+      await unlink(plainTarget).catch(() => {});
+    }
+  }
+  await chmod(target, 0o600).catch(() => {});
   const info = await stat(target);
   const offsite = await uploadVerifiedBackup(name, target);
   // Keep older local copies when an offsite upload failed, so a transient R2
@@ -939,6 +999,7 @@ async function createServerBackupOnce(reason = 'manual') {
     createdAt: info.mtime.toISOString(),
     kept: backupKeep,
     offsite,
+    encrypted: Boolean(backupEncryptionPassphrase),
   };
 }
 
@@ -2591,14 +2652,29 @@ async function readVerifiedBackup(name) {
     info = await stat(target);
   }
   if (!info.isFile()) throw new Error('Backup not found.');
-  if (name.endsWith('.json')) {
-    const saved = JSON.parse(await readFile(target, 'utf8'));
+  const encrypted = name.endsWith('.enc');
+  if (name.includes('.json')) {
+    const body = await decryptServerBackupBody(name, await readFile(target));
+    let saved;
+    try {
+      saved = JSON.parse(body.toString('utf8'));
+    } catch {
+      throw new Error('The backup does not contain readable JSON.');
+    }
     if (!saved?.state || !Array.isArray(saved.state.companies)) {
       throw new Error('The backup does not contain a readable workspace.');
     }
-    return { snapshot: saved, info };
+    return { snapshot: saved, info, encrypted };
   }
-  const copy = new DatabaseSync(target, { readOnly: true });
+  let sqliteTarget = target;
+  let temporary = '';
+  if (encrypted) {
+    const body = await decryptServerBackupBody(name, await readFile(target));
+    temporary = join(backupDir, `.restore-${randomBytes(8).toString('hex')}.sqlite`);
+    await writeFile(temporary, body, { mode: 0o600 });
+    sqliteTarget = temporary;
+  }
+  const copy = new DatabaseSync(sqliteTarget, { readOnly: true });
   try {
     const check = copy.prepare('PRAGMA integrity_check').get();
     if (String(Object.values(check ?? {})[0] ?? '').toLowerCase() !== 'ok') {
@@ -2608,9 +2684,10 @@ async function readVerifiedBackup(name) {
     if (!snapshot?.state || !Array.isArray(snapshot.state.companies)) {
       throw new Error('The backup does not contain a readable workspace.');
     }
-    return { snapshot, info };
+    return { snapshot, info, encrypted };
   } finally {
     copy.close();
+    if (temporary) await unlink(temporary).catch(() => {});
   }
 }
 
@@ -2712,6 +2789,10 @@ async function handleBackupApi(request, response, url) {
         keep: backupKeep,
         hours: backupHours,
         offsite: { configured: Boolean(r2Config), bucket: r2Config?.bucket ?? '' },
+        encryption: {
+          configured: Boolean(backupEncryptionPassphrase),
+          algorithm: 'AES-256-GCM',
+        },
       });
     } catch {
       json(response, 500, { ok: false, error: 'Could not list server backups.' });
@@ -2732,10 +2813,16 @@ async function handleBackupApi(request, response, url) {
     }
     try {
       const body = await readServerBackupBytes(name);
+      const encrypted = name.endsWith('.enc');
       response.writeHead(200, {
-        'content-type': name.endsWith('.json') ? 'application/json; charset=utf-8' : 'application/vnd.sqlite3',
+        'content-type': encrypted
+          ? 'application/octet-stream'
+          : name.includes('.json')
+            ? 'application/json; charset=utf-8'
+            : 'application/vnd.sqlite3',
         'content-disposition': `attachment; filename="${name}"`,
         'cache-control': 'no-store',
+        ...(encrypted ? { 'x-zledgercraft-encrypted': 'AES-256-GCM' } : {}),
       });
       response.end(body);
     } catch {

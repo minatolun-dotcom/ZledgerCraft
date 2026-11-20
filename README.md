@@ -99,7 +99,10 @@ dev workflow. Set `ZL_AUTH=1` to require login on localhost as well.
   Restoring replaces the books with that snapshot, creates a pre-restore
   backup first, and leaves server accounts and passwords unchanged. These
   copies stay on the server, so download one or copy it to separate storage for
-  disaster recovery.
+  disaster recovery. Set `ZL_BACKUP_PASSPHRASE` (12+ characters) to encrypt new
+  server backup files, including R2 uploads, with AES-256-GCM. Downloads stay
+  encrypted, and restore needs the same passphrase; keep it outside the backup
+  storage. Existing unencrypted backups remain readable without it.
 - LAN traffic is HTTP by default, so passwords and books are readable on the
   network path. For HTTPS, set `TLS_CERT_PATH` and `TLS_KEY_PATH`. Use this only
   on a trusted private network; do not forward the port from the internet.
@@ -523,8 +526,9 @@ disabled.
   passphrase is never stored or uploaded. Encrypted downloads require a secure
   context (HTTPS or localhost), so a plain-HTTP LAN page shows an explanation
   instead of the form. Restore accepts either plain or encrypted JSON and asks
-  for the passphrase when needed. The live workspace and server/R2 snapshots
-  remain unencrypted at rest.
+  for the passphrase when needed. The live workspace remains unencrypted at
+  rest; new server/R2 backup files can also be encrypted with
+  `ZL_BACKUP_PASSPHRASE`.
 - Backups include profiles and the audit trail. A restore keeps existing local
   profiles, merges the current log with the backup's log and appends a restore
   event rather than erasing history.

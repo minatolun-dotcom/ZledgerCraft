@@ -1,6 +1,6 @@
 # Cloud integration plan
 
-Last updated: 2026-11-19
+Last updated: 2026-11-20
 
 This is the working record for the Cloudflare Pages, Cloudflare R2, Resend and
 Neon integration. It records the agreed phases, decisions, implementation
@@ -304,6 +304,8 @@ feature without breaking local development or the single-file build.
 - `ZL_PG_POOL_SIZE` (optional, default 5)
 - `ZL_FUNCTION=1` (set by `neon.ts` for the Neon Function adapter)
 - `ZL_DATA_DIR`, `ZL_BACKUP_DIR` (function deployment uses `/tmp`; ephemeral)
+- `ZL_BACKUP_PASSPHRASE` (optional; 12+ characters, encrypts new server/R2
+  backup files with AES-256-GCM; keep it outside the backup destination)
 - `ZL_DISABLE_ENV_FILE=1` (optional; tests use this instead of `.env.local`)
 - `ZL_REPORT_SECRET` (required by `neon.ts` for the Function; otherwise signs
   report links and falls back to `DATABASE_URL` or the owner password)
@@ -322,6 +324,8 @@ feature without breaking local development or the single-file build.
 - `ZL_AUTH=1`
 - `ZL_OWNER_USER`, `ZL_OWNER_PASSWORD`, `ZL_OWNER_NAME`
 - `ZL_DATA_DIR`, `ZL_BACKUP_DIR`, `ZL_BACKUP_KEEP`, `ZL_BACKUP_HOURS`
+- `ZL_BACKUP_PASSPHRASE` (optional; 12+ characters; encrypts new server and R2
+  backup files; required to restore those files later)
 - `ZL_ALLOWED_IPS`, `TLS_CERT_PATH`, `TLS_KEY_PATH`
 
 ## Security decisions
@@ -329,7 +333,9 @@ feature without breaking local development or the single-file build.
 - R2 credentials must be scoped to one bucket and stored as server secrets.
 - Backups are sensitive. R2 provides encryption at rest, but provider-side
   encryption is not a substitute for client-side encryption or an offline key.
-  Do not put the only copy in the same account as the live database.
+  Set `ZL_BACKUP_PASSPHRASE` to encrypt app-created backup files with
+  AES-256-GCM. Do not put the only copy in the same account as the live
+  database, and keep the passphrase outside the backup destination.
 - Password-reset tokens are stored only as hashes, expire quickly, are single
   use and never reveal whether an account exists.
 - Email addresses are optional; existing username-only accounts must continue to
@@ -385,6 +391,7 @@ feature without breaking local development or the single-file build.
 | Concurrent merge history | pass | Merge tests assert changed field paths and overlapping fields; the server API test verifies a `workspace.merge` audit event for an accepted stale save |
 | Approval thresholds | pass | Store tests cover the threshold predicate and validation; the server API test allows a below-threshold accountant posting and rejects one at the threshold, while the existing all-voucher policy still blocks direct posting |
 | API usage counts | pass | SQLite API test asserts 24-hour and one-hour counts after the rate-limit loop; the Neon branch test reads counts from Postgres after three shared-limit requests |
+| Encrypted server backups | pass | `tests/server-backup-crypto.test.mjs` and `tests/server-backup-encryption.test.mjs` cover byte round trips, tamper/wrong-key rejection, encrypted `.enc` creation, encrypted downloads and restore with and without the key |
 
 ## Progress log
 
@@ -614,3 +621,19 @@ and operate the current server with R2 and Resend enabled.
   limit, revocation is immediate, and token create/revoke actions join the
   hash-chained server audit. The API is read-only; webhooks and write endpoints
   remain future work.
+
+### 2026-11-20 — Encrypted server and R2 backups
+
+- New server backup files are encrypted at rest when `ZL_BACKUP_PASSPHRASE` is
+  set. SQLite snapshots and Postgres JSON snapshots use the same
+  magic/salt/IV/ciphertext/tag container with scrypt key derivation and
+  AES-256-GCM.
+- Encrypted files use `.sqlite.enc` or `.json.enc`, R2 uploads use the same
+  encrypted file, and the owner download stays encrypted. Restore decrypts with
+  the configured passphrase and refuses an encrypted file when the key is
+  missing. Existing plaintext backups continue to list and restore.
+- The owner backup panel marks encrypted rows and says whether the deployment
+  key is configured. Interrupted encrypted backup/restore temporary plaintext
+  files are cleaned up rather than listed or served.
+- `neon.ts` forwards `ZL_BACKUP_PASSPHRASE` when present. The live workspace
+  itself remains unencrypted; this protects backup files and R2 objects only.

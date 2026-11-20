@@ -288,7 +288,13 @@ export let authUser = null;
 export let authInfo = null;
 export let authAccounts = [];
 export let serverBackups = [];
-export let serverBackupInfo = { keep: 7, hours: 24, offsite: { configured: false, bucket: '' }, history: [] };
+export let serverBackupInfo = {
+  keep: 7,
+  hours: 24,
+  offsite: { configured: false, bucket: '' },
+  encryption: { configured: false, algorithm: '' },
+  history: [],
+};
 export let reportSettings = {
   enabled: false,
   recipients: '',
@@ -454,6 +460,7 @@ async function refreshServerBackups() {
         keep: payload.keep ?? 7,
         hours: payload.hours ?? 24,
         offsite: payload.offsite ?? { configured: false, bucket: '' },
+        encryption: payload.encryption ?? { configured: false, algorithm: '' },
         history: Array.isArray(payload.history) ? payload.history : [],
       };
     }

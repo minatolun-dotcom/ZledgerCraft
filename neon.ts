@@ -14,6 +14,9 @@ export default defineConfig({
         ZL_PUBLIC_URL: { value: process.env.ZL_PUBLIC_URL, required: true },
         ZL_REPORT_SECRET: { value: process.env.ZL_REPORT_SECRET, required: true },
         ZL_SCHEDULER_SECRET: { value: process.env.ZL_SCHEDULER_SECRET, required: true },
+        ...(process.env.ZL_BACKUP_PASSPHRASE
+          ? { ZL_BACKUP_PASSPHRASE: { value: process.env.ZL_BACKUP_PASSPHRASE } }
+          : {}),
         R2_ACCOUNT_ID: { value: process.env.R2_ACCOUNT_ID, required: true },
         R2_ACCESS_KEY_ID: { value: process.env.R2_ACCESS_KEY_ID, required: true },
         R2_SECRET_ACCESS_KEY: { value: process.env.R2_SECRET_ACCESS_KEY, required: true },

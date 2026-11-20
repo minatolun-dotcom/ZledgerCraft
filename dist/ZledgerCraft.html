@@ -12124,7 +12124,7 @@ function serverUsersPanel({
         : '<tr><td colspan="5" class="muted">No server account events recorded yet.</td></tr>'}</tbody>
     </table></div>
     <h3 class="section-title">Server backups</h3>
-    <p class="muted small">A daily ${postgres ? 'Postgres JSON' : 'SQLite'} snapshot is created after the first save of the day and kept for ${serverBackupInfo.keep} snapshots at ${serverBackupInfo.hours}-hour intervals. ${serverBackupInfo.offsite?.configured ? `Verified snapshots are also uploaded to the configured R2 bucket (${esc(serverBackupInfo.offsite.bucket || 'offsite')}).` : 'These copies stay on this server; configure R2 for an offsite copy.'} Downloading a backup keeps an off-server copy. Restoring replaces the server books with that snapshot, creates a pre-restore backup first, and leaves server accounts and passwords unchanged.</p>
+    <p class="muted small">A daily ${postgres ? 'Postgres JSON' : 'SQLite'} snapshot is created after the first save of the day and kept for ${serverBackupInfo.keep} snapshots at ${serverBackupInfo.hours}-hour intervals. ${serverBackupInfo.offsite?.configured ? `Verified snapshots are also uploaded to the configured R2 bucket (${esc(serverBackupInfo.offsite.bucket || 'offsite')}).` : 'These copies stay on this server; configure R2 for an offsite copy.'} ${serverBackupInfo.encryption?.configured ? 'New local and R2 backup files are encrypted with AES-256-GCM. Downloads stay encrypted; restoring needs the same ZL_BACKUP_PASSPHRASE.' : 'Set ZL_BACKUP_PASSPHRASE to encrypt new local and R2 backup files at rest.'} Downloading a backup keeps an off-server copy. Restoring replaces the server books with that snapshot, creates a pre-restore backup first, and leaves server accounts and passwords unchanged.</p>
     <div class="form-actions">
       <button class="btn small primary" type="button" data-action="create-server-backup">Create backup now</button>
       <button class="btn small" type="button" data-action="refresh-server-backups">Refresh list</button>
@@ -12135,7 +12135,7 @@ function serverUsersPanel({
         ? serverBackups
             .map(
               (backup) => `<tr>
-                <td><code>${esc(backup.name)}</code></td>
+                <td><code>${esc(backup.name)}</code>${backup.encrypted ? ' <span class="badge">Encrypted</span>' : ''}</td>
                 <td>${esc(new Date(backup.createdAt).toLocaleString('en-IN'))}</td>
                 <td class="num">${esc(serverFileSize(backup.bytes))}</td>
                 <td class="row-actions"><a class="btn small" href="/api/backups/${encodeURIComponent(backup.name)}" download>Download</a><button class="btn small danger" type="button" data-action="restore-server-backup" data-id="${esc(backup.name)}">Restore</button></td>
@@ -17252,7 +17252,13 @@ let authUser = null;
 let authInfo = null;
 let authAccounts = [];
 let serverBackups = [];
-let serverBackupInfo = { keep: 7, hours: 24, offsite: { configured: false, bucket: '' }, history: [] };
+let serverBackupInfo = {
+  keep: 7,
+  hours: 24,
+  offsite: { configured: false, bucket: '' },
+  encryption: { configured: false, algorithm: '' },
+  history: [],
+};
 let reportSettings = {
   enabled: false,
   recipients: '',
@@ -17418,6 +17424,7 @@ async function refreshServerBackups() {
         keep: payload.keep ?? 7,
         hours: payload.hours ?? 24,
         offsite: payload.offsite ?? { configured: false, bucket: '' },
+        encryption: payload.encryption ?? { configured: false, algorithm: '' },
         history: Array.isArray(payload.history) ? payload.history : [],
       };
     }

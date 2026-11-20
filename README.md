@@ -346,6 +346,9 @@ disabled.
   equal credits, every amount is positive, and the date falls in the year.
 - Alter any voucher in place (numbering is kept unless the type changes),
   duplicate it, or delete it.
+- An unfinished new voucher is saved in browser storage as you type and restored
+  when the same company and voucher type are reopened. Saving or discarding the
+  draft clears it; drafts do not follow you to another browser or device.
 - Cheque/DD details on payment, receipt and contra vouchers: instrument type,
   number, instrument date and bank ledger. The selected bank must also appear on
   a voucher line. Instrument dates later than the voucher are marked post-dated.

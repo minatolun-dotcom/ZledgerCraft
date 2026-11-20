@@ -344,6 +344,18 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 26: unfinished-voucher recovery
+
+- A new voucher draft is written to browser storage shortly after typing stops
+  and restored when the same company and voucher type are reopened, with a
+  "Restored your unsaved voucher draft" notice. Saving clears it.
+- The draft key is per company and voucher type, is size-capped, and ignores
+  corrupt or mismatched payloads. Editing an existing voucher, or working in a
+  browser without storage, simply skips the feature.
+- Verification: read/ignore/oversize/clear helper tests, full suite and build;
+  267 tests (266 pass, 1 skipped) and a 902.8 kB build pass. The browser UI wiring
+  itself has no automated test.
+
 ### 2026-11-20 — Phase 25: expiring-batch report
 
 - Inventory now shows batches with stock whose expiry falls within 90 days of

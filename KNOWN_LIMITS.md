@@ -162,7 +162,7 @@ README. When a new limit is introduced, add it here in the same change.
 | KL-52 | Desktop-first layout | Responsive enough for tablet/desktop widths, but not a mobile-first or touch-first experience. |
 | KL-53 | India/INR assumptions | Indian numbering, rupee wording, Apr–Mar default year and en-IN formatting. Foreign currencies are supported on vouchers, but INR is always the base/reporting currency. No locale switcher, multi-language UI or alternative fiscal calendars. |
 | KL-54 | Date input display follows the browser | Stored dates are ISO, printed labels are `DD-Mon-YYYY`, but native date inputs display in the browser locale. |
-| KL-55 | No autosave of an unfinished voucher | Leaving voucher entry discards the draft; there is no recovery of unsaved entry. |
+| KL-55 | Draft recovery is local-only | A new voucher draft is saved to browser storage while typing and restored when the same company and voucher type are reopened; a saved voucher clears it. Drafts are not shared across browsers/devices, are not part of the workspace backup, and editing an existing voucher does not create a draft. |
 | KL-56 | No bulk edit or vouchers grid | Vouchers are altered one at a time; no spreadsheet-style bulk edit, column chooser or saved views. |
 | KL-57 | Limited performance benchmark | The Day Book now pages large results and a reproducible 10,000-voucher render benchmark exists in `tools/browser`, but import throughput, very large workspaces and long statement imports have no measured target or load test. |
 | KL-58 | Print alignment is not automated | Browser tests cover the preview and screen state, not physical printer or cheque stationery alignment. |

@@ -1240,10 +1240,63 @@ export function prepareDraft(type, source = null) {
   return draft;
 }
 
+const VOUCHER_DRAFT_PREFIX = 'zc.voucherDraft.';
+let voucherDraftTimer = null;
+
+function voucherDraftKey(companyId, type) {
+  return `${VOUCHER_DRAFT_PREFIX}${companyId}.${type}`;
+}
+
+export function readVoucherDraft(company, type) {
+  if (!company?.id || typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(voucherDraftKey(company.id, type));
+    if (!raw || raw.length > 200000) return null;
+    const saved = JSON.parse(raw);
+    if (!saved || saved.type !== type || !Array.isArray(saved.lines)) return null;
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
+export function clearVoucherDraft(company, type) {
+  if (!company?.id || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(voucherDraftKey(company.id, type));
+  } catch {
+    // A full or unavailable storage area should not block voucher entry.
+  }
+}
+
+function saveVoucherDraft() {
+  if (!draft || view.screen !== 'voucherNew' || view.editId || view.pendingEdit) return;
+  const active = company();
+  const form = document.getElementById('voucher-form');
+  if (!active?.id || !form || typeof localStorage === 'undefined') return;
+  try {
+    const snapshot = { ...readVoucherForm(), orderId: draft.orderId || '' };
+    localStorage.setItem(voucherDraftKey(active.id, snapshot.type), JSON.stringify(snapshot));
+  } catch {
+    // Ignore quota errors; the draft is a convenience, not the save of record.
+  }
+}
+
+function scheduleVoucherDraftSave() {
+  if (voucherDraftTimer) clearTimeout(voucherDraftTimer);
+  voucherDraftTimer = setTimeout(saveVoucherDraft, 400);
+}
+
 export function openVoucher(type) {
   if (!requirePermission('voucher.write')) return;
   if (!requireCompany()) return;
-  prepareDraft(type);
+  const active = company();
+  const saved = readVoucherDraft(active, type);
+  prepareDraft(type, saved);
+  if (saved) {
+    draft.orderId = saved.orderId || null;
+    setFlash('Restored your unsaved voucher draft.');
+  }
   navigate('voucherNew', { type });
 }
 
@@ -2095,7 +2148,11 @@ export function render() {
     const source = view.editId
       ? company()?.vouchers.find((item) => item.id === view.editId) ?? null
       : null;
-    prepareDraft(view.type || 'Payment', source);
+    const saved = !source && !view.pendingEdit
+      ? readVoucherDraft(company(), view.type || 'Payment')
+      : null;
+    prepareDraft(view.type || 'Payment', source ?? saved);
+    if (!source && saved) draft.orderId = saved.orderId || null;
   }
   const active = company();
   const wasSearch = view.screen === 'ledgerPick';
@@ -3224,6 +3281,7 @@ export async function handleSubmit(event) {
       showFormError(result.error);
       return;
     }
+    clearVoucherDraft(active, draft.type);
     const instrumentNote = result.voucher.instrument
       ? ` · ${result.voucher.instrument.kind} ${result.voucher.instrument.number} dated ${dateLabel(result.voucher.instrument.date)}`
       : '';
@@ -5194,6 +5252,7 @@ export function resetPeriodFilters() {
 
 export function handleChange(event) {
   const target = event.target;
+  if (target.closest?.('#voucher-form')) scheduleVoucherDraftSave();
   if (target.matches?.('input[type="file"][data-xlsx-target]')) {
     const file = target.files?.[0];
     if (!file) return;
@@ -5358,6 +5417,7 @@ export function previewRestore(payload) {
 
 export function handleInput(event) {
   const target = event.target;
+  if (target.closest?.('#voucher-form')) scheduleVoucherDraftSave();
   if (target.matches('#restore-form textarea')) {
     previewRestore(target.value);
     return;

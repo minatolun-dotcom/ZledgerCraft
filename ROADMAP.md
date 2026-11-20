@@ -344,6 +344,17 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 34: editable cost masters
+
+- Cost categories can be renamed and cost centres renamed or moved to another
+  category, with the usual non-empty and unique-name checks. Voucher lines, cost
+  centre budgets and reports keep pointing at the same IDs.
+- The cost-centre master screen gains Edit and Cancel actions and prefilled
+  forms; duplicate names are rejected case-insensitively.
+- Verification: rename, duplicate, empty name, missing master, move category,
+  invalid category and allocation preservation; 276 tests (275 pass, 1 skipped)
+  and a 924.4 kB build pass.
+
 ### 2026-11-20 — Phase 33: joining and exit proration
 
 - Employees can carry an optional date of exit (validated as a real date not

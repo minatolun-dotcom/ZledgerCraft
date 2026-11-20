@@ -2323,6 +2323,23 @@ export function addCostCategory(company, input = {}) {
   return { ok: true, category };
 }
 
+export function updateCostCategory(company, categoryId, input = {}) {
+  const category = (company.costCategories ?? []).find((item) => item.id === categoryId);
+  if (!category) return { ok: false, error: 'Cost category not found.' };
+  const name = String(input.name ?? '').trim();
+  if (!name) return { ok: false, error: 'Cost category name is required.' };
+  if (name.length > 80) return { ok: false, error: 'Cost category name must be 80 characters or fewer.' };
+  if (
+    (company.costCategories ?? []).some(
+      (item) => item.id !== categoryId && item.name.toLowerCase() === name.toLowerCase(),
+    )
+  ) {
+    return { ok: false, error: `A cost category named "${name}" already exists.` };
+  }
+  category.name = name;
+  return { ok: true, category };
+}
+
 export function deleteCostCategory(company, categoryId) {
   const category = (company.costCategories ?? []).find((item) => item.id === categoryId);
   if (!category) return { ok: false, error: 'Cost category not found.' };
@@ -2347,6 +2364,26 @@ export function addCostCentre(company, input = {}) {
   company.costCentres = company.costCentres ?? [];
   const centre = { id: uid('cc'), name, categoryId: category.id, createdAt: new Date().toISOString() };
   company.costCentres.push(centre);
+  return { ok: true, centre };
+}
+
+export function updateCostCentre(company, centreId, input = {}) {
+  const centre = (company.costCentres ?? []).find((item) => item.id === centreId);
+  if (!centre) return { ok: false, error: 'Cost centre not found.' };
+  const name = String(input.name ?? '').trim();
+  if (!name) return { ok: false, error: 'Cost centre name is required.' };
+  if (name.length > 80) return { ok: false, error: 'Cost centre name must be 80 characters or fewer.' };
+  if (
+    (company.costCentres ?? []).some(
+      (item) => item.id !== centreId && item.name.toLowerCase() === name.toLowerCase(),
+    )
+  ) {
+    return { ok: false, error: `A cost centre named "${name}" already exists.` };
+  }
+  const category = (company.costCategories ?? []).find((item) => item.id === input.categoryId);
+  if (!category) return { ok: false, error: 'Choose a cost category for this centre.' };
+  centre.name = name;
+  centre.categoryId = category.id;
   return { ok: true, centre };
 }
 

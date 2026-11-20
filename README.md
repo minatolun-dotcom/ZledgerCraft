@@ -314,8 +314,9 @@ disabled.
   years can be reopened. Reports reset to the selected year when you switch.
 - All standard Tally groups, plus custom groups under any group (they inherit
   the nature of their primary group).
-- Cost categories and cost centres with add/delete masters. Categories without
-  centres and centres used by vouchers are protected from deletion.
+- Cost categories and cost centres with add, rename and delete masters, and a
+  centre can be moved to another category. Categories without centres and
+  centres used by vouchers are protected from deletion.
 - Annual budgets per ledger, group or cost centre for a financial year, with
   add, edit, delete and "duplicate next year" masters. One budget per target per
   year is enforced; cost-centre budgets measure spend tagged to that centre.
@@ -661,7 +662,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts and joining/exit proration, one journal-posting run per month, employee-wise salary register and printable payslips; no attendance/leave/arrears, formula or percentage pay heads, PF/ESI/PT computation, employer contributions, ECR/returns, Form 24Q/16 or salary payment workflow |
 | Bank reconciliation and statement import | Covered — CSV statement import, auto/manual matching and book balance; no OFX/QIF or live bank feeds |
 | Cheque/DD details, cheque printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque preview/print and a reconciliation-aware Cheque / DD register; no magnetic-ink cheque stationery presets |
-| Cost centres and cost-category reports | Covered — categories, centres, one centre per voucher line, summary and break-up; no split allocations or unallocated reconciliation |
+| Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary and break-up; no merging categories, split allocations or unallocated reconciliation |
 | Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance and over-budget status; no phased, revised, approval or cost-centre budgets |
 | Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting and an unrealised forex revaluation report; no realised gain/loss posting, foreign inventory/bill allocations or interest calculation |
 | Multiple financial years per company, year-end closing and carry-forward | Covered — year selector, close/reopen and automatic next year; no closing journal is written because balances are cumulative |

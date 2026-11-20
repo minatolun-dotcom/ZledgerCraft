@@ -703,6 +703,12 @@ export function budgetMastersPanel(active) {
 export function costCentreMastersPanel(active) {
   const categories = active.costCategories ?? [];
   const centres = active.costCentres ?? [];
+  const editingCategory = view.editingCostCategoryId
+    ? categories.find((category) => category.id === view.editingCostCategoryId) ?? null
+    : null;
+  const editingCentre = view.editingCostCentreId
+    ? centres.find((centre) => centre.id === view.editingCostCentreId) ?? null
+    : null;
   const categoryRows = categories
     .map((category) => {
       const count = centres.filter((centre) => centre.categoryId === category.id).length;
@@ -710,6 +716,7 @@ export function costCentreMastersPanel(active) {
         <td><strong>${esc(category.name)}</strong></td>
         <td class="num">${count}</td>
         <td class="row-actions">
+          <button class="btn small" type="button" data-action="edit-cost-category" data-id="${esc(category.id)}">Edit</button>
           <button class="btn small danger" type="button" data-action="delete-cost-category" data-id="${esc(category.id)}"
             ${count > 0 || categories.length <= 1 ? 'disabled' : ''}>Delete</button>
         </td>
@@ -725,6 +732,7 @@ export function costCentreMastersPanel(active) {
         <td class="muted">${esc(category?.name ?? 'Unknown')}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
+          <button class="btn small" type="button" data-action="edit-cost-centre" data-id="${esc(centre.id)}">Edit</button>
           <button class="btn small danger" type="button" data-action="delete-cost-centre" data-id="${esc(centre.id)}"
             ${used > 0 ? 'disabled' : ''}>Delete</button>
         </td>
@@ -739,8 +747,9 @@ export function costCentreMastersPanel(active) {
       <div>
         <h3 class="column-title">Cost categories</h3>
         <form id="cost-category-form" class="inline-form" novalidate>
-          <input name="name" maxlength="80" placeholder="e.g. Departments" required>
-          <button class="btn small" type="submit">Add category</button>
+          <input name="name" maxlength="80" placeholder="e.g. Departments" value="${esc(editingCategory?.name ?? '')}" required>
+          <button class="btn small" type="submit">${editingCategory ? 'Save category' : 'Add category'}</button>
+          ${editingCategory ? '<button class="btn small ghost" type="button" data-action="cancel-cost-category-edit">Cancel</button>' : ''}
         </form>
         <p id="cost-category-error" class="form-error" role="alert"></p>
         <table class="data-table compact">
@@ -751,12 +760,14 @@ export function costCentreMastersPanel(active) {
       <div>
         <h3 class="column-title">Cost centres</h3>
         <form id="cost-centre-form" class="inline-form" novalidate>
-          <input name="name" maxlength="80" placeholder="e.g. Sales team" required>
+          <input name="name" maxlength="80" placeholder="e.g. Sales team" value="${esc(editingCentre?.name ?? '')}" required>
           <select name="categoryId" aria-label="Cost category">
-            ${categories.map((category) => `<option value="${esc(category.id)}">${esc(category.name)}</option>`).join('')}
+            ${categories.map((category) => `<option value="${esc(category.id)}"${editingCentre?.categoryId === category.id ? ' selected' : ''}>${esc(category.name)}</option>`).join('')}
           </select>
-          <button class="btn small" type="submit">Add centre</button>
+          <button class="btn small" type="submit">${editingCentre ? 'Save centre' : 'Add centre'}</button>
+          ${editingCentre ? '<button class="btn small ghost" type="button" data-action="cancel-cost-centre-edit">Cancel</button>' : ''}
         </form>
+        <p class="muted small">Renaming or moving a centre keeps voucher allocations, budgets and reports tied to it.</p>
         <p id="cost-centre-error" class="form-error" role="alert"></p>
         ${centres.length
           ? `<table class="data-table compact">

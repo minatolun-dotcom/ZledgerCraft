@@ -112,6 +112,8 @@ import {
   updateLedger,
   updateStockItem,
   updateBudget,
+  updateCostCategory,
+  updateCostCentre,
   updateCurrencyRate,
   updatePendingVoucher,
   updateVoucher,
@@ -3255,15 +3257,24 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = addCostCategory(active, { name: data.get('name') });
+    const editingCategoryId = view.editingCostCategoryId;
+    const result = editingCategoryId
+      ? updateCostCategory(active, editingCategoryId, { name: data.get('name') })
+      : addCostCategory(active, { name: data.get('name') });
     if (!result.ok) {
       showFormError(result.error, 'cost-category-error');
       return;
     }
-    logAudit('costCategory.create', `Added cost category "${result.category.name}".`, active, result.category.name);
+    logAudit(
+      editingCategoryId ? 'costCategory.update' : 'costCategory.create',
+      `${editingCategoryId ? 'Renamed' : 'Added'} cost category "${result.category.name}".`,
+      active,
+      result.category.name,
+    );
     persist();
-    setFlash(`Cost category "${result.category.name}" added.`);
-    render();
+    setFlash(`Cost category "${result.category.name}" ${editingCategoryId ? 'saved' : 'added'}.`);
+    if (editingCategoryId) navigate('costCentres');
+    else render();
     return;
   }
 
@@ -3273,18 +3284,25 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    const result = addCostCentre(active, {
-      name: data.get('name'),
-      categoryId: data.get('categoryId'),
-    });
+    const editingCentreId = view.editingCostCentreId;
+    const payload = { name: data.get('name'), categoryId: data.get('categoryId') };
+    const result = editingCentreId
+      ? updateCostCentre(active, editingCentreId, payload)
+      : addCostCentre(active, payload);
     if (!result.ok) {
       showFormError(result.error, 'cost-centre-error');
       return;
     }
-    logAudit('costCentre.create', `Added cost centre "${result.centre.name}".`, active, result.centre.name);
+    logAudit(
+      editingCentreId ? 'costCentre.update' : 'costCentre.create',
+      `${editingCentreId ? 'Updated' : 'Added'} cost centre "${result.centre.name}".`,
+      active,
+      result.centre.name,
+    );
     persist();
-    setFlash(`Cost centre "${result.centre.name}" added.`);
-    render();
+    setFlash(`Cost centre "${result.centre.name}" ${editingCentreId ? 'saved' : 'added'}.`);
+    if (editingCentreId) navigate('costCentres');
+    else render();
     return;
   }
 
@@ -3943,6 +3961,18 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'edit-cost-category':
+      navigate('costCentres', { editingCostCategoryId: trigger.dataset.id });
+      break;
+    case 'cancel-cost-category-edit':
+      navigate('costCentres');
+      break;
+    case 'edit-cost-centre':
+      navigate('costCentres', { editingCostCentreId: trigger.dataset.id });
+      break;
+    case 'cancel-cost-centre-edit':
+      navigate('costCentres');
+      break;
     case 'delete-cost-category': {
       if (!can('master.delete')) {
         requirePermission('master.delete');

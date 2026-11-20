@@ -13,6 +13,8 @@ import {
   findLedgerByName,
   importState,
   normalizeCostMasters,
+  updateCostCategory,
+  updateCostCentre,
 } from '../src/store.js';
 import { costCentreBreakup, costCentreSummary } from '../src/accounting.js';
 
@@ -57,6 +59,37 @@ test('a new company has a primary cost category and cost centres validate', () =
   });
   assert.equal(payment.ok, false);
   assert.match(payment.error, /cost centre no longer exists/i);
+});
+
+test('cost categories can be renamed and centres moved between categories', () => {
+  const { company, bank, rent, admin, category } = costFixture();
+  const payment = addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: rent.id, side: 'Dr', amount: 500, costCentreId: admin.id },
+      { ledgerId: bank.id, side: 'Cr', amount: 500 },
+    ],
+  });
+  assert.equal(payment.ok, true, payment.error);
+
+  const renamed = updateCostCategory(company, category.id, { name: 'Business units' });
+  assert.equal(renamed.ok, true, renamed.error);
+  assert.equal(renamed.category.name, 'Business units');
+  assert.equal(company.costCategories.find((entry) => entry.id === category.id).name, 'Business units');
+  assert.equal(updateCostCategory(company, category.id, { name: 'primary cost category' }).ok, false);
+  assert.equal(updateCostCategory(company, category.id, { name: ' ' }).ok, false);
+  assert.equal(updateCostCategory(company, 'missing', { name: 'Other' }).ok, false);
+
+  const second = addCostCategory(company, { name: 'Support' }).category;
+  const moved = updateCostCentre(company, admin.id, { name: 'Admin & HR', categoryId: second.id });
+  assert.equal(moved.ok, true, moved.error);
+  assert.equal(moved.centre.name, 'Admin & HR');
+  assert.equal(moved.centre.categoryId, second.id);
+  assert.equal(costCentreUsage(company, admin.id), 1, 'renaming and moving keeps voucher allocations');
+  assert.equal(updateCostCentre(company, admin.id, { name: 'Sales team', categoryId: second.id }).ok, false);
+  assert.equal(updateCostCentre(company, admin.id, { name: 'Ops', categoryId: 'missing' }).ok, false);
+  assert.equal(updateCostCentre(company, 'missing', { name: 'Ops', categoryId: second.id }).ok, false);
 });
 
 test('cost allocations roll up by centre and category', () => {

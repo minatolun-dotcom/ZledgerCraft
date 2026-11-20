@@ -1229,11 +1229,12 @@ export function normalizeGst(company) {
         label: String(rate.label ?? '').trim().slice(0, 40) || gstRateLabel(value, cess),
         rate: value,
         cess,
+        ...(isValidIsoDate(String(rate.effectiveFrom ?? '')) ? { effectiveFrom: String(rate.effectiveFrom) } : {}),
       };
     })
     .filter((rate) => {
       if (!rate) return false;
-      const key = `${rate.rate}:${rate.cess}`;
+      const key = `${rate.rate}:${rate.cess}:${rate.effectiveFrom ?? ''}`;
       if (seenRates.has(key)) return false;
       seenRates.add(key);
       return true;
@@ -2527,11 +2528,13 @@ export function addGstRate(company, input = {}) {
   if (cess === null || cess < 0 || cess > 50) return { ok: false, error: 'Cess rate must be between 0% and 50%.' };
   company.gst = company.gst ?? normalizeGst(company).gst;
   company.gst.rates = company.gst.rates ?? [];
-  if (company.gst.rates.some((entry) => entry.rate === rate && entry.cess === cess)) {
-    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists in the rate master.` };
+  const effectiveFrom = String(input.effectiveFrom ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective date.' };
+  if (company.gst.rates.some((entry) => entry.rate === rate && entry.cess === cess && (entry.effectiveFrom ?? '') === effectiveFrom)) {
+    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with that effective date.` };
   }
   const label = String(input.label ?? '').trim().slice(0, 40) || gstRateLabel(rate, cess);
-  const entry = { id: uid('gst'), label, rate, cess };
+  const entry = { id: uid('gst'), label, rate, cess, ...(effectiveFrom ? { effectiveFrom } : {}) };
   company.gst.rates.push(entry);
   return { ok: true, rate: entry };
 }
@@ -2543,17 +2546,21 @@ export function updateGstRate(company, rateId, input = {}) {
   const cess = parseAmount(input.cess === undefined ? entry.cess ?? 0 : input.cess);
   if (rate === null || rate < 0 || rate > 50) return { ok: false, error: 'GST rate must be between 0% and 50%.' };
   if (cess === null || cess < 0 || cess > 50) return { ok: false, error: 'Cess rate must be between 0% and 50%.' };
+  const effectiveFrom = String(input.effectiveFrom ?? entry.effectiveFrom ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective date.' };
   if (
     (company.gst.rates ?? []).some(
-      (other) => other.id !== rateId && other.rate === rate && (other.cess ?? 0) === cess,
+      (other) => other.id !== rateId && other.rate === rate && (other.cess ?? 0) === cess && (other.effectiveFrom ?? '') === effectiveFrom,
     )
   ) {
-    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists in the rate master.` };
+    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with that effective date.` };
   }
   const label = String(input.label ?? '').trim().slice(0, 40) || gstRateLabel(rate, cess);
   entry.label = label;
   entry.rate = rate;
   entry.cess = cess;
+  if (effectiveFrom) entry.effectiveFrom = effectiveFrom;
+  else delete entry.effectiveFrom;
   return { ok: true, rate: entry };
 }
 
@@ -4624,6 +4631,24 @@ export function addStockTransfer(company, input) {
   };
   company.stockTransfers.push(transfer);
   return { ok: true, transfer };
+}
+
+export function updateStockTransfer(company, transferId, input = {}) {
+  const index = (company.stockTransfers ?? []).findIndex((entry) => entry.id === transferId);
+  if (index < 0) return { ok: false, error: 'Stock transfer not found.' };
+  const original = company.stockTransfers[index];
+  company.stockTransfers.splice(index, 1);
+  const result = addStockTransfer(company, input);
+  if (!result.ok) {
+    company.stockTransfers.splice(index, 0, original);
+    return result;
+  }
+  const updated = company.stockTransfers.pop();
+  updated.id = original.id;
+  updated.no = original.no;
+  updated.createdAt = original.createdAt;
+  company.stockTransfers.splice(index, 0, updated);
+  return { ok: true, transfer: updated };
 }
 
 export function deleteStockTransfer(company, transferId) {

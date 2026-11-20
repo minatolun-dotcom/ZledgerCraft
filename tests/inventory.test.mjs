@@ -36,6 +36,7 @@ import {
   stockBatchesOnHand,
   stockOnHand,
   updateStockItem,
+  updateStockTransfer,
   updateVoucher,
 } from '../src/store.js';
 import {
@@ -673,6 +674,18 @@ test('stock transfers move quantity between godowns and are guarded', () => {
   });
   assert.equal(tooMuch.ok, false);
   assert.match(tooMuch.error, /Only 6/);
+
+  const edited = updateStockTransfer(company, transfer.transfer.id, {
+    date: '2026-04-03',
+    fromGodownId: main,
+    toGodownId: warehouse.id,
+    stockItemId: item.id,
+    qty: 2,
+  });
+  assert.equal(edited.ok, true, edited.error);
+  assert.equal(edited.transfer.id, transfer.transfer.id);
+  assert.equal(edited.transfer.no, transfer.transfer.no);
+  assert.equal(godownStockSummary(company).rows.find((row) => row.godownId === main).closingQty, 8);
 
   assert.equal(deleteGodown(company, warehouse.id).ok, false);
   assert.match(deleteGodown(company, warehouse.id).error, /used/);

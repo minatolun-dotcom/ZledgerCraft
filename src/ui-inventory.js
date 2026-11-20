@@ -230,11 +230,11 @@ export function orderItemRow(active) {
   </div>`;
 }
 
-export function stockTransferItemRow(active) {
+export function stockTransferItemRow(active, line = {}) {
   return `<div class="bom-row transfer-row">
-    <label class="field"><span>Item</span><select name="transferItemId">${stockItemSelectOptions(active, '')}</select></label>
-    <label class="field"><span>Batch (if tracked)</span><input name="transferBatchNo" maxlength="30" placeholder="e.g. LOT-24" aria-label="Batch"></label>
-    <label class="field"><span>Quantity</span><input name="transferQty" inputmode="decimal" placeholder="0" aria-label="Transfer quantity"></label>
+    <label class="field"><span>Item</span><select name="transferItemId">${stockItemSelectOptions(active, line.stockItemId ?? '')}</select></label>
+    <label class="field"><span>Batch (if tracked)</span><input name="transferBatchNo" maxlength="30" placeholder="e.g. LOT-24" aria-label="Batch" value="${esc(line.batchNo ?? '')}"></label>
+    <label class="field"><span>Quantity</span><input name="transferQty" inputmode="decimal" placeholder="0" aria-label="Transfer quantity" value="${line.qty ? esc(fmtQty(line.qty)) : ''}"></label>
     <button class="btn small ghost" type="button" data-action="remove-transfer-line">Remove</button>
   </div>`;
 }
@@ -267,6 +267,9 @@ export function inventoryScreen() {
   const transfers = [...(active.stockTransfers ?? [])].sort(
     (a, b) => b.date.localeCompare(a.date) || b.no - a.no,
   );
+  const editingTransfer = view.stockTransferId
+    ? (active.stockTransfers ?? []).find((transfer) => transfer.id === view.stockTransferId) ?? null
+    : null;
   const boms = [...(active.boms ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   const manufactures = [...(active.manufactures ?? [])].sort(
     (a, b) => b.date.localeCompare(a.date) || b.no - a.no,
@@ -531,7 +534,7 @@ export function inventoryScreen() {
         <td>${lines.length ? lineNames : '<span class="muted">No items</span>'}</td>
         <td class="num">${lineQtys}</td>
         <td class="muted">${esc(transfer.narration || '—')}</td>
-        <td class="row-actions"><button class="btn small danger" type="button" data-action="delete-stock-transfer" data-id="${esc(transfer.id)}">Delete</button></td>
+        <td class="row-actions"><button class="btn small ghost" type="button" data-action="edit-stock-transfer" data-id="${esc(transfer.id)}">Edit</button><button class="btn small danger" type="button" data-action="delete-stock-transfer" data-id="${esc(transfer.id)}">Delete</button></td>
       </tr>`;
     })
     .join('');
@@ -779,16 +782,16 @@ export function inventoryScreen() {
     ${panel(
       'Stock transfers',
       `<form id="stock-transfer-form" class="form-grid" novalidate>
-        <label class="field"><span>Date</span><input name="date" type="date" value="${esc(todayIso() >= booksStart(active) && todayIso() <= to ? todayIso() : active.fyStart)}" min="${esc(booksStart(active))}" required></label>
-        <label class="field"><span>From godown</span><select name="fromGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
-        <label class="field"><span>To godown</span><select name="toGodownId">${godownSelectOptions(active, godowns.find((godown) => !godown.primary)?.id ?? defaultGodownId(active))}</select></label>
-        <label class="field"><span>Narration</span><input name="narration" maxlength="400" placeholder="Optional reason or vehicle"></label>
+        <label class="field"><span>Date</span><input name="date" type="date" value="${esc(editingTransfer?.date ?? (todayIso() >= booksStart(active) && todayIso() <= to ? todayIso() : active.fyStart))}" min="${esc(booksStart(active))}" required></label>
+        <label class="field"><span>From godown</span><select name="fromGodownId">${godownSelectOptions(active, editingTransfer?.fromGodownId ?? defaultGodownId(active))}</select></label>
+        <label class="field"><span>To godown</span><select name="toGodownId">${godownSelectOptions(active, editingTransfer?.toGodownId ?? godowns.find((godown) => !godown.primary)?.id ?? defaultGodownId(active))}</select></label>
+        <label class="field"><span>Narration</span><input name="narration" maxlength="400" placeholder="Optional reason or vehicle" value="${esc(editingTransfer?.narration ?? '')}"></label>
         <div class="bom-components">
           <span class="muted small">Items moved between the godowns</span>
-          <div id="stock-transfer-lines">${stockTransferItemRow(active)}</div>
+          <div id="stock-transfer-lines">${editingTransfer?.items?.length ? editingTransfer.items.map((line) => stockTransferItemRow(active, line)).join('') : stockTransferItemRow(active)}</div>
           <button class="btn small" type="button" data-action="add-stock-transfer-line">Add item</button>
         </div>
-        <div class="field form-actions"><button class="btn primary" type="submit">Record transfer</button></div>
+        <div class="field form-actions"><button class="btn primary" type="submit">${editingTransfer ? 'Save transfer' : 'Record transfer'}</button>${editingTransfer ? '<button class="btn small ghost" type="button" data-action="cancel-stock-transfer-edit">Cancel</button>' : ''}</div>
         <p id="stock-transfer-error" class="form-error" role="alert"></p>
       </form>
       ${transfers.length

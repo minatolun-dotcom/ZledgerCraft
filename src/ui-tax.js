@@ -85,6 +85,7 @@ export function gstScreen() {
         <td><strong>${esc(rate.label)}</strong></td>
         <td class="num">${rate.rate}%</td>
         <td class="num">${rate.cess ? `${rate.cess}%` : '—'}</td>
+        <td>${rate.effectiveFrom ? esc(dateLabel(rate.effectiveFrom)) : '<span class="muted">Always</span>'}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-gst-rate" data-id="${esc(rate.id)}">Edit</button>
@@ -151,13 +152,14 @@ export function gstScreen() {
       <input name="label" maxlength="40" placeholder="Label (optional)" aria-label="GST rate label" value="${esc(editingGstRate?.label ?? '')}">
       <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="GST rate percent" value="${esc(editingGstRate?.rate ?? '')}" required>
       <input name="cess" inputmode="decimal" placeholder="Cess %" aria-label="Cess percent" value="${esc(editingGstRate?.cess ?? '')}">
+      <input name="effectiveFrom" type="date" aria-label="Effective from" value="${esc(editingGstRate?.effectiveFrom ?? '')}">
       <button class="btn small" type="submit">${editingGstRate ? 'Save rate' : 'Add rate'}</button>
       ${editingGstRate ? '<button class="btn small ghost" type="button" data-action="cancel-gst-rate-edit">Cancel</button>' : ''}
       <p id="gst-rate-error" class="form-error" role="alert"></p>
     </form>
-    <p class="muted small">Editing a rate changes future vouchers only; posted vouchers keep the rate they were saved with.</p>
+    <p class="muted small">A rate is selectable from its effective date onwards. Editing a rate changes future vouchers only; posted vouchers keep the rate they were saved with.</p>
     <div class="table-scroll" tabindex="0"><table class="data-table compact">
-      <thead><tr><th>Rate</th><th class="num">GST</th><th class="num">Cess</th><th class="num">Vouchers</th><th></th></tr></thead>
+      <thead><tr><th>Rate</th><th class="num">GST</th><th class="num">Cess</th><th>Effective from</th><th class="num">Vouchers</th><th></th></tr></thead>
       <tbody>${rateRows}</tbody>
     </table></div>`,
     'One rate applies to the whole invoice. Rates used by vouchers cannot be deleted.',

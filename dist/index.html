@@ -3655,11 +3655,12 @@ function normalizeGst(company) {
         label: String(rate.label ?? '').trim().slice(0, 40) || gstRateLabel(value, cess),
         rate: value,
         cess,
+        ...(isValidIsoDate(String(rate.effectiveFrom ?? '')) ? { effectiveFrom: String(rate.effectiveFrom) } : {}),
       };
     })
     .filter((rate) => {
       if (!rate) return false;
-      const key = `${rate.rate}:${rate.cess}`;
+      const key = `${rate.rate}:${rate.cess}:${rate.effectiveFrom ?? ''}`;
       if (seenRates.has(key)) return false;
       seenRates.add(key);
       return true;
@@ -4953,11 +4954,13 @@ function addGstRate(company, input = {}) {
   if (cess === null || cess < 0 || cess > 50) return { ok: false, error: 'Cess rate must be between 0% and 50%.' };
   company.gst = company.gst ?? normalizeGst(company).gst;
   company.gst.rates = company.gst.rates ?? [];
-  if (company.gst.rates.some((entry) => entry.rate === rate && entry.cess === cess)) {
-    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists in the rate master.` };
+  const effectiveFrom = String(input.effectiveFrom ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective date.' };
+  if (company.gst.rates.some((entry) => entry.rate === rate && entry.cess === cess && (entry.effectiveFrom ?? '') === effectiveFrom)) {
+    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with that effective date.` };
   }
   const label = String(input.label ?? '').trim().slice(0, 40) || gstRateLabel(rate, cess);
-  const entry = { id: uid('gst'), label, rate, cess };
+  const entry = { id: uid('gst'), label, rate, cess, ...(effectiveFrom ? { effectiveFrom } : {}) };
   company.gst.rates.push(entry);
   return { ok: true, rate: entry };
 }
@@ -4969,17 +4972,21 @@ function updateGstRate(company, rateId, input = {}) {
   const cess = parseAmount(input.cess === undefined ? entry.cess ?? 0 : input.cess);
   if (rate === null || rate < 0 || rate > 50) return { ok: false, error: 'GST rate must be between 0% and 50%.' };
   if (cess === null || cess < 0 || cess > 50) return { ok: false, error: 'Cess rate must be between 0% and 50%.' };
+  const effectiveFrom = String(input.effectiveFrom ?? entry.effectiveFrom ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective date.' };
   if (
     (company.gst.rates ?? []).some(
-      (other) => other.id !== rateId && other.rate === rate && (other.cess ?? 0) === cess,
+      (other) => other.id !== rateId && other.rate === rate && (other.cess ?? 0) === cess && (other.effectiveFrom ?? '') === effectiveFrom,
     )
   ) {
-    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists in the rate master.` };
+    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with that effective date.` };
   }
   const label = String(input.label ?? '').trim().slice(0, 40) || gstRateLabel(rate, cess);
   entry.label = label;
   entry.rate = rate;
   entry.cess = cess;
+  if (effectiveFrom) entry.effectiveFrom = effectiveFrom;
+  else delete entry.effectiveFrom;
   return { ok: true, rate: entry };
 }
 
@@ -7050,6 +7057,24 @@ function addStockTransfer(company, input) {
   };
   company.stockTransfers.push(transfer);
   return { ok: true, transfer };
+}
+
+function updateStockTransfer(company, transferId, input = {}) {
+  const index = (company.stockTransfers ?? []).findIndex((entry) => entry.id === transferId);
+  if (index < 0) return { ok: false, error: 'Stock transfer not found.' };
+  const original = company.stockTransfers[index];
+  company.stockTransfers.splice(index, 1);
+  const result = addStockTransfer(company, input);
+  if (!result.ok) {
+    company.stockTransfers.splice(index, 0, original);
+    return result;
+  }
+  const updated = company.stockTransfers.pop();
+  updated.id = original.id;
+  updated.no = original.no;
+  updated.createdAt = original.createdAt;
+  company.stockTransfers.splice(index, 0, updated);
+  return { ok: true, transfer: updated };
 }
 
 function deleteStockTransfer(company, transferId) {
@@ -17820,11 +17845,11 @@ function orderItemRow(active) {
   </div>`;
 }
 
-function stockTransferItemRow(active) {
+function stockTransferItemRow(active, line = {}) {
   return `<div class="bom-row transfer-row">
-    <label class="field"><span>Item</span><select name="transferItemId">${stockItemSelectOptions(active, '')}</select></label>
-    <label class="field"><span>Batch (if tracked)</span><input name="transferBatchNo" maxlength="30" placeholder="e.g. LOT-24" aria-label="Batch"></label>
-    <label class="field"><span>Quantity</span><input name="transferQty" inputmode="decimal" placeholder="0" aria-label="Transfer quantity"></label>
+    <label class="field"><span>Item</span><select name="transferItemId">${stockItemSelectOptions(active, line.stockItemId ?? '')}</select></label>
+    <label class="field"><span>Batch (if tracked)</span><input name="transferBatchNo" maxlength="30" placeholder="e.g. LOT-24" aria-label="Batch" value="${esc(line.batchNo ?? '')}"></label>
+    <label class="field"><span>Quantity</span><input name="transferQty" inputmode="decimal" placeholder="0" aria-label="Transfer quantity" value="${line.qty ? esc(fmtQty(line.qty)) : ''}"></label>
     <button class="btn small ghost" type="button" data-action="remove-transfer-line">Remove</button>
   </div>`;
 }
@@ -17857,6 +17882,9 @@ function inventoryScreen() {
   const transfers = [...(active.stockTransfers ?? [])].sort(
     (a, b) => b.date.localeCompare(a.date) || b.no - a.no,
   );
+  const editingTransfer = view.stockTransferId
+    ? (active.stockTransfers ?? []).find((transfer) => transfer.id === view.stockTransferId) ?? null
+    : null;
   const boms = [...(active.boms ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   const manufactures = [...(active.manufactures ?? [])].sort(
     (a, b) => b.date.localeCompare(a.date) || b.no - a.no,
@@ -18121,7 +18149,7 @@ function inventoryScreen() {
         <td>${lines.length ? lineNames : '<span class="muted">No items</span>'}</td>
         <td class="num">${lineQtys}</td>
         <td class="muted">${esc(transfer.narration || '—')}</td>
-        <td class="row-actions"><button class="btn small danger" type="button" data-action="delete-stock-transfer" data-id="${esc(transfer.id)}">Delete</button></td>
+        <td class="row-actions"><button class="btn small ghost" type="button" data-action="edit-stock-transfer" data-id="${esc(transfer.id)}">Edit</button><button class="btn small danger" type="button" data-action="delete-stock-transfer" data-id="${esc(transfer.id)}">Delete</button></td>
       </tr>`;
     })
     .join('');
@@ -18369,16 +18397,16 @@ function inventoryScreen() {
     ${panel(
       'Stock transfers',
       `<form id="stock-transfer-form" class="form-grid" novalidate>
-        <label class="field"><span>Date</span><input name="date" type="date" value="${esc(todayIso() >= booksStart(active) && todayIso() <= to ? todayIso() : active.fyStart)}" min="${esc(booksStart(active))}" required></label>
-        <label class="field"><span>From godown</span><select name="fromGodownId">${godownSelectOptions(active, defaultGodownId(active))}</select></label>
-        <label class="field"><span>To godown</span><select name="toGodownId">${godownSelectOptions(active, godowns.find((godown) => !godown.primary)?.id ?? defaultGodownId(active))}</select></label>
-        <label class="field"><span>Narration</span><input name="narration" maxlength="400" placeholder="Optional reason or vehicle"></label>
+        <label class="field"><span>Date</span><input name="date" type="date" value="${esc(editingTransfer?.date ?? (todayIso() >= booksStart(active) && todayIso() <= to ? todayIso() : active.fyStart))}" min="${esc(booksStart(active))}" required></label>
+        <label class="field"><span>From godown</span><select name="fromGodownId">${godownSelectOptions(active, editingTransfer?.fromGodownId ?? defaultGodownId(active))}</select></label>
+        <label class="field"><span>To godown</span><select name="toGodownId">${godownSelectOptions(active, editingTransfer?.toGodownId ?? godowns.find((godown) => !godown.primary)?.id ?? defaultGodownId(active))}</select></label>
+        <label class="field"><span>Narration</span><input name="narration" maxlength="400" placeholder="Optional reason or vehicle" value="${esc(editingTransfer?.narration ?? '')}"></label>
         <div class="bom-components">
           <span class="muted small">Items moved between the godowns</span>
-          <div id="stock-transfer-lines">${stockTransferItemRow(active)}</div>
+          <div id="stock-transfer-lines">${editingTransfer?.items?.length ? editingTransfer.items.map((line) => stockTransferItemRow(active, line)).join('') : stockTransferItemRow(active)}</div>
           <button class="btn small" type="button" data-action="add-stock-transfer-line">Add item</button>
         </div>
-        <div class="field form-actions"><button class="btn primary" type="submit">Record transfer</button></div>
+        <div class="field form-actions"><button class="btn primary" type="submit">${editingTransfer ? 'Save transfer' : 'Record transfer'}</button>${editingTransfer ? '<button class="btn small ghost" type="button" data-action="cancel-stock-transfer-edit">Cancel</button>' : ''}</div>
         <p id="stock-transfer-error" class="form-error" role="alert"></p>
       </form>
       ${transfers.length
@@ -19424,6 +19452,7 @@ function gstScreen() {
         <td><strong>${esc(rate.label)}</strong></td>
         <td class="num">${rate.rate}%</td>
         <td class="num">${rate.cess ? `${rate.cess}%` : '—'}</td>
+        <td>${rate.effectiveFrom ? esc(dateLabel(rate.effectiveFrom)) : '<span class="muted">Always</span>'}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-gst-rate" data-id="${esc(rate.id)}">Edit</button>
@@ -19490,13 +19519,14 @@ function gstScreen() {
       <input name="label" maxlength="40" placeholder="Label (optional)" aria-label="GST rate label" value="${esc(editingGstRate?.label ?? '')}">
       <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="GST rate percent" value="${esc(editingGstRate?.rate ?? '')}" required>
       <input name="cess" inputmode="decimal" placeholder="Cess %" aria-label="Cess percent" value="${esc(editingGstRate?.cess ?? '')}">
+      <input name="effectiveFrom" type="date" aria-label="Effective from" value="${esc(editingGstRate?.effectiveFrom ?? '')}">
       <button class="btn small" type="submit">${editingGstRate ? 'Save rate' : 'Add rate'}</button>
       ${editingGstRate ? '<button class="btn small ghost" type="button" data-action="cancel-gst-rate-edit">Cancel</button>' : ''}
       <p id="gst-rate-error" class="form-error" role="alert"></p>
     </form>
-    <p class="muted small">Editing a rate changes future vouchers only; posted vouchers keep the rate they were saved with.</p>
+    <p class="muted small">A rate is selectable from its effective date onwards. Editing a rate changes future vouchers only; posted vouchers keep the rate they were saved with.</p>
     <div class="table-scroll" tabindex="0"><table class="data-table compact">
-      <thead><tr><th>Rate</th><th class="num">GST</th><th class="num">Cess</th><th class="num">Vouchers</th><th></th></tr></thead>
+      <thead><tr><th>Rate</th><th class="num">GST</th><th class="num">Cess</th><th>Effective from</th><th class="num">Vouchers</th><th></th></tr></thead>
       <tbody>${rateRows}</tbody>
     </table></div>`,
     'One rate applies to the whole invoice. Rates used by vouchers cannot be deleted.',
@@ -22586,7 +22616,9 @@ function gstVoucherBlock(active) {
   if (draft.currencyCode && draft.currencyCode !== 'INR') return '';
   const rateOptions = [
     `<option value="">No GST</option>`,
-    ...(gst.rates ?? []).map(
+    ...(gst.rates ?? [])
+      .filter((rate) => !rate.effectiveFrom || !draft.date || rate.effectiveFrom <= draft.date)
+      .map(
       (rate) =>
         `<option value="${esc(rate.id)}"${draft.gst?.rateId === rate.id ? ' selected' : ''}>${esc(rate.label)}</option>`,
     ),
@@ -24047,26 +24079,31 @@ async function handleSubmit(event) {
       batchNo: row.querySelector('[name="transferBatchNo"]')?.value ?? '',
       qty: row.querySelector('[name="transferQty"]')?.value ?? '',
     }));
-    const result = addStockTransfer(active, {
+    const editingTransferId = view.stockTransferId;
+    const payload = {
       date: data.get('date'),
       fromGodownId: data.get('fromGodownId'),
       toGodownId: data.get('toGodownId'),
       items,
       narration: data.get('narration'),
-    });
+    };
+    const result = editingTransferId
+      ? updateStockTransfer(active, editingTransferId, payload)
+      : addStockTransfer(active, payload);
     if (!result.ok) {
       showFormError(result.error, 'stock-transfer-error');
       return;
     }
     const lineCount = result.transfer.items.length;
     logAudit(
-      'stockTransfer.create',
-      `Transferred ${lineCount} item${lineCount === 1 ? '' : 's'} as ST-${result.transfer.no}.`,
+      editingTransferId ? 'stockTransfer.update' : 'stockTransfer.create',
+      `${editingTransferId ? 'Updated' : 'Transferred'} ${lineCount} item${lineCount === 1 ? '' : 's'} as ST-${result.transfer.no}.`,
       active,
       `ST-${result.transfer.no}`,
     );
+    view.stockTransferId = null;
     persist();
-    setFlash(`Stock transfer ST-${result.transfer.no} recorded.`);
+    setFlash(`Stock transfer ST-${result.transfer.no} ${editingTransferId ? 'updated' : 'recorded'}.`);
     render();
     return;
   }
@@ -24249,6 +24286,7 @@ async function handleSubmit(event) {
       label: data.get('label'),
       rate: data.get('rate'),
       cess: data.get('cess') || 0,
+      effectiveFrom: data.get('effectiveFrom'),
     };
     const result = editingRateId
       ? updateGstRate(active, editingRateId, payload)
@@ -27026,6 +27064,22 @@ async function handleClick(event) {
         result.ok ? `Stock count SC-${result.count.no} deleted.` : result.error,
         result.ok ? 'ok' : 'warn',
       );
+      render();
+      break;
+    }
+
+    case 'edit-stock-transfer': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      view.stockTransferId = trigger.dataset.id;
+      render();
+      break;
+    }
+
+    case 'cancel-stock-transfer-edit': {
+      view.stockTransferId = null;
       render();
       break;
     }

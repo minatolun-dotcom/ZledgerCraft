@@ -516,6 +516,16 @@ test('altering a GST invoice recomputes its tax lines and total', () => {
   assert.equal(noGst.voucher.total, 1050);
 });
 
+test('GST rate effective dates allow a future rate change', () => {
+  const { company } = fixture();
+  const added = addGstRate(company, { rate: 18, effectiveFrom: '2026-07-01' });
+  assert.equal(added.ok, true, added.error);
+  assert.equal(added.rate.effectiveFrom, '2026-07-01');
+  assert.equal(addGstRate(company, { rate: 18, effectiveFrom: '2026-07-01' }).ok, false);
+  assert.equal(addGstRate(company, { rate: 18, effectiveFrom: 'not-a-date' }).ok, false);
+  assert.equal(updateGstRate(company, added.rate.id, { effectiveFrom: '2026-08-01' }).rate.effectiveFrom, '2026-08-01');
+});
+
 test('GST rates are unique and used rates cannot be deleted', () => {
   const { company, customer, sales } = fixture();
   const added = addGstRate(company, { label: '40% + 12% cess', rate: 40, cess: 12 });

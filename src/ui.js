@@ -36,6 +36,7 @@ import {
   addStockCount,
   addStockGroup,
   addStockTransfer,
+  updateStockTransfer,
   addTaxChallan,
   addStockItem,
   addTdsSection,
@@ -1538,7 +1539,9 @@ export function gstVoucherBlock(active) {
   if (draft.currencyCode && draft.currencyCode !== 'INR') return '';
   const rateOptions = [
     `<option value="">No GST</option>`,
-    ...(gst.rates ?? []).map(
+    ...(gst.rates ?? [])
+      .filter((rate) => !rate.effectiveFrom || !draft.date || rate.effectiveFrom <= draft.date)
+      .map(
       (rate) =>
         `<option value="${esc(rate.id)}"${draft.gst?.rateId === rate.id ? ' selected' : ''}>${esc(rate.label)}</option>`,
     ),
@@ -2999,26 +3002,31 @@ export async function handleSubmit(event) {
       batchNo: row.querySelector('[name="transferBatchNo"]')?.value ?? '',
       qty: row.querySelector('[name="transferQty"]')?.value ?? '',
     }));
-    const result = addStockTransfer(active, {
+    const editingTransferId = view.stockTransferId;
+    const payload = {
       date: data.get('date'),
       fromGodownId: data.get('fromGodownId'),
       toGodownId: data.get('toGodownId'),
       items,
       narration: data.get('narration'),
-    });
+    };
+    const result = editingTransferId
+      ? updateStockTransfer(active, editingTransferId, payload)
+      : addStockTransfer(active, payload);
     if (!result.ok) {
       showFormError(result.error, 'stock-transfer-error');
       return;
     }
     const lineCount = result.transfer.items.length;
     logAudit(
-      'stockTransfer.create',
-      `Transferred ${lineCount} item${lineCount === 1 ? '' : 's'} as ST-${result.transfer.no}.`,
+      editingTransferId ? 'stockTransfer.update' : 'stockTransfer.create',
+      `${editingTransferId ? 'Updated' : 'Transferred'} ${lineCount} item${lineCount === 1 ? '' : 's'} as ST-${result.transfer.no}.`,
       active,
       `ST-${result.transfer.no}`,
     );
+    view.stockTransferId = null;
     persist();
-    setFlash(`Stock transfer ST-${result.transfer.no} recorded.`);
+    setFlash(`Stock transfer ST-${result.transfer.no} ${editingTransferId ? 'updated' : 'recorded'}.`);
     render();
     return;
   }
@@ -3201,6 +3209,7 @@ export async function handleSubmit(event) {
       label: data.get('label'),
       rate: data.get('rate'),
       cess: data.get('cess') || 0,
+      effectiveFrom: data.get('effectiveFrom'),
     };
     const result = editingRateId
       ? updateGstRate(active, editingRateId, payload)
@@ -5978,6 +5987,22 @@ async function handleClick(event) {
         result.ok ? `Stock count SC-${result.count.no} deleted.` : result.error,
         result.ok ? 'ok' : 'warn',
       );
+      render();
+      break;
+    }
+
+    case 'edit-stock-transfer': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      view.stockTransferId = trigger.dataset.id;
+      render();
+      break;
+    }
+
+    case 'cancel-stock-transfer-edit': {
+      view.stockTransferId = null;
       render();
       break;
     }

@@ -14,6 +14,7 @@ import {
   exportState,
   findLedgerByName,
   importState,
+  postRecurringVoucher,
   saveGstSettings,
   saveTdsSettings,
   setNextVoucherNumber,
@@ -155,6 +156,25 @@ test('recurring templates copy a posted voucher and remain editable as a draft',
   assert.equal(added.template.total, source.total);
   assert.equal(deleteRecurringVoucher(company, added.template.id).ok, true);
   assert.equal(company.recurringVouchers.length, 0);
+});
+
+test('a due recurring template posts and advances its next date', () => {
+  const { company } = tradingFixture();
+  const source = company.vouchers.find((entry) => entry.type === 'Sales');
+  const added = addRecurringVoucher(company, {
+    voucherId: source.id,
+    name: 'Monthly sale',
+    frequency: 'Monthly',
+    nextDate: '2026-05-01',
+  });
+  assert.equal(added.ok, true, added.error);
+  const before = company.vouchers.length;
+  const posted = postRecurringVoucher(company, added.template.id);
+  assert.equal(posted.ok, true, posted.error);
+  assert.equal(company.vouchers.length, before + 1);
+  assert.equal(posted.voucher.date, '2026-05-01');
+  assert.equal(added.template.nextDate, '2026-06-01');
+  assert.equal(added.template.lastVoucherId, posted.voucher.id);
 });
 
 test('company consolidation aggregates each company without eliminating balances', () => {

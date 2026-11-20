@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { createCompany } from '../src/store.js';
+import { addCurrency, createCompany } from '../src/store.js';
 import {
   csvObjects,
   importStockItemCsv,
+  importCurrencyRateCsv,
   parseBankStatement,
   parseBankStatementCsv,
+  parseMt940Statement,
   parseOfxStatement,
   parseQifStatement,
   parseCsv,
@@ -90,6 +92,39 @@ test('OFX and QIF statements parse into signed bank lines', () => {
   assert.equal(qif.lines[0].amount, -75.5);
   assert.equal(qif.lines[1].amount, 1000);
   assert.equal(parseBankStatement('!Type:Bank\nD4/11/2026\nT-1\n^').ok, true);
+});
+
+test('MT940 transactions parse with signed amounts and details', () => {
+  const parsed = parseMt940Statement(
+    ':20:STATEMENT\n:60F:C260401INR1000,00\n:61:2604100410C200,00NTRFNONREF\n:86:Customer receipt\n:61:2604110411D50,25NCHQ123//CHQ-9\n:62F:C260430INR1149,75',
+  );
+  assert.equal(parsed.ok, true, parsed.error);
+  assert.equal(parsed.lines.length, 2);
+  assert.deepEqual(parsed.lines[0], {
+    date: '2026-04-10',
+    description: 'Customer receipt',
+    reference: '',
+    amount: 200,
+  });
+  assert.equal(parsed.lines[1].amount, -50.25);
+  assert.equal(parsed.lines[1].reference, 'CHQ-9');
+  assert.equal(parseBankStatement(':61:2604110411D1,00NTRF\n:86:Fee').ok, true);
+});
+
+test('currency-rate CSV import is atomic', () => {
+  const company = createCompany('Rate Import Co', '2026-04-01').company;
+  assert.equal(importCurrencyRateCsv('Code,Date,Rate\nUSD,2026-04-01,83\n', company).ok, false);
+  addCurrency(company, { code: 'USD', name: 'US Dollar', symbol: '$', date: '2026-04-01', rate: 83 });
+  const imported = importCurrencyRateCsv(
+    'Code,Date,Rate\nUSD,2026-04-10,84\nUSD,2026-04-15,85\n',
+    company,
+  );
+  assert.equal(imported.ok, true, imported.error);
+  assert.equal(imported.count, 2);
+  assert.equal(company.currencies.find((item) => item.code === 'USD').rates.length, 3);
+  const before = company.currencies.find((item) => item.code === 'USD').rates.length;
+  assert.equal(importCurrencyRateCsv('Code,Date,Rate\nUSD,2026-04-20,86\nUSD,2026-04-10,99', company).ok, false);
+  assert.equal(company.currencies.find((item) => item.code === 'USD').rates.length, before);
 });
 
 test('stock item CSV import resolves units and is all-or-nothing', () => {

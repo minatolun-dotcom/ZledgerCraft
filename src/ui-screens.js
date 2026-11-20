@@ -1185,6 +1185,9 @@ export function vouchersScreen() {
       <td class="num">${money(template.total)}</td>
       <td class="row-actions">
         <button class="btn small" type="button" data-action="use-recurring-voucher" data-id="${esc(template.id)}">Use</button>
+        ${template.nextDate <= todayIso()
+          ? `<button class="btn small primary" type="button" data-action="post-recurring-voucher" data-id="${esc(template.id)}"${can('voucher.write') ? '' : ' disabled'}>Post due</button>`
+          : ''}
         <button class="btn small danger" type="button" data-action="delete-recurring-voucher" data-id="${esc(template.id)}">Delete</button>
       </td>
     </tr>`)
@@ -1242,7 +1245,7 @@ export function vouchersScreen() {
       ${recurring.length
         ? `<table class="data-table compact"><thead><tr><th>Template</th><th>Next date</th><th class="num">Amount</th><th></th></tr></thead><tbody>${recurringRows}</tbody></table>`
         : '<p class="muted">No templates yet. Pick a posted voucher above to reuse its lines.</p>'}`,
-      'Use prefills a new voucher with the template lines and next date; it does not auto-post. The template is not advanced automatically.',
+      'Use prefills a new voucher for review. Post due creates the voucher immediately and advances the next date; templates above the approval threshold must still be posted manually.',
     )}`;
 }
 

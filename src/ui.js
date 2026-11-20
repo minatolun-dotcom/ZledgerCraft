@@ -102,6 +102,7 @@ import {
   postBankAdjustment,
   postForexRevaluation,
   postOverdueInterest,
+  postRecurringVoucher,
   postStockCount,
   rateForCurrency,
   reopenFinancialYear,
@@ -254,6 +255,7 @@ import {
   backupScreen,
   parseCsv,
   csvObjects,
+  importCurrencyRateCsv,
   importLedgerCsv,
   importStockItemCsv,
   importVoucherCsv,
@@ -4620,6 +4622,24 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'import-currency-rates': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const text = document.getElementById('currency-rate-csv')?.value ?? '';
+      const result = importCurrencyRateCsv(text);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit('currency.import', `Imported ${result.count} exchange rate${result.count === 1 ? '' : 's'} from CSV.`);
+      persist();
+      setFlash(`Imported ${result.count} exchange rate${result.count === 1 ? '' : 's'}.`);
+      render();
+      break;
+    }
     case 'import-stock-items': {
       if (!can('master.write')) {
         requirePermission('master.write');
@@ -5289,6 +5309,30 @@ async function handleClick(event) {
       prepareDraft(template.type, { ...template, date: template.nextDate });
       navigate('voucherNew', { type: template.type });
       setFlash(`Prefilled "${template.name}". Review and accept it.`, 'ok');
+      break;
+    }
+
+    case 'post-recurring-voucher': {
+      if (!requirePermission('voucher.write')) break;
+      const active = company();
+      if (!active || !window.confirm('Post this recurring template now and advance its next date?')) break;
+      const result = postRecurringVoucher(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'recurring.post',
+          `Posted recurring template "${result.template.name}" as voucher ${result.voucher.no}.`,
+          active,
+          result.template.id,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok
+          ? `Posted "${result.template.name}" as ${voucherLabel(result.voucher.type)} ${result.voucher.no}.`
+          : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
       break;
     }
 

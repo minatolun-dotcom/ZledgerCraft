@@ -3450,6 +3450,56 @@ export function addRecurringVoucher(company, input = {}) {
   return { ok: true, template };
 }
 
+function advanceRecurringDate(date, frequency) {
+  if (frequency === 'Weekly') {
+    const next = new Date(`${date}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 7);
+    return next.toISOString().slice(0, 10);
+  }
+  const months = frequency === 'Quarterly' ? 3 : frequency === 'Yearly' ? 12 : 1;
+  const current = new Date(`${date}T00:00:00Z`);
+  const day = current.getUTCDate();
+  current.setUTCDate(1);
+  current.setUTCMonth(current.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + 1, 0)).getUTCDate();
+  current.setUTCDate(Math.min(day, lastDay));
+  return current.toISOString().slice(0, 10);
+}
+
+export function postRecurringVoucher(company, templateId) {
+  const template = (company.recurringVouchers ?? []).find((entry) => entry.id === templateId);
+  if (!template) return { ok: false, error: 'Recurring template not found.' };
+  if (approvalRequiredForAmount(company, template.total)) {
+    return { ok: false, error: 'This template needs manual approval before posting.' };
+  }
+  const copy = JSON.parse(JSON.stringify(template));
+  const input = {
+    type: copy.type,
+    date: copy.nextDate,
+    narration: copy.narration,
+    lines: copy.lines,
+    ...(copy.items ? { items: copy.items } : {}),
+    ...(copy.bill ? { bill: copy.bill } : {}),
+    ...(copy.instrument ? { instrument: copy.instrument } : {}),
+    ...(copy.gst ? { gst: copy.gst } : {}),
+    ...(copy.tds ? { tds: copy.tds } : {}),
+    ...(copy.currencyCode
+      ? {
+          currencyCode: copy.currencyCode,
+          exchangeRate: copy.exchangeRate,
+          currencyTotal: copy.currencyTotal,
+        }
+      : {}),
+  };
+  const posted = addVoucher(company, input);
+  if (!posted.ok) return posted;
+  const postedDate = template.nextDate;
+  template.nextDate = advanceRecurringDate(postedDate, template.frequency);
+  template.lastPostedDate = postedDate;
+  template.lastVoucherId = posted.voucher.id;
+  return { ok: true, template, voucher: posted.voucher };
+}
+
 export function deleteRecurringVoucher(company, templateId) {
   const template = (company.recurringVouchers ?? []).find((entry) => entry.id === templateId);
   if (!template) return { ok: false, error: 'Recurring template not found.' };

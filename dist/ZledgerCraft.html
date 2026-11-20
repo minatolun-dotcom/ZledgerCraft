@@ -5876,6 +5876,56 @@ function addRecurringVoucher(company, input = {}) {
   return { ok: true, template };
 }
 
+function advanceRecurringDate(date, frequency) {
+  if (frequency === 'Weekly') {
+    const next = new Date(`${date}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 7);
+    return next.toISOString().slice(0, 10);
+  }
+  const months = frequency === 'Quarterly' ? 3 : frequency === 'Yearly' ? 12 : 1;
+  const current = new Date(`${date}T00:00:00Z`);
+  const day = current.getUTCDate();
+  current.setUTCDate(1);
+  current.setUTCMonth(current.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + 1, 0)).getUTCDate();
+  current.setUTCDate(Math.min(day, lastDay));
+  return current.toISOString().slice(0, 10);
+}
+
+function postRecurringVoucher(company, templateId) {
+  const template = (company.recurringVouchers ?? []).find((entry) => entry.id === templateId);
+  if (!template) return { ok: false, error: 'Recurring template not found.' };
+  if (approvalRequiredForAmount(company, template.total)) {
+    return { ok: false, error: 'This template needs manual approval before posting.' };
+  }
+  const copy = JSON.parse(JSON.stringify(template));
+  const input = {
+    type: copy.type,
+    date: copy.nextDate,
+    narration: copy.narration,
+    lines: copy.lines,
+    ...(copy.items ? { items: copy.items } : {}),
+    ...(copy.bill ? { bill: copy.bill } : {}),
+    ...(copy.instrument ? { instrument: copy.instrument } : {}),
+    ...(copy.gst ? { gst: copy.gst } : {}),
+    ...(copy.tds ? { tds: copy.tds } : {}),
+    ...(copy.currencyCode
+      ? {
+          currencyCode: copy.currencyCode,
+          exchangeRate: copy.exchangeRate,
+          currencyTotal: copy.currencyTotal,
+        }
+      : {}),
+  };
+  const posted = addVoucher(company, input);
+  if (!posted.ok) return posted;
+  const postedDate = template.nextDate;
+  template.nextDate = advanceRecurringDate(postedDate, template.frequency);
+  template.lastPostedDate = postedDate;
+  template.lastVoucherId = posted.voucher.id;
+  return { ok: true, template, voucher: posted.voucher };
+}
+
 function deleteRecurringVoucher(company, templateId) {
   const template = (company.recurringVouchers ?? []).find((entry) => entry.id === templateId);
   if (!template) return { ok: false, error: 'Recurring template not found.' };
@@ -15482,6 +15532,9 @@ function vouchersScreen() {
       <td class="num">${money(template.total)}</td>
       <td class="row-actions">
         <button class="btn small" type="button" data-action="use-recurring-voucher" data-id="${esc(template.id)}">Use</button>
+        ${template.nextDate <= todayIso()
+          ? `<button class="btn small primary" type="button" data-action="post-recurring-voucher" data-id="${esc(template.id)}"${can('voucher.write') ? '' : ' disabled'}>Post due</button>`
+          : ''}
         <button class="btn small danger" type="button" data-action="delete-recurring-voucher" data-id="${esc(template.id)}">Delete</button>
       </td>
     </tr>`)
@@ -15539,7 +15592,7 @@ function vouchersScreen() {
       ${recurring.length
         ? `<table class="data-table compact"><thead><tr><th>Template</th><th>Next date</th><th class="num">Amount</th><th></th></tr></thead><tbody>${recurringRows}</tbody></table>`
         : '<p class="muted">No templates yet. Pick a posted voucher above to reuse its lines.</p>'}`,
-      'Use prefills a new voucher with the template lines and next date; it does not auto-post. The template is not advanced automatically.',
+      'Use prefills a new voucher for review. Post due creates the voucher immediately and advances the next date; templates above the approval threshold must still be posted manually.',
     )}`;
 }
 
@@ -18464,6 +18517,31 @@ function importLedgerCsv(text) {
   return { ok: true, count: additions.length };
 }
 
+function importCurrencyRateCsv(text, target = null) {
+  const active = target ?? company();
+  if (!active) return { ok: false, error: 'Open a company first.' };
+  const parsed = csvObjects(text);
+  if (!parsed.ok) return parsed;
+  for (const column of ['code', 'date', 'rate']) {
+    if (!parsed.header.includes(column)) return { ok: false, error: `Currency-rate CSV needs a ${column} column.` };
+  }
+  const clone = JSON.parse(JSON.stringify(active));
+  const additions = [];
+  for (const record of parsed.rows) {
+    const code = String(record.code ?? '').trim().toUpperCase();
+    const date = parseStatementDate(record.date);
+    if (!date) return { ok: false, error: `Row ${record.__row}: date must be YYYY-MM-DD.` };
+    const result = addCurrencyRate(clone, code, { date, rate: record.rate });
+    if (!result.ok) return { ok: false, error: `Row ${record.__row}: ${result.error}` };
+    additions.push({ code, date, rate: record.rate });
+  }
+  for (const addition of additions) {
+    const result = addCurrencyRate(active, addition.code, addition);
+    if (!result.ok) return { ok: false, error: result.error };
+  }
+  return { ok: true, count: additions.length };
+}
+
 function importStockItemCsv(text, target = null) {
   const active = target ?? company();
   if (!active) return { ok: false, error: 'Open a company first.' };
@@ -18635,9 +18713,47 @@ function parseQifStatement(text) {
   return { ok: true, lines };
 }
 
+function parseMt940Statement(text) {
+  const sourceLines = String(text ?? '').split(/\r?\n/);
+  const lines = [];
+  for (let index = 0; index < sourceLines.length; index += 1) {
+    const line = sourceLines[index].trim();
+    if (!line.startsWith(':61:')) continue;
+    const match = line.slice(4).match(/^(\d{6})(\d{4})?((?:C|D|CR|DR))([\d,]+)/i);
+    if (!match) return { ok: false, error: 'An MT940 :61: line has an invalid date or amount.' };
+    const year = 2000 + Number(match[1].slice(0, 2));
+    const month = match[1].slice(2, 4);
+    const day = match[1].slice(4, 6);
+    const date = parseStatementDate(`${year}-${month}-${day}`);
+    const amount = parseAmount(match[4].replace(',', '.'));
+    if (!date) return { ok: false, error: 'An MT940 transaction has an invalid date.' };
+    if (amount === null || amount === 0) return { ok: false, error: 'An MT940 transaction has an invalid amount.' };
+    let description = '';
+    for (let next = index + 1; next < sourceLines.length; next += 1) {
+      const detail = sourceLines[next].trim();
+      if (detail.startsWith(':86:')) {
+        description = detail.slice(4).trim();
+        break;
+      }
+      if (detail.startsWith(':')) break;
+    }
+    const reference = line.slice(4).match(/\/\/(.+)$/)?.[1]?.trim() ?? '';
+    const credit = /^(C|CR)$/i.test(match[3]);
+    lines.push({
+      date,
+      description: description.slice(0, 200),
+      reference: reference.slice(0, 100),
+      amount: round2(credit ? amount : -amount),
+    });
+  }
+  if (!lines.length) return { ok: false, error: 'No MT940 :61: transactions were found.' };
+  return { ok: true, lines };
+}
+
 function parseBankStatement(text) {
   const source = String(text ?? '');
   if (/<OFX>|<STMTTRN>/i.test(source)) return parseOfxStatement(source);
+  if (/^:61:/m.test(source)) return parseMt940Statement(source);
   if (/^!Type:/im.test(source) || /^D\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/m.test(source)) {
     return parseQifStatement(source);
   }
@@ -20568,13 +20684,13 @@ function bankReconScreen() {
     ${canWrite
       ? panel(
           'Import bank statement',
-          `<p class="muted">Paste or choose CSV, OFX or QIF. CSV columns: <code>Date, Description, Reference, Debit, Credit</code>; dates accept YYYY-MM-DD or DD/MM/YYYY. OFX transactions use TRNAMT/DTPOSTED, and QIF uses D/T/P/N fields. Debit is money out; credit is money in. Importing replaces the current statement and its matches.</p>
+          `<p class="muted">Paste or choose CSV, OFX, QIF or MT940. CSV columns: <code>Date, Description, Reference, Debit, Credit</code>; dates accept YYYY-MM-DD or DD/MM/YYYY. OFX uses TRNAMT/DTPOSTED, QIF uses D/T/P/N and MT940 uses :61:/:86: fields. Debit is money out; credit is money in. Importing replaces the current statement and its matches.</p>
           <div class="pay-grid">
             <label class="field"><span>Opening balance (optional)</span><input id="bank-opening-balance" inputmode="decimal" placeholder="0.00"></label>
             <label class="field"><span>Closing balance (optional)</span><input id="bank-closing-balance" inputmode="decimal" placeholder="0.00"></label>
           </div>
           <p class="muted small">Provide both balances to check that opening plus statement movement equals closing. This validates the statement file, not the book balance.</p>
-          <label class="field"><span>Statement file (CSV, OFX or QIF)</span><input type="file" accept=".csv,.ofx,.qif,text/csv,application/x-ofx,application/qif" data-csv-target="bank-statement-csv"></label>
+          <label class="field"><span>Statement file (CSV, OFX, QIF or MT940)</span><input type="file" accept=".csv,.ofx,.qif,.sta,.mt940,text/csv,application/x-ofx,application/qif" data-csv-target="bank-statement-csv"></label>
           <textarea id="bank-statement-csv" class="backup-box import-box" rows="7" placeholder="Date,Description,Reference,Debit,Credit\n10/05/2026,Customer receipt,R1,,1000\n11/05/2026,Supplier payment,P1,500," aria-label="Bank statement CSV"></textarea>
           <div class="form-actions"><button class="btn small primary" type="button" data-action="import-bank-statement">Import statement</button></div>`,
         )
@@ -20616,6 +20732,13 @@ function importScreen() {
     <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="stock-item-csv"></label>
     <textarea id="stock-item-csv" class="backup-box import-box" rows="7" placeholder="Name,Group,Unit,Opening,Rate,Reorder,Selling,Purchase,HSN,Batch\nCotton Shirt,Primary,Nos,10,100,12,150,90,6109,No" aria-label="Stock item import CSV"></textarea>
     <div class="form-actions"><button class="btn small primary" type="button" data-action="import-stock-items"${can('master.write') ? '' : ' disabled'}>Import stock items</button></div>`,
+  )}
+  ${panel(
+    'Import currency rates from CSV',
+    `<p class="muted">Header: <code>Code, Date, Rate</code>. Date uses YYYY-MM-DD and the currency must already exist. The whole file is rejected if any row fails or duplicates an existing rate date.</p>
+    <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="currency-rate-csv"></label>
+    <textarea id="currency-rate-csv" class="backup-box import-box" rows="6" placeholder="Code,Date,Rate\nUSD,2026-04-01,83.25\nUSD,2026-04-15,84.10" aria-label="Currency rate import CSV"></textarea>
+    <div class="form-actions"><button class="btn small primary" type="button" data-action="import-currency-rates"${can('master.write') ? '' : ' disabled'}>Import rates</button></div>`,
   )}
   ${panel(
     'Import vouchers from CSV or Excel',
@@ -24967,6 +25090,24 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'import-currency-rates': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const text = document.getElementById('currency-rate-csv')?.value ?? '';
+      const result = importCurrencyRateCsv(text);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit('currency.import', `Imported ${result.count} exchange rate${result.count === 1 ? '' : 's'} from CSV.`);
+      persist();
+      setFlash(`Imported ${result.count} exchange rate${result.count === 1 ? '' : 's'}.`);
+      render();
+      break;
+    }
     case 'import-stock-items': {
       if (!can('master.write')) {
         requirePermission('master.write');
@@ -25636,6 +25777,30 @@ async function handleClick(event) {
       prepareDraft(template.type, { ...template, date: template.nextDate });
       navigate('voucherNew', { type: template.type });
       setFlash(`Prefilled "${template.name}". Review and accept it.`, 'ok');
+      break;
+    }
+
+    case 'post-recurring-voucher': {
+      if (!requirePermission('voucher.write')) break;
+      const active = company();
+      if (!active || !window.confirm('Post this recurring template now and advance its next date?')) break;
+      const result = postRecurringVoucher(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'recurring.post',
+          `Posted recurring template "${result.template.name}" as voucher ${result.voucher.no}.`,
+          active,
+          result.template.id,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok
+          ? `Posted "${result.template.name}" as ${voucherLabel(result.voucher.type)} ${result.voucher.no}.`
+          : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
       break;
     }
 

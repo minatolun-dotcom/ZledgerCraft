@@ -3,6 +3,7 @@
 import {
   VOUCHER_TYPES,
   booksStart,
+  addCurrencyRate,
   addLedger,
   addStockItem,
   addVoucher,
@@ -312,6 +313,31 @@ export function importLedgerCsv(text) {
   return { ok: true, count: additions.length };
 }
 
+export function importCurrencyRateCsv(text, target = null) {
+  const active = target ?? company();
+  if (!active) return { ok: false, error: 'Open a company first.' };
+  const parsed = csvObjects(text);
+  if (!parsed.ok) return parsed;
+  for (const column of ['code', 'date', 'rate']) {
+    if (!parsed.header.includes(column)) return { ok: false, error: `Currency-rate CSV needs a ${column} column.` };
+  }
+  const clone = JSON.parse(JSON.stringify(active));
+  const additions = [];
+  for (const record of parsed.rows) {
+    const code = String(record.code ?? '').trim().toUpperCase();
+    const date = parseStatementDate(record.date);
+    if (!date) return { ok: false, error: `Row ${record.__row}: date must be YYYY-MM-DD.` };
+    const result = addCurrencyRate(clone, code, { date, rate: record.rate });
+    if (!result.ok) return { ok: false, error: `Row ${record.__row}: ${result.error}` };
+    additions.push({ code, date, rate: record.rate });
+  }
+  for (const addition of additions) {
+    const result = addCurrencyRate(active, addition.code, addition);
+    if (!result.ok) return { ok: false, error: result.error };
+  }
+  return { ok: true, count: additions.length };
+}
+
 export function importStockItemCsv(text, target = null) {
   const active = target ?? company();
   if (!active) return { ok: false, error: 'Open a company first.' };
@@ -483,9 +509,47 @@ export function parseQifStatement(text) {
   return { ok: true, lines };
 }
 
+export function parseMt940Statement(text) {
+  const sourceLines = String(text ?? '').split(/\r?\n/);
+  const lines = [];
+  for (let index = 0; index < sourceLines.length; index += 1) {
+    const line = sourceLines[index].trim();
+    if (!line.startsWith(':61:')) continue;
+    const match = line.slice(4).match(/^(\d{6})(\d{4})?((?:C|D|CR|DR))([\d,]+)/i);
+    if (!match) return { ok: false, error: 'An MT940 :61: line has an invalid date or amount.' };
+    const year = 2000 + Number(match[1].slice(0, 2));
+    const month = match[1].slice(2, 4);
+    const day = match[1].slice(4, 6);
+    const date = parseStatementDate(`${year}-${month}-${day}`);
+    const amount = parseAmount(match[4].replace(',', '.'));
+    if (!date) return { ok: false, error: 'An MT940 transaction has an invalid date.' };
+    if (amount === null || amount === 0) return { ok: false, error: 'An MT940 transaction has an invalid amount.' };
+    let description = '';
+    for (let next = index + 1; next < sourceLines.length; next += 1) {
+      const detail = sourceLines[next].trim();
+      if (detail.startsWith(':86:')) {
+        description = detail.slice(4).trim();
+        break;
+      }
+      if (detail.startsWith(':')) break;
+    }
+    const reference = line.slice(4).match(/\/\/(.+)$/)?.[1]?.trim() ?? '';
+    const credit = /^(C|CR)$/i.test(match[3]);
+    lines.push({
+      date,
+      description: description.slice(0, 200),
+      reference: reference.slice(0, 100),
+      amount: round2(credit ? amount : -amount),
+    });
+  }
+  if (!lines.length) return { ok: false, error: 'No MT940 :61: transactions were found.' };
+  return { ok: true, lines };
+}
+
 export function parseBankStatement(text) {
   const source = String(text ?? '');
   if (/<OFX>|<STMTTRN>/i.test(source)) return parseOfxStatement(source);
+  if (/^:61:/m.test(source)) return parseMt940Statement(source);
   if (/^!Type:/im.test(source) || /^D\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/m.test(source)) {
     return parseQifStatement(source);
   }

@@ -359,13 +359,13 @@ export function bankReconScreen() {
     ${canWrite
       ? panel(
           'Import bank statement',
-          `<p class="muted">Paste or choose CSV, OFX or QIF. CSV columns: <code>Date, Description, Reference, Debit, Credit</code>; dates accept YYYY-MM-DD or DD/MM/YYYY. OFX transactions use TRNAMT/DTPOSTED, and QIF uses D/T/P/N fields. Debit is money out; credit is money in. Importing replaces the current statement and its matches.</p>
+          `<p class="muted">Paste or choose CSV, OFX, QIF or MT940. CSV columns: <code>Date, Description, Reference, Debit, Credit</code>; dates accept YYYY-MM-DD or DD/MM/YYYY. OFX uses TRNAMT/DTPOSTED, QIF uses D/T/P/N and MT940 uses :61:/:86: fields. Debit is money out; credit is money in. Importing replaces the current statement and its matches.</p>
           <div class="pay-grid">
             <label class="field"><span>Opening balance (optional)</span><input id="bank-opening-balance" inputmode="decimal" placeholder="0.00"></label>
             <label class="field"><span>Closing balance (optional)</span><input id="bank-closing-balance" inputmode="decimal" placeholder="0.00"></label>
           </div>
           <p class="muted small">Provide both balances to check that opening plus statement movement equals closing. This validates the statement file, not the book balance.</p>
-          <label class="field"><span>Statement file (CSV, OFX or QIF)</span><input type="file" accept=".csv,.ofx,.qif,text/csv,application/x-ofx,application/qif" data-csv-target="bank-statement-csv"></label>
+          <label class="field"><span>Statement file (CSV, OFX, QIF or MT940)</span><input type="file" accept=".csv,.ofx,.qif,.sta,.mt940,text/csv,application/x-ofx,application/qif" data-csv-target="bank-statement-csv"></label>
           <textarea id="bank-statement-csv" class="backup-box import-box" rows="7" placeholder="Date,Description,Reference,Debit,Credit\n10/05/2026,Customer receipt,R1,,1000\n11/05/2026,Supplier payment,P1,500," aria-label="Bank statement CSV"></textarea>
           <div class="form-actions"><button class="btn small primary" type="button" data-action="import-bank-statement">Import statement</button></div>`,
         )
@@ -407,6 +407,13 @@ export function importScreen() {
     <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="stock-item-csv"></label>
     <textarea id="stock-item-csv" class="backup-box import-box" rows="7" placeholder="Name,Group,Unit,Opening,Rate,Reorder,Selling,Purchase,HSN,Batch\nCotton Shirt,Primary,Nos,10,100,12,150,90,6109,No" aria-label="Stock item import CSV"></textarea>
     <div class="form-actions"><button class="btn small primary" type="button" data-action="import-stock-items"${can('master.write') ? '' : ' disabled'}>Import stock items</button></div>`,
+  )}
+  ${panel(
+    'Import currency rates from CSV',
+    `<p class="muted">Header: <code>Code, Date, Rate</code>. Date uses YYYY-MM-DD and the currency must already exist. The whole file is rejected if any row fails or duplicates an existing rate date.</p>
+    <label class="field"><span>CSV file</span><input type="file" accept=".csv,text/csv" data-csv-target="currency-rate-csv"></label>
+    <textarea id="currency-rate-csv" class="backup-box import-box" rows="6" placeholder="Code,Date,Rate\nUSD,2026-04-01,83.25\nUSD,2026-04-15,84.10" aria-label="Currency rate import CSV"></textarea>
+    <div class="form-actions"><button class="btn small primary" type="button" data-action="import-currency-rates"${can('master.write') ? '' : ' disabled'}>Import rates</button></div>`,
   )}
   ${panel(
     'Import vouchers from CSV or Excel',

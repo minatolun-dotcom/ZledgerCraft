@@ -1767,6 +1767,15 @@ function stockMovementEvents(company, to) {
     if (transfer.date > to) continue;
     events.push({ kind: 'transfer', date: transfer.date, no: Number(transfer.no) || 0, transfer });
   }
+  for (const adjustment of company.stockAdjustments ?? []) {
+    if (adjustment.date > to) continue;
+    events.push({
+      kind: 'adjustment',
+      date: adjustment.date,
+      no: Number(adjustment.no) || 0,
+      adjustment,
+    });
+  }
   for (const manufacture of company.manufactures ?? []) {
     if (manufacture.date > to) continue;
     events.push({
@@ -1851,6 +1860,26 @@ function applyStockEvent(states, event) {
       if (!state) continue;
       const moved = applyStockLine(state, event.voucher, itemId);
       if (moved) add(itemId, moved);
+    }
+    return moves;
+  }
+
+  if (event.kind === 'adjustment') {
+    for (const line of event.adjustment.rows ?? []) {
+      const state = states.get(line.stockItemId);
+      if (!state) continue;
+      const diff = round3(line.difference);
+      if (diff > 0) {
+        const value = round2(diff * state.lastCost);
+        state.qty = round3(state.qty + diff);
+        state.value = round2(state.value + value);
+        if (state.qty > 0) state.lastCost = round2(state.value / state.qty);
+        add(line.stockItemId, { inQty: diff, inValue: value, outQty: 0, outValue: 0 });
+      } else if (diff < 0) {
+        const qty = round3(Math.abs(diff));
+        const value = moveOut(state, qty);
+        add(line.stockItemId, { inQty: 0, inValue: 0, outQty: qty, outValue: value });
+      }
     }
     return moves;
   }
@@ -2112,6 +2141,14 @@ export function godownStockSummary(company, filters = {}) {
             quantityMapAdd(inward, event.transfer.toGodownId, qty);
           }
         }
+      } else if (event.kind === 'adjustment') {
+        for (const line of event.adjustment.rows ?? []) {
+          if (line.stockItemId !== item.id) continue;
+          const qty = round3(line.difference);
+          if (event.date < from) quantityMapAdd(opening, event.adjustment.godownId, qty);
+          else if (qty >= 0) quantityMapAdd(inward, event.adjustment.godownId, qty);
+          else quantityMapAdd(outward, event.adjustment.godownId, -qty);
+        }
       } else if (event.kind === 'manufacture') {
         const manufacture = event.manufacture;
         for (const line of manufacture.components ?? []) {
@@ -2216,6 +2253,15 @@ export function batchStockSummary(company, filters = {}) {
             quantityMapAdd(inward, key, qty);
           }
         }
+      } else if (event.kind === 'adjustment') {
+        for (const line of event.adjustment.rows ?? []) {
+          if (line.stockItemId !== item.id) continue;
+          const key = keyFor(line.batchNo);
+          const qty = round3(line.difference);
+          if (event.date < from) quantityMapAdd(opening, key, qty);
+          else if (qty >= 0) quantityMapAdd(inward, key, qty);
+          else quantityMapAdd(outward, key, -qty);
+        }
       } else if (event.kind === 'manufacture') {
         const manufacture = event.manufacture;
         if (manufacture.outputItemId === item.id) {
@@ -2302,6 +2348,13 @@ export function stockAgeing(company, filters = {}) {
         const qty = round3(line.qty);
         if (direction > 0) layersFor(line.stockItemId).push({ date: event.date, qty });
         else consumeAgeLayers(layersFor(line.stockItemId), qty);
+      }
+    } else if (event.kind === 'adjustment') {
+      for (const line of event.adjustment.rows ?? []) {
+        if (!records.has(line.stockItemId)) continue;
+        const qty = round3(line.difference);
+        if (qty > 0) layersFor(line.stockItemId).push({ date: event.date, qty });
+        else consumeAgeLayers(layersFor(line.stockItemId), -qty);
       }
     } else if (event.kind === 'manufacture') {
       const manufacture = event.manufacture;
@@ -2408,16 +2461,30 @@ export function stockMovements(company, itemId, filters = {}) {
     if (!moved) continue;
     rows.push({
       voucherId: event.kind === 'voucher' ? event.voucher.id : event[event.kind].id,
-      type: event.kind === 'manufacture' ? 'Manufacture' : event.kind === 'voucher' ? event.voucher.type : 'Transfer',
+      type:
+        event.kind === 'manufacture'
+          ? 'Manufacture'
+          : event.kind === 'adjustment'
+            ? 'Stock adjustment'
+            : event.kind === 'voucher'
+              ? event.voucher.type
+              : 'Transfer',
       no: event.kind === 'voucher' ? event.voucher.no : null,
-      label: event.kind === 'manufacture' ? `MFG-${event.no}` : null,
+      label:
+        event.kind === 'manufacture'
+          ? `MFG-${event.no}`
+          : event.kind === 'adjustment'
+            ? `SADJ-${event.no}`
+            : null,
       date: event.date,
       narration:
         event.kind === 'voucher'
           ? event.voucher.narration ?? ''
           : event.kind === 'manufacture'
             ? event.manufacture.narration ?? event.manufacture.bomName
-            : event.transfer.narration ?? '',
+            : event.kind === 'adjustment'
+              ? `Stock count SC-${event.adjustment.countNo}`
+              : event.transfer.narration ?? '',
       inQty: moved.inQty,
       inValue: moved.inValue,
       outQty: moved.outQty,

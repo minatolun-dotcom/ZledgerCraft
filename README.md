@@ -425,8 +425,10 @@ disabled.
 - Physical stock counts by godown: a dated count sheet snapshots the book
   quantity, records counted quantities and shows differences in a count
   register. Batch-tracked items are counted lot by lot, with an unlisted-lot row
-  for stock found outside the shown batches. Counts are working papers and do
-  not move stock or post an adjustment.
+  for stock found outside the shown batches. A count starts as a working paper;
+  posting its differences creates a SADJ stock adjustment that changes on-hand
+  quantities and stock value at weighted-average cost without posting a ledger
+  entry. Posted counts are locked against deletion.
 - Stock ageing buckets closing quantities by approximate FIFO receipt age
   (0–30, 31–60, 61–90, 91–180 and over 180 days), with the oldest remaining
   layer per item. Opening stock is the oldest layer and transfers are ignored.

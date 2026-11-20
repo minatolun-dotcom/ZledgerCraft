@@ -314,6 +314,7 @@ export function inventoryScreen() {
         <td>${esc(count.godownName || count.godownId)}</td>
         <td class="num">${count.rows.length}</td>
         <td class="num">${differences || '—'}</td>
+        <td>${count.adjustmentId ? `<strong>SADJ-${count.adjustmentNo}</strong>` : '<span class="muted">Open</span>'}</td>
         <td class="row-actions">
           <button class="btn small ghost" type="button" data-action="view-stock-count" data-id="${esc(count.id)}">View</button>
           <button class="btn small danger" type="button" data-action="delete-stock-count" data-id="${esc(count.id)}">Delete</button>
@@ -703,6 +704,10 @@ export function inventoryScreen() {
         ? `<div class="stock-count-detail">
             <h3>SC-${selectedCount.no} · ${esc(dateLabel(selectedCount.date))} · ${esc(selectedCount.godownName || selectedCount.godownId)}</h3>
             ${selectedCount.narration ? `<p class="muted">${esc(selectedCount.narration)}</p>` : ''}
+            ${selectedCount.adjustmentId
+              ? `<p class="muted">Posted as <strong>SADJ-${selectedCount.adjustmentNo}</strong>. On-hand quantities include this adjustment; no ledger entry was posted.</p>`
+              : `<p class="muted">Posting applies the counted differences as a stock adjustment. This changes on-hand quantities but does not post a ledger entry.</p>
+                <button class="btn small" type="button" data-action="post-stock-count" data-id="${esc(selectedCount.id)}">Post adjustment</button>`}
             <table class="data-table compact">
               <thead><tr><th>Item</th><th>Batch</th><th>Unit</th><th class="num">Book qty</th><th class="num">Counted</th><th class="num">Difference</th></tr></thead>
               <tbody>${stockCountDetailRows}</tbody>
@@ -711,7 +716,7 @@ export function inventoryScreen() {
         : ''}
       ${stockCounts.length
         ? `<table class="data-table compact">
-            <thead><tr><th>Count</th><th>Date</th><th>Godown</th><th class="num">Lines</th><th class="num">Differences</th><th></th></tr></thead>
+            <thead><tr><th>Count</th><th>Date</th><th>Godown</th><th class="num">Lines</th><th class="num">Differences</th><th>Adjustment</th><th></th></tr></thead>
             <tbody>${stockCountRows}</tbody>
           </table>`
         : '<p class="muted">No stock counts recorded yet.</p>'}`,

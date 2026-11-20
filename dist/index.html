@@ -4976,6 +4976,7 @@ function seedInventoryMasters(company) {
   }
   if (!Array.isArray(company.stockTransfers)) company.stockTransfers = [];
   if (!Array.isArray(company.stockCounts)) company.stockCounts = [];
+  if (!Array.isArray(company.stockAdjustments)) company.stockAdjustments = [];
   if (!Array.isArray(company.orders)) company.orders = [];
   if (!Array.isArray(company.boms)) company.boms = [];
   if (!Array.isArray(company.manufactures)) company.manufactures = [];
@@ -4991,6 +4992,10 @@ function seedInventoryMasters(company) {
   company.counters.__stockCount = Math.max(
     Number(company.counters.__stockCount) || 0,
     ...company.stockCounts.map((count) => Number(count.no) || 0),
+  );
+  company.counters.__stockAdjustment = Math.max(
+    Number(company.counters.__stockAdjustment) || 0,
+    ...company.stockAdjustments.map((adjustment) => Number(adjustment.no) || 0),
   );
   for (const type of ['Sales', 'Purchase']) {
     const key = type === 'Sales' ? '__salesOrder' : '__purchaseOrder';
@@ -6419,6 +6424,15 @@ function stockOnHand(company, itemId, asOn, options = {}) {
       if (!godownFilter || transfer.toGodownId === godownFilter) qty = round3(qty + qtyMoved);
     }
   }
+  for (const adjustment of company.stockAdjustments ?? []) {
+    if (adjustment.date > asOn) continue;
+    for (const line of adjustment.rows ?? []) {
+      if (line.stockItemId !== itemId) continue;
+      if (godownFilter && adjustment.godownId !== godownFilter) continue;
+      if (batchFilter !== null && (line.batchNo || OPENING_BATCH) !== batchFilter) continue;
+      qty = round3(qty + (Number(line.difference) || 0));
+    }
+  }
   const manufactures = (company.manufactures ?? [])
     .filter((manufacture) => manufacture.date <= asOn)
     .sort((a, b) => a.date.localeCompare(b.date) || (Number(a.no) || 0) - (Number(b.no) || 0));
@@ -6659,9 +6673,51 @@ function addStockCount(company, input) {
   return { ok: true, count };
 }
 
+function postStockCount(company, countId) {
+  const count = (company.stockCounts ?? []).find((entry) => entry.id === countId);
+  if (!count) return { ok: false, error: 'Stock count not found.' };
+  if (count.adjustmentId) return { ok: false, error: 'This stock count has already been posted.' };
+  seedYears(company);
+  const year = yearForDate(company, count.date);
+  if (!year) return { ok: false, error: 'The count date must fall inside a financial year.' };
+  if (year.closed) return { ok: false, error: 'The financial year is closed. Reopen it before posting the adjustment.' };
+  const rows = (count.rows ?? [])
+    .filter((row) => Math.abs(Number(row.difference) || 0) >= 0.0005)
+    .map((row) => ({
+      stockItemId: row.stockItemId,
+      ...(row.batchNo ? { batchNo: row.batchNo } : {}),
+      difference: round3(row.difference),
+    }));
+  if (!rows.length) return { ok: false, error: 'This count has no differences to post.' };
+  company.stockAdjustments = company.stockAdjustments ?? [];
+  company.counters = company.counters ?? {};
+  company.counters.__stockAdjustment = Math.max(
+    Number(company.counters.__stockAdjustment) || 0,
+    ...company.stockAdjustments.map((adjustment) => Number(adjustment.no) || 0),
+  ) + 1;
+  const adjustment = {
+    id: uid('sadj'),
+    no: company.counters.__stockAdjustment,
+    date: count.date,
+    godownId: count.godownId,
+    countId: count.id,
+    countNo: count.no,
+    rows,
+    createdAt: new Date().toISOString(),
+  };
+  company.stockAdjustments.push(adjustment);
+  count.adjustmentId = adjustment.id;
+  count.adjustmentNo = adjustment.no;
+  count.postedAt = adjustment.createdAt;
+  return { ok: true, count, adjustment };
+}
+
 function deleteStockCount(company, countId) {
   const count = (company.stockCounts ?? []).find((entry) => entry.id === countId);
   if (!count) return { ok: false, error: 'Stock count not found.' };
+  if (count.adjustmentId) {
+    return { ok: false, error: 'This count has posted a stock adjustment and cannot be deleted.' };
+  }
   company.stockCounts = (company.stockCounts ?? []).filter((entry) => entry.id !== countId);
   return { ok: true, count };
 }
@@ -8227,6 +8283,28 @@ function validateImportedCompany(company) {
       const systemQty = parseQty(row.systemQty ?? 0);
       if (countedQty === null || countedQty < 0 || systemQty === null || systemQty < 0) {
         return `Company "${name}": stock count ${count.no ?? ''} has an invalid quantity.`;
+      }
+    }
+  }
+
+  const adjustmentIds = new Set();
+  for (const adjustment of company.stockAdjustments ?? []) {
+    if (!adjustment || !adjustment.id || !isValidIsoDate(adjustment.date)) {
+      return `Company "${name}" has an invalid stock adjustment.`;
+    }
+    if (adjustmentIds.has(adjustment.id)) {
+      return `Company "${name}" has duplicate stock adjustment ids.`;
+    }
+    adjustmentIds.add(adjustment.id);
+    if (!godownIds.has(adjustment.godownId)) {
+      return `Company "${name}": stock adjustment ${adjustment.no ?? ''} points at a missing godown.`;
+    }
+    if (!Array.isArray(adjustment.rows) || adjustment.rows.length === 0) {
+      return `Company "${name}": stock adjustment ${adjustment.no ?? ''} has no lines.`;
+    }
+    for (const row of adjustment.rows) {
+      if (!stockItemIds.has(row.stockItemId) || parseQty(row.difference) === null) {
+        return `Company "${name}": stock adjustment ${adjustment.no ?? ''} has an invalid line.`;
       }
     }
   }
@@ -10381,6 +10459,15 @@ function stockMovementEvents(company, to) {
     if (transfer.date > to) continue;
     events.push({ kind: 'transfer', date: transfer.date, no: Number(transfer.no) || 0, transfer });
   }
+  for (const adjustment of company.stockAdjustments ?? []) {
+    if (adjustment.date > to) continue;
+    events.push({
+      kind: 'adjustment',
+      date: adjustment.date,
+      no: Number(adjustment.no) || 0,
+      adjustment,
+    });
+  }
   for (const manufacture of company.manufactures ?? []) {
     if (manufacture.date > to) continue;
     events.push({
@@ -10465,6 +10552,26 @@ function applyStockEvent(states, event) {
       if (!state) continue;
       const moved = applyStockLine(state, event.voucher, itemId);
       if (moved) add(itemId, moved);
+    }
+    return moves;
+  }
+
+  if (event.kind === 'adjustment') {
+    for (const line of event.adjustment.rows ?? []) {
+      const state = states.get(line.stockItemId);
+      if (!state) continue;
+      const diff = round3(line.difference);
+      if (diff > 0) {
+        const value = round2(diff * state.lastCost);
+        state.qty = round3(state.qty + diff);
+        state.value = round2(state.value + value);
+        if (state.qty > 0) state.lastCost = round2(state.value / state.qty);
+        add(line.stockItemId, { inQty: diff, inValue: value, outQty: 0, outValue: 0 });
+      } else if (diff < 0) {
+        const qty = round3(Math.abs(diff));
+        const value = moveOut(state, qty);
+        add(line.stockItemId, { inQty: 0, inValue: 0, outQty: qty, outValue: value });
+      }
     }
     return moves;
   }
@@ -10726,6 +10833,14 @@ function godownStockSummary(company, filters = {}) {
             quantityMapAdd(inward, event.transfer.toGodownId, qty);
           }
         }
+      } else if (event.kind === 'adjustment') {
+        for (const line of event.adjustment.rows ?? []) {
+          if (line.stockItemId !== item.id) continue;
+          const qty = round3(line.difference);
+          if (event.date < from) quantityMapAdd(opening, event.adjustment.godownId, qty);
+          else if (qty >= 0) quantityMapAdd(inward, event.adjustment.godownId, qty);
+          else quantityMapAdd(outward, event.adjustment.godownId, -qty);
+        }
       } else if (event.kind === 'manufacture') {
         const manufacture = event.manufacture;
         for (const line of manufacture.components ?? []) {
@@ -10830,6 +10945,15 @@ function batchStockSummary(company, filters = {}) {
             quantityMapAdd(inward, key, qty);
           }
         }
+      } else if (event.kind === 'adjustment') {
+        for (const line of event.adjustment.rows ?? []) {
+          if (line.stockItemId !== item.id) continue;
+          const key = keyFor(line.batchNo);
+          const qty = round3(line.difference);
+          if (event.date < from) quantityMapAdd(opening, key, qty);
+          else if (qty >= 0) quantityMapAdd(inward, key, qty);
+          else quantityMapAdd(outward, key, -qty);
+        }
       } else if (event.kind === 'manufacture') {
         const manufacture = event.manufacture;
         if (manufacture.outputItemId === item.id) {
@@ -10916,6 +11040,13 @@ function stockAgeing(company, filters = {}) {
         const qty = round3(line.qty);
         if (direction > 0) layersFor(line.stockItemId).push({ date: event.date, qty });
         else consumeAgeLayers(layersFor(line.stockItemId), qty);
+      }
+    } else if (event.kind === 'adjustment') {
+      for (const line of event.adjustment.rows ?? []) {
+        if (!records.has(line.stockItemId)) continue;
+        const qty = round3(line.difference);
+        if (qty > 0) layersFor(line.stockItemId).push({ date: event.date, qty });
+        else consumeAgeLayers(layersFor(line.stockItemId), -qty);
       }
     } else if (event.kind === 'manufacture') {
       const manufacture = event.manufacture;
@@ -11022,16 +11153,30 @@ function stockMovements(company, itemId, filters = {}) {
     if (!moved) continue;
     rows.push({
       voucherId: event.kind === 'voucher' ? event.voucher.id : event[event.kind].id,
-      type: event.kind === 'manufacture' ? 'Manufacture' : event.kind === 'voucher' ? event.voucher.type : 'Transfer',
+      type:
+        event.kind === 'manufacture'
+          ? 'Manufacture'
+          : event.kind === 'adjustment'
+            ? 'Stock adjustment'
+            : event.kind === 'voucher'
+              ? event.voucher.type
+              : 'Transfer',
       no: event.kind === 'voucher' ? event.voucher.no : null,
-      label: event.kind === 'manufacture' ? `MFG-${event.no}` : null,
+      label:
+        event.kind === 'manufacture'
+          ? `MFG-${event.no}`
+          : event.kind === 'adjustment'
+            ? `SADJ-${event.no}`
+            : null,
       date: event.date,
       narration:
         event.kind === 'voucher'
           ? event.voucher.narration ?? ''
           : event.kind === 'manufacture'
             ? event.manufacture.narration ?? event.manufacture.bomName
-            : event.transfer.narration ?? '',
+            : event.kind === 'adjustment'
+              ? `Stock count SC-${event.adjustment.countNo}`
+              : event.transfer.narration ?? '',
       inQty: moved.inQty,
       inValue: moved.inValue,
       outQty: moved.outQty,
@@ -17164,6 +17309,7 @@ function inventoryScreen() {
         <td>${esc(count.godownName || count.godownId)}</td>
         <td class="num">${count.rows.length}</td>
         <td class="num">${differences || '—'}</td>
+        <td>${count.adjustmentId ? `<strong>SADJ-${count.adjustmentNo}</strong>` : '<span class="muted">Open</span>'}</td>
         <td class="row-actions">
           <button class="btn small ghost" type="button" data-action="view-stock-count" data-id="${esc(count.id)}">View</button>
           <button class="btn small danger" type="button" data-action="delete-stock-count" data-id="${esc(count.id)}">Delete</button>
@@ -17553,6 +17699,10 @@ function inventoryScreen() {
         ? `<div class="stock-count-detail">
             <h3>SC-${selectedCount.no} · ${esc(dateLabel(selectedCount.date))} · ${esc(selectedCount.godownName || selectedCount.godownId)}</h3>
             ${selectedCount.narration ? `<p class="muted">${esc(selectedCount.narration)}</p>` : ''}
+            ${selectedCount.adjustmentId
+              ? `<p class="muted">Posted as <strong>SADJ-${selectedCount.adjustmentNo}</strong>. On-hand quantities include this adjustment; no ledger entry was posted.</p>`
+              : `<p class="muted">Posting applies the counted differences as a stock adjustment. This changes on-hand quantities but does not post a ledger entry.</p>
+                <button class="btn small" type="button" data-action="post-stock-count" data-id="${esc(selectedCount.id)}">Post adjustment</button>`}
             <table class="data-table compact">
               <thead><tr><th>Item</th><th>Batch</th><th>Unit</th><th class="num">Book qty</th><th class="num">Counted</th><th class="num">Difference</th></tr></thead>
               <tbody>${stockCountDetailRows}</tbody>
@@ -17561,7 +17711,7 @@ function inventoryScreen() {
         : ''}
       ${stockCounts.length
         ? `<table class="data-table compact">
-            <thead><tr><th>Count</th><th>Date</th><th>Godown</th><th class="num">Lines</th><th class="num">Differences</th><th></th></tr></thead>
+            <thead><tr><th>Count</th><th>Date</th><th>Godown</th><th class="num">Lines</th><th class="num">Differences</th><th>Adjustment</th><th></th></tr></thead>
             <tbody>${stockCountRows}</tbody>
           </table>`
         : '<p class="muted">No stock counts recorded yet.</p>'}`,
@@ -25443,6 +25593,33 @@ async function handleClick(event) {
 
     case 'cancel-stock-count': {
       view.stockCountDraft = null;
+      render();
+      break;
+    }
+
+    case 'post-stock-count': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Post the counted differences as a stock adjustment? This changes on-hand quantities but does not post a ledger entry.')) break;
+      const result = postStockCount(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'stockCount.post',
+          `Posted stock count SC-${result.count.no} as SADJ-${result.adjustment.no}.`,
+          active,
+          `SADJ-${result.adjustment.no}`,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok
+          ? `Stock count SC-${result.count.no} posted as SADJ-${result.adjustment.no}.`
+          : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
       render();
       break;
     }

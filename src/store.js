@@ -2614,6 +2614,7 @@ function seedInventoryMasters(company) {
   }
   if (!Array.isArray(company.stockTransfers)) company.stockTransfers = [];
   if (!Array.isArray(company.stockCounts)) company.stockCounts = [];
+  if (!Array.isArray(company.stockAdjustments)) company.stockAdjustments = [];
   if (!Array.isArray(company.orders)) company.orders = [];
   if (!Array.isArray(company.boms)) company.boms = [];
   if (!Array.isArray(company.manufactures)) company.manufactures = [];
@@ -2629,6 +2630,10 @@ function seedInventoryMasters(company) {
   company.counters.__stockCount = Math.max(
     Number(company.counters.__stockCount) || 0,
     ...company.stockCounts.map((count) => Number(count.no) || 0),
+  );
+  company.counters.__stockAdjustment = Math.max(
+    Number(company.counters.__stockAdjustment) || 0,
+    ...company.stockAdjustments.map((adjustment) => Number(adjustment.no) || 0),
   );
   for (const type of ['Sales', 'Purchase']) {
     const key = type === 'Sales' ? '__salesOrder' : '__purchaseOrder';
@@ -4057,6 +4062,15 @@ export function stockOnHand(company, itemId, asOn, options = {}) {
       if (!godownFilter || transfer.toGodownId === godownFilter) qty = round3(qty + qtyMoved);
     }
   }
+  for (const adjustment of company.stockAdjustments ?? []) {
+    if (adjustment.date > asOn) continue;
+    for (const line of adjustment.rows ?? []) {
+      if (line.stockItemId !== itemId) continue;
+      if (godownFilter && adjustment.godownId !== godownFilter) continue;
+      if (batchFilter !== null && (line.batchNo || OPENING_BATCH) !== batchFilter) continue;
+      qty = round3(qty + (Number(line.difference) || 0));
+    }
+  }
   const manufactures = (company.manufactures ?? [])
     .filter((manufacture) => manufacture.date <= asOn)
     .sort((a, b) => a.date.localeCompare(b.date) || (Number(a.no) || 0) - (Number(b.no) || 0));
@@ -4297,9 +4311,51 @@ export function addStockCount(company, input) {
   return { ok: true, count };
 }
 
+export function postStockCount(company, countId) {
+  const count = (company.stockCounts ?? []).find((entry) => entry.id === countId);
+  if (!count) return { ok: false, error: 'Stock count not found.' };
+  if (count.adjustmentId) return { ok: false, error: 'This stock count has already been posted.' };
+  seedYears(company);
+  const year = yearForDate(company, count.date);
+  if (!year) return { ok: false, error: 'The count date must fall inside a financial year.' };
+  if (year.closed) return { ok: false, error: 'The financial year is closed. Reopen it before posting the adjustment.' };
+  const rows = (count.rows ?? [])
+    .filter((row) => Math.abs(Number(row.difference) || 0) >= 0.0005)
+    .map((row) => ({
+      stockItemId: row.stockItemId,
+      ...(row.batchNo ? { batchNo: row.batchNo } : {}),
+      difference: round3(row.difference),
+    }));
+  if (!rows.length) return { ok: false, error: 'This count has no differences to post.' };
+  company.stockAdjustments = company.stockAdjustments ?? [];
+  company.counters = company.counters ?? {};
+  company.counters.__stockAdjustment = Math.max(
+    Number(company.counters.__stockAdjustment) || 0,
+    ...company.stockAdjustments.map((adjustment) => Number(adjustment.no) || 0),
+  ) + 1;
+  const adjustment = {
+    id: uid('sadj'),
+    no: company.counters.__stockAdjustment,
+    date: count.date,
+    godownId: count.godownId,
+    countId: count.id,
+    countNo: count.no,
+    rows,
+    createdAt: new Date().toISOString(),
+  };
+  company.stockAdjustments.push(adjustment);
+  count.adjustmentId = adjustment.id;
+  count.adjustmentNo = adjustment.no;
+  count.postedAt = adjustment.createdAt;
+  return { ok: true, count, adjustment };
+}
+
 export function deleteStockCount(company, countId) {
   const count = (company.stockCounts ?? []).find((entry) => entry.id === countId);
   if (!count) return { ok: false, error: 'Stock count not found.' };
+  if (count.adjustmentId) {
+    return { ok: false, error: 'This count has posted a stock adjustment and cannot be deleted.' };
+  }
   company.stockCounts = (company.stockCounts ?? []).filter((entry) => entry.id !== countId);
   return { ok: true, count };
 }
@@ -5865,6 +5921,28 @@ function validateImportedCompany(company) {
       const systemQty = parseQty(row.systemQty ?? 0);
       if (countedQty === null || countedQty < 0 || systemQty === null || systemQty < 0) {
         return `Company "${name}": stock count ${count.no ?? ''} has an invalid quantity.`;
+      }
+    }
+  }
+
+  const adjustmentIds = new Set();
+  for (const adjustment of company.stockAdjustments ?? []) {
+    if (!adjustment || !adjustment.id || !isValidIsoDate(adjustment.date)) {
+      return `Company "${name}" has an invalid stock adjustment.`;
+    }
+    if (adjustmentIds.has(adjustment.id)) {
+      return `Company "${name}" has duplicate stock adjustment ids.`;
+    }
+    adjustmentIds.add(adjustment.id);
+    if (!godownIds.has(adjustment.godownId)) {
+      return `Company "${name}": stock adjustment ${adjustment.no ?? ''} points at a missing godown.`;
+    }
+    if (!Array.isArray(adjustment.rows) || adjustment.rows.length === 0) {
+      return `Company "${name}": stock adjustment ${adjustment.no ?? ''} has no lines.`;
+    }
+    for (const row of adjustment.rows) {
+      if (!stockItemIds.has(row.stockItemId) || parseQty(row.difference) === null) {
+        return `Company "${name}": stock adjustment ${adjustment.no ?? ''} has an invalid line.`;
       }
     }
   }

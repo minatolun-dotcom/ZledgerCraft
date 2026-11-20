@@ -31,6 +31,7 @@ import {
   findLedgerByName,
   importState,
   orderRemainingItems,
+  postStockCount,
   setOrderStatus,
   stockBatchesOnHand,
   stockOnHand,
@@ -257,6 +258,28 @@ test('price list separates selling and purchase prices', () => {
   assert.equal(priceList(company, { priceType: 'purchase' }).rows[0].price, 101);
   updateStockItem(company, item.id, { sellingPrice: 0 });
   assert.equal(priceList(company).rows[0].hasPrice, false);
+});
+
+test('posting a stock count applies its differences without a ledger entry', () => {
+  const { company, item, purchase } = inventoryFixture();
+  purchase('2026-04-02', 4, 100);
+  const godownId = defaultGodownId(company);
+  const count = addStockCount(company, {
+    date: '2026-04-30',
+    godownId,
+    rows: [{ stockItemId: item.id, countedQty: 12 }],
+  });
+  assert.equal(count.ok, true, count.error);
+  const beforeVouchers = company.vouchers.length;
+  const posted = postStockCount(company, count.count.id);
+  assert.equal(posted.ok, true, posted.error);
+  assert.equal(posted.adjustment.no, 1);
+  assert.equal(stockOnHand(company, item.id, '2026-04-30', { godownId }), 12);
+  assert.equal(stockSummary(company).rows[0].closingQty, 12);
+  assert.equal(stockSummary(company).rows[0].closingValue, 1200);
+  assert.equal(company.vouchers.length, beforeVouchers, 'posting does not create a voucher');
+  assert.equal(postStockCount(company, count.count.id).ok, false, 'cannot post twice');
+  assert.equal(deleteStockCount(company, count.count.id).ok, false, 'posted count is locked');
 });
 
 test('stock counts snapshot book quantities without moving stock', () => {

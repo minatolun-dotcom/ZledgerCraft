@@ -99,6 +99,7 @@ import {
   payrollBankTransferRows,
   payrollLedgers,
   payrollMonthEnd,
+  postStockCount,
   rateForCurrency,
   reopenFinancialYear,
   recordAudit,
@@ -5614,6 +5615,33 @@ async function handleClick(event) {
 
     case 'cancel-stock-count': {
       view.stockCountDraft = null;
+      render();
+      break;
+    }
+
+    case 'post-stock-count': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Post the counted differences as a stock adjustment? This changes on-hand quantities but does not post a ledger entry.')) break;
+      const result = postStockCount(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'stockCount.post',
+          `Posted stock count SC-${result.count.no} as SADJ-${result.adjustment.no}.`,
+          active,
+          `SADJ-${result.adjustment.no}`,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok
+          ? `Stock count SC-${result.count.no} posted as SADJ-${result.adjustment.no}.`
+          : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
       render();
       break;
     }

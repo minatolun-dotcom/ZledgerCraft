@@ -99,7 +99,7 @@ export const SCREEN_TITLES = {
   bankRecon: 'Bank Reconciliation',
   payroll: 'Payroll',
   payrollRun: 'Run payroll',
-  chequePrint: 'Cheque printing',
+  chequePrint: 'Instrument printing',
   backup: 'Backup & restore',
   importData: 'Import data',
 };

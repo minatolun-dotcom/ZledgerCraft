@@ -188,42 +188,73 @@ export function postDatedScreen() {
 }
 
 export function chequePrintScreen() {
-  if (!company()) return emptyCompanyScreen('Cheque print');
+  if (!company()) return emptyCompanyScreen('Instrument print');
   const active = company();
   const voucher = active.vouchers.find((item) => item.id === view.id);
-  if (!voucher || voucher.type !== 'Payment' || voucher.instrument?.kind !== 'Cheque') {
+  if (
+    !voucher ||
+    !['Payment', 'Receipt', 'Contra'].includes(voucher.type) ||
+    !['Cheque', 'DD'].includes(voucher.instrument?.kind)
+  ) {
     return panel(
-      'Cheque print',
-      `<p class="muted">Cheque printing is available for payment vouchers with cheque details.</p>
+      'Instrument print',
+      `<p class="muted">Printing is available for payment vouchers with cheque or DD details and receipt vouchers with instrument details.</p>
        <button class="btn" type="button" data-screen="gateway">Back to Gateway</button>`,
     );
   }
-  const bank = active.ledgers.find((ledger) => ledger.id === voucher.instrument.bankLedgerId);
-  const payee =
+  const instrument = voucher.instrument;
+  const bank = active.ledgers.find((ledger) => ledger.id === instrument.bankLedgerId);
+  const isPayment = voucher.type === 'Payment';
+  const party =
     voucher.lines
-      .filter((line) => line.side === 'Dr' && line.ledgerId !== voucher.instrument.bankLedgerId)
+      .filter((line) => line.side === (isPayment ? 'Dr' : 'Cr') && line.ledgerId !== instrument.bankLedgerId)
       .map((line) => active.ledgers.find((ledger) => ledger.id === line.ledgerId)?.name)
       .filter(Boolean)
       .join(' / ') || '—';
-  const date = voucher.instrument.date;
+  const date = instrument.date;
+  const bankName = esc(bank?.name ?? 'Bank');
+  const kindLabel = instrument.kind === 'DD' ? 'Demand Draft' : 'Cheque';
+  const printLabel = !isPayment ? 'Print deposit slip' : instrument.kind === 'DD' ? 'Print DD advice' : 'Print cheque';
 
-  return panel(
-    `Cheque print · ${esc(voucher.instrument.number)}`,
-    `<div class="cheque-preview">
-      <div class="cheque-sheet">
-        <div class="cheque-head"><strong>${esc(bank?.name ?? 'Bank')}</strong><span class="cheque-number">Cheque ${esc(voucher.instrument.number)}</span></div>
+  let preview;
+  if (isPayment && instrument.kind === 'Cheque') {
+    preview = `<div class="cheque-sheet">
+        <div class="cheque-head"><strong>${bankName}</strong><span class="cheque-number">Cheque ${esc(instrument.number)}</span></div>
         <div class="cheque-date">Date <strong>${esc(dateLabel(date))}</strong></div>
-        <div class="cheque-payee">Pay <strong>${esc(payee)}</strong></div>
+        <div class="cheque-payee">Pay <strong>${esc(party)}</strong></div>
         <div class="cheque-words">${esc(amountInWords(voucher.total))}</div>
         <div class="cheque-footer"><span class="cheque-amount">${money(voucher.total)}</span><span class="cheque-sign">Authorised signatory</span></div>
         <div class="cheque-cross">A/c Payee</div>
-      </div>
-    </div>
+      </div>`;
+  } else if (isPayment) {
+    preview = `<div class="cheque-sheet">
+        <div class="cheque-head"><strong>${bankName}</strong><span class="cheque-number">${kindLabel} ${esc(instrument.number)}</span></div>
+        <div class="cheque-date">Date <strong>${esc(dateLabel(date))}</strong></div>
+        <div class="cheque-payee">Pay <strong>${esc(party)}</strong></div>
+        <div class="cheque-words">${esc(amountInWords(voucher.total))}</div>
+        <div class="cheque-footer"><span class="cheque-amount">${money(voucher.total)}</span><span class="cheque-sign">Authorised signatory</span></div>
+        <div class="cheque-cross">DD advice</div>
+      </div>`;
+  } else {
+    preview = `<div class="cheque-sheet">
+        <div class="cheque-head"><strong>${bankName}</strong><span class="cheque-number">Deposit slip</span></div>
+        <div class="cheque-date">Date <strong>${esc(dateLabel(date))}</strong></div>
+        <div class="cheque-payee">Received from <strong>${esc(party)}</strong></div>
+        <div class="cheque-payee">Instrument <strong>${esc(instrument.kind)} ${esc(instrument.number)}</strong></div>
+        <div class="cheque-words">${esc(amountInWords(voucher.total))}</div>
+        <div class="cheque-footer"><span class="cheque-amount">${money(voucher.total)}</span><span class="cheque-sign">For deposit to the above account</span></div>
+        <div class="cheque-cross">${esc(voucherLabel(voucher.type))} ${voucher.no}</div>
+      </div>`;
+  }
+
+  return panel(
+    `${isPayment ? kindLabel : 'Deposit slip'} print · ${esc(instrument.number)}`,
+    `<div class="cheque-preview">${preview}</div>
     <div class="form-actions">
-      <button class="btn primary" type="button" data-action="print-report">Print cheque</button>
+      <button class="btn primary" type="button" data-action="print-report">${printLabel}</button>
       <button class="btn ghost" type="button" data-action="open-voucher" data-id="${esc(voucher.id)}">Back to voucher</button>
     </div>`,
-    'Preview only. Use your browser print dialog to print the cheque; alignment depends on the printer and cheque stationery.',
+    'Preview only. Use your browser print dialog; alignment depends on the printer and stationery. It is not a bank-issued advice or a validated deposit receipt.',
   );
 }
 

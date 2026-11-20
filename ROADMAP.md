@@ -344,6 +344,14 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 42: DD advice and deposit slips
+
+- The instrument print screen now covers cheque payments, DD payments and
+  receipt instruments. DD payments print an advice and receipts a deposit slip,
+  both with payer/payee, amount in words and bank details; the voucher screen
+  offers the matching print action.
+- Verification: the build passes at 956.6 kB; no ledger or data logic changed.
+
 ### 2026-11-20 — Phase 41: physical stock counts
 
 - Dated count sheets by godown snapshot each item's book quantity, default the

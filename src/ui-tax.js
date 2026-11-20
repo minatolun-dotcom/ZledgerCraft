@@ -13,10 +13,12 @@ import {
 import {
   eInvoiceRegister,
   ewayBillRegister,
+  gstAnnualSummary,
   gstReturns,
   ledgerTotals,
   outstanding,
   taxAuditSummary,
+  withholdingCertificates,
   withholdingSummary,
 } from './accounting.js';
 import {
@@ -49,6 +51,7 @@ export function gstScreen() {
   const from = current.from || active.fyStart;
   const to = current.to || active.fyEnd;
   const report = gstReturns(active, { from, to });
+  const annual = gstAnnualSummary(active, { from: active.fyStart, to: active.fyEnd });
   const totals = ledgerTotals(active, { to });
 
   const stateOptions = [
@@ -330,7 +333,16 @@ export function gstScreen() {
         : '<p class="muted">No voucher carries GST in this period. Open a sales or purchase voucher, choose a GST rate and save.</p>',
     )}`;
 
-  return `${setupPanel}${ratesPanel}${gst.enabled || report.count ? reportPanels : ''}`;
+  return `${setupPanel}${ratesPanel}${gst.enabled || report.count ? reportPanels : ''}
+    ${panel(
+      'GST annual working paper',
+      `<table class="data-table compact">
+        <thead><tr><th>Month</th><th class="num">Outward taxable</th><th class="num">Output tax</th><th class="num">ITC</th><th class="num">Net tax</th></tr></thead>
+        <tbody>${annual.rows.map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${money(row.outwardTaxable)}</td><td class="num">${money(row.outwardTax)}</td><td class="num">${money(row.itc)}</td><td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td>Financial year</td><td class="num">${money(annual.totals.outwardTaxable)}</td><td class="num">${money(annual.totals.outwardTax)}</td><td class="num">${money(annual.totals.itc)}</td><td class="num">${money(annual.totals.net)}</td></tr></tfoot>
+      </table>`,
+      `Monthly GSTR-1/GSTR-3B working totals for ${esc(dateLabel(annual.from))} to ${esc(dateLabel(annual.to))}. This is not GSTR-9, an annual return or a filing.`,
+    )}`;
 }
 
 export function readinessBadge(ready, label = 'Ready') {
@@ -702,6 +714,7 @@ export function tdsScreen() {
   const from = filters.tds.from || active.fyStart;
   const to = filters.tds.to || active.fyEnd;
   const report = withholdingSummary(active, { kind, from, to });
+  const certificates = withholdingCertificates(active, { kind, from, to });
   const totals = ledgerTotals(active, { to });
   const ledgers = withholdingTaxLedgers(active);
   const kindNoun = kind === 'TDS' ? 'deducted' : 'collected';
@@ -953,6 +966,17 @@ export function tdsScreen() {
       `Period ${esc(dateLabel(from))} to ${esc(dateLabel(to))}${report.tan ? ` · TAN ${esc(report.tan)}` : ''}. Working papers only — deductions, thresholds and challans are tracked locally and nothing is filed.`,
     )}`;
 
-  return `${setupPanel}${sectionsPanel}${challanPanel}${tds.enabled || report.count ? reportPanels : ''}`;
+  return `${setupPanel}${sectionsPanel}${challanPanel}${tds.enabled || report.count ? reportPanels : ''}
+    ${panel(
+      `${kind} certificate working paper`,
+      certificates.rows.length
+        ? `<table class="data-table compact">
+            <thead><tr><th>Deductee</th><th>PAN</th><th>Quarter</th><th>Sections</th><th class="num">Vouchers</th><th class="num">Base</th><th class="num">${kind}</th></tr></thead>
+            <tbody>${certificates.rows.map((row) => `<tr><td>${esc(row.party)}</td><td>${row.pan ? esc(row.pan) : '<span class="badge overdue">missing PAN</span>'}</td><td>${esc(row.quarterLabel)}</td><td>${esc(row.sections)}</td><td class="num">${row.count}</td><td class="num">${money(row.base)}</td><td class="num">${money(row.amount)}</td></tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="5">Total</td><td class="num">${money(certificates.totals.base)}</td><td class="num">${money(certificates.totals.amount)}</td></tr></tfoot>
+          </table>`
+        : '<p class="muted">No deductor/collector entries in this period.</p>',
+      `Deductee-and-quarter totals for preparing Form 16A/27D-style certificates${certificates.tan ? ` under TAN ${esc(certificates.tan)}` : ''}. No certificate is generated, signed or filed.`,
+    )}`;
 }
 

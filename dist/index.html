@@ -3136,6 +3136,7 @@ function loadState() {
   for (const company of parsed.companies) normalizeStockCounts(company);
   for (const company of parsed.companies) normalizeEwayPartB(company);
   for (const company of parsed.companies) normalizeComplianceTasks(company);
+  for (const company of parsed.companies) normalizeRecurringVouchers(company);
   parsed.audit = normalizeAudit(parsed.audit);
   seedUsers(parsed);
   return parsed;
@@ -5693,6 +5694,71 @@ function orderLinkFor(company, type, orderId) {
   return { ok: true, order };
 }
 
+const RECURRING_FREQUENCIES = new Set(['Weekly', 'Monthly', 'Quarterly', 'Yearly']);
+
+function addRecurringVoucher(company, input = {}) {
+  const voucher = (company.vouchers ?? []).find((entry) => entry.id === input.voucherId);
+  if (!voucher) return { ok: false, error: 'Choose a posted voucher to use as the template.' };
+  const name = String(input.name ?? '').trim().slice(0, 100);
+  if (!name) return { ok: false, error: 'Enter a template name.' };
+  if (!RECURRING_FREQUENCIES.has(input.frequency)) {
+    return { ok: false, error: 'Choose a valid repeat frequency.' };
+  }
+  const nextDate = String(input.nextDate ?? '');
+  if (!isValidIsoDate(nextDate)) return { ok: false, error: 'Enter a valid next date.' };
+  company.recurringVouchers = Array.isArray(company.recurringVouchers) ? company.recurringVouchers : [];
+  if (company.recurringVouchers.length >= 100) {
+    return { ok: false, error: 'Keep at most 100 recurring voucher templates.' };
+  }
+  const copy = JSON.parse(JSON.stringify(voucher));
+  const template = {
+    id: uid('rtpl'),
+    name,
+    type: voucher.type,
+    frequency: input.frequency,
+    nextDate,
+    narration: copy.narration ?? '',
+    lines: copy.lines ?? [],
+    total: copy.total ?? 0,
+    ...(copy.items ? { items: copy.items } : {}),
+    ...(copy.bill ? { bill: copy.bill } : {}),
+    ...(copy.instrument ? { instrument: { ...copy.instrument, status: undefined } } : {}),
+    ...(copy.gst ? { gst: copy.gst } : {}),
+    ...(copy.tds ? { tds: copy.tds } : {}),
+    ...(copy.currencyCode ? { currencyCode: copy.currencyCode, exchangeRate: copy.exchangeRate, currencyTotal: copy.currencyTotal } : {}),
+    createdAt: new Date().toISOString(),
+  };
+  delete template.instrument?.status;
+  company.recurringVouchers.push(template);
+  return { ok: true, template };
+}
+
+function deleteRecurringVoucher(company, templateId) {
+  const template = (company.recurringVouchers ?? []).find((entry) => entry.id === templateId);
+  if (!template) return { ok: false, error: 'Recurring template not found.' };
+  company.recurringVouchers = company.recurringVouchers.filter((entry) => entry.id !== templateId);
+  return { ok: true, template };
+}
+
+function normalizeRecurringVouchers(company) {
+  if (!Array.isArray(company.recurringVouchers)) {
+    company.recurringVouchers = [];
+    return company;
+  }
+  const seen = new Set();
+  company.recurringVouchers = company.recurringVouchers
+    .filter((template) => {
+      if (!template || !template.id || seen.has(template.id)) return false;
+      if (!VOUCHER_TYPES[template.type] || !RECURRING_FREQUENCIES.has(template.frequency)) return false;
+      if (!String(template.name ?? '').trim() || !isValidIsoDate(template.nextDate)) return false;
+      if (!Array.isArray(template.lines) || !template.lines.length) return false;
+      seen.add(template.id);
+      return true;
+    })
+    .slice(-100);
+  return company;
+}
+
 function setNextVoucherNumber(company, type, nextValue) {
   if (!VOUCHER_TYPES[type]) return { ok: false, error: 'Choose a valid voucher type.' };
   const next = Number(nextValue);
@@ -8025,6 +8091,31 @@ function validateImportedCompany(company) {
     }
   }
 
+  if (company.recurringVouchers !== undefined) {
+    if (!Array.isArray(company.recurringVouchers) || company.recurringVouchers.length > 100) {
+      return `Company "${name}" has invalid recurring voucher templates.`;
+    }
+    const templateIds = new Set();
+    for (const template of company.recurringVouchers) {
+      if (!template || !template.id || templateIds.has(template.id)) {
+        return `Company "${name}" has a duplicate or missing recurring template id.`;
+      }
+      templateIds.add(template.id);
+      if (String(template.name ?? '').trim().length === 0 || String(template.name).length > 100) {
+        return `Company "${name}" has a recurring template with an invalid name.`;
+      }
+      if (!VOUCHER_TYPES[template.type] || !['Weekly', 'Monthly', 'Quarterly', 'Yearly'].includes(template.frequency)) {
+        return `Company "${name}" has a recurring template with an invalid type or frequency.`;
+      }
+      if (!isValidIsoDate(template.nextDate)) {
+        return `Company "${name}" has a recurring template with an invalid next date.`;
+      }
+      if (!Array.isArray(template.lines) || !template.lines.length) {
+        return `Company "${name}" has a recurring template without lines.`;
+      }
+    }
+  }
+
   if (company.complianceTasks !== undefined) {
     if (!Array.isArray(company.complianceTasks) || company.complianceTasks.length > 1000) {
       return `Company "${name}" has invalid compliance tasks.`;
@@ -8359,6 +8450,7 @@ function importState(json) {
     normalizeStockCounts(mapped);
     normalizeEwayPartB(mapped);
     normalizeComplianceTasks(mapped);
+    normalizeRecurringVouchers(mapped);
     return mapped;
   });
 
@@ -9900,6 +9992,66 @@ function finishSections(map) {
 }
 
 /** Cash flow: where cash came from and where it went, grouped by primary group. */
+function addIsoDays(iso, days) {
+  return new Date(Date.UTC(
+    Number(iso.slice(0, 4)),
+    Number(iso.slice(5, 7)) - 1,
+    Number(iso.slice(8, 10)) + days,
+  )).toISOString().slice(0, 10);
+}
+
+/** Projected cash from open bills, without posting anything. */
+function cashForecast(company, filters = {}) {
+  const asOn = filters.asOn || company.fyEnd;
+  const horizon = Math.max(1, Math.min(365, Number(filters.days) || 30));
+  const totals = ledgerTotals(company, { to: asOn });
+  const opening = round2(
+    cashBankLedgers(company).reduce((sum, ledger) => sum + (totals.get(ledger.id)?.closing ?? 0), 0),
+  );
+  const receivable = outstanding(company, { side: 'receivable', asOn });
+  const payable = outstanding(company, { side: 'payable', asOn });
+  const expected = (bill) => (bill.dueDate && bill.dueDate > asOn ? bill.dueDate : asOn);
+  const end = addIsoDays(asOn, horizon);
+  const buckets = [
+    { label: 'Due now', from: asOn, to: asOn },
+    { label: '1–7 days', from: addIsoDays(asOn, 1), to: addIsoDays(asOn, 7) },
+    { label: '8–14 days', from: addIsoDays(asOn, 8), to: addIsoDays(asOn, 14) },
+    { label: '15–30 days', from: addIsoDays(asOn, 15), to: addIsoDays(asOn, 30) },
+  ];
+  if (horizon > 30) {
+    buckets.push({ label: `31–${horizon} days`, from: addIsoDays(asOn, 31), to: end });
+  }
+
+  const collect = (sideReport) =>
+    sideReport.parties.flatMap((party) =>
+      party.bills.map((bill) => ({ party: party.name, amount: bill.amount, date: expected(bill), ref: bill.ref })),
+    );
+  const receipts = collect(receivable).filter((row) => row.date <= end);
+  const payments = collect(payable).filter((row) => row.date <= end);
+  const sum = (rows, from, to) =>
+    round2(rows.filter((row) => row.date >= from && row.date <= to).reduce((total, row) => total + row.amount, 0));
+
+  let running = opening;
+  const rows = buckets.map((bucket) => {
+    const receipt = sum(receipts, bucket.from, bucket.to);
+    const payment = sum(payments, bucket.from, bucket.to);
+    const net = round2(receipt - payment);
+    running = round2(running + net);
+    return { ...bucket, receipts: receipt, payments: payment, net, closing: running };
+  });
+  return {
+    asOn,
+    days: horizon,
+    opening,
+    rows,
+    totals: {
+      receipts: round2(rows.reduce((sum, row) => sum + row.receipts, 0)),
+      payments: round2(rows.reduce((sum, row) => sum + row.payments, 0)),
+      closing: running,
+    },
+  };
+}
+
 function cashFlow(company, filters = {}) {
   const { from, to } = dateRange(company, filters);
   const ledgers = cashBankLedgers(company);
@@ -10823,6 +10975,49 @@ function gstReturns(company, filters = {}) {
   };
 }
 
+function gstAnnualSummary(company, filters = {}) {
+  const from = filters.from || company.fyStart;
+  const to = filters.to || company.fyEnd;
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const rows = [];
+  let year = Number(from.slice(0, 4));
+  let month = Number(from.slice(5, 7)) - 1;
+  const endYear = Number(to.slice(0, 4));
+  const endMonth = Number(to.slice(5, 7)) - 1;
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    const monthStart = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+    const monthEnd = new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10);
+    const start = monthStart < from ? from : monthStart;
+    const finish = monthEnd > to ? to : monthEnd;
+    const report = gstReturns(company, { from: start, to: finish });
+    rows.push({
+      from: start,
+      to: finish,
+      label: `${names[month]} ${year}`,
+      outwardTaxable: report.gstr3b.outwardTaxable,
+      outwardTax: report.gstr3b.outwardTaxTotal,
+      itc: report.gstr3b.itcTotal,
+      net: report.gstr3b.netTotal,
+    });
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return {
+    from,
+    to,
+    rows,
+    totals: {
+      outwardTaxable: round2(rows.reduce((sum, row) => sum + row.outwardTaxable, 0)),
+      outwardTax: round2(rows.reduce((sum, row) => sum + row.outwardTax, 0)),
+      itc: round2(rows.reduce((sum, row) => sum + row.itc, 0)),
+      net: round2(rows.reduce((sum, row) => sum + row.net, 0)),
+    },
+  };
+}
+
 function withholdingQuarter(date) {
   const month = Number(String(date).slice(5, 7));
   if (month >= 4 && month <= 6) return { key: 'Q1', label: 'Q1 · Apr–Jun' };
@@ -10982,6 +11177,47 @@ function withholdingSummary(company, filters = {}) {
     challans,
     challanTotal: round2(challans.reduce((sum, challan) => sum + challan.amount, 0)),
     thresholdRows,
+  };
+}
+
+/** Deductee-wise certificate working paper, one row per party and quarter. */
+function withholdingCertificates(company, filters = {}) {
+  const summary = withholdingSummary(company, filters);
+  const map = new Map();
+  for (const document of summary.documents) {
+    const key = `${document.party}|${document.pan}|${document.quarter}`;
+    let row = map.get(key);
+    if (!row) {
+      row = {
+        party: document.party || 'Unassigned',
+        pan: document.pan,
+        quarter: document.quarter,
+        quarterLabel: document.quarterLabel,
+        base: 0,
+        amount: 0,
+        count: 0,
+        sections: new Set(),
+      };
+      map.set(key, row);
+    }
+    row.base = round2(row.base + document.base);
+    row.amount = round2(row.amount + document.amount);
+    row.count += 1;
+    row.sections.add(document.code);
+  }
+  const rows = [...map.values()]
+    .map((row) => ({ ...row, sections: [...row.sections].sort().join(', ') }))
+    .sort((a, b) => a.quarter.localeCompare(b.quarter) || a.party.localeCompare(b.party));
+  return {
+    kind: summary.kind,
+    from: summary.from,
+    to: summary.to,
+    tan: summary.tan,
+    rows,
+    totals: {
+      base: round2(rows.reduce((sum, row) => sum + row.base, 0)),
+      amount: round2(rows.reduce((sum, row) => sum + row.amount, 0)),
+    },
   };
 }
 
@@ -14547,6 +14783,18 @@ function vouchersScreen() {
   if (!company()) return emptyCompanyScreen('Vouchers');
   const active = company();
   const recent = dayBook(active).slice(0, 12);
+  const recurring = [...(active.recurringVouchers ?? [])].sort((a, b) => a.nextDate.localeCompare(b.nextDate));
+  const recurringRows = recurring
+    .map((template) => `<tr>
+      <td><strong>${esc(template.name)}</strong><div class="muted small">${esc(voucherLabel(template.type))} · ${esc(template.frequency)}</div></td>
+      <td>${esc(dateLabel(template.nextDate))}</td>
+      <td class="num">${money(template.total)}</td>
+      <td class="row-actions">
+        <button class="btn small" type="button" data-action="use-recurring-voucher" data-id="${esc(template.id)}">Use</button>
+        <button class="btn small danger" type="button" data-action="delete-recurring-voucher" data-id="${esc(template.id)}">Delete</button>
+      </td>
+    </tr>`)
+    .join('');
   const cards = Object.entries(VOUCHER_TYPES)
     .map(
       ([type, meta]) => `
@@ -14582,6 +14830,25 @@ function vouchersScreen() {
               .join('')}</tbody>
           </table>`
         : '<p class="muted">No vouchers yet. Press F5 to record a payment, or F8 for a sale.</p>',
+    )}
+    ${panel(
+      'Recurring voucher templates',
+      `<form id="recurring-voucher-form" class="form-grid" novalidate>
+        <label class="field"><span>Source voucher</span><select name="voucherId">${[...(active.vouchers ?? [])]
+          .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no)
+          .slice(0, 100)
+          .map((voucher) => `<option value="${esc(voucher.id)}">${esc(dateLabel(voucher.date))} · ${esc(voucherLabel(voucher.type))} ${voucher.no} · ${money(voucher.total)}</option>`)
+          .join('')}</select></label>
+        <label class="field"><span>Template name</span><input name="name" maxlength="100" placeholder="e.g. Monthly office rent"></label>
+        <label class="field"><span>Repeat</span><select name="frequency"><option>Monthly</option><option>Quarterly</option><option>Yearly</option><option>Weekly</option></select></label>
+        <label class="field"><span>Next date</span><input name="nextDate" type="date"></label>
+        <div class="form-actions"><button class="btn primary" type="submit">Create template</button></div>
+        <p id="recurring-voucher-error" class="form-error" role="alert"></p>
+      </form>
+      ${recurring.length
+        ? `<table class="data-table compact"><thead><tr><th>Template</th><th>Next date</th><th class="num">Amount</th><th></th></tr></thead><tbody>${recurringRows}</tbody></table>`
+        : '<p class="muted">No templates yet. Pick a posted voucher above to reuse its lines.</p>'}`,
+      'Use prefills a new voucher with the template lines and next date; it does not auto-post. The template is not advanced automatically.',
     )}`;
 }
 
@@ -15371,6 +15638,8 @@ function cashBankScreen() {
   const from = current.from || active.fyStart;
   const to = current.to || active.fyEnd;
   const report = cashBankBook(active, { from, to, ledgerId: current.ledgerId || undefined });
+  const forecastDate = todayIso() >= from && todayIso() <= to ? todayIso() : to;
+  const forecast = cashForecast(active, { asOn: forecastDate, days: 30 });
   const options = [
     `<option value="">All cash & bank ledgers</option>`,
     ...cashBankLedgers(active).map(
@@ -15405,7 +15674,7 @@ function cashBankScreen() {
       </table>
     </div>`;
 
-  return panel(
+  return `${panel(
     'Cash & Bank Book',
     `<form id="cashbook-form" class="filter-bar">
       <label class="field inline-field"><span>Ledger</span><select name="ledgerId">${options}</select></label>
@@ -15418,7 +15687,19 @@ function cashBankScreen() {
       : '<p class="muted">No cash or bank ledgers yet. Create one under Cash-in-Hand or Bank Accounts.</p>'}
     <p class="verdict ok">Cash & bank: ${money(report.closing)} · receipts ${money(report.receiptTotal)} · payments ${money(report.paymentTotal)}</p>`,
     `${esc(dateLabel(from))} to ${esc(dateLabel(to))} · opening ${money(report.opening)}`,
-  );
+  )}
+  ${panel(
+    'Cash-flow forecast',
+    `<table class="data-table compact">
+      <thead><tr><th>Period</th><th class="num">Expected receipts</th><th class="num">Expected payments</th><th class="num">Net</th><th class="num">Projected cash</th></tr></thead>
+      <tbody>
+        <tr><td>Opening cash & bank</td><td></td><td></td><td></td><td class="num">${money(forecast.opening)}</td></tr>
+        ${forecast.rows.map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${row.receipts ? money(row.receipts) : '—'}</td><td class="num">${row.payments ? money(row.payments) : '—'}</td><td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td><td class="num ${row.closing < 0 ? 'neg' : ''}">${money(row.closing)}</td></tr>`).join('')}
+      </tbody>
+      <tfoot><tr><td>Projected ${forecast.days}-day closing</td><td class="num">${money(forecast.totals.receipts)}</td><td class="num">${money(forecast.totals.payments)}</td><td class="num">${money(forecast.totals.receipts - forecast.totals.payments)}</td><td class="num">${money(forecast.totals.closing)}</td></tr></tfoot>
+    </table>`,
+    `From ${esc(dateLabel(forecast.asOn))}. Uses cash/bank balances and open receivable/payable bills with due dates; bills already due are assumed due now. It does not forecast orders, recurring entries or unscheduled payments.`,
+  )}`;
 }
 
 function registersScreen() {
@@ -17546,6 +17827,7 @@ function gstScreen() {
   const from = current.from || active.fyStart;
   const to = current.to || active.fyEnd;
   const report = gstReturns(active, { from, to });
+  const annual = gstAnnualSummary(active, { from: active.fyStart, to: active.fyEnd });
   const totals = ledgerTotals(active, { to });
 
   const stateOptions = [
@@ -17827,7 +18109,16 @@ function gstScreen() {
         : '<p class="muted">No voucher carries GST in this period. Open a sales or purchase voucher, choose a GST rate and save.</p>',
     )}`;
 
-  return `${setupPanel}${ratesPanel}${gst.enabled || report.count ? reportPanels : ''}`;
+  return `${setupPanel}${ratesPanel}${gst.enabled || report.count ? reportPanels : ''}
+    ${panel(
+      'GST annual working paper',
+      `<table class="data-table compact">
+        <thead><tr><th>Month</th><th class="num">Outward taxable</th><th class="num">Output tax</th><th class="num">ITC</th><th class="num">Net tax</th></tr></thead>
+        <tbody>${annual.rows.map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${money(row.outwardTaxable)}</td><td class="num">${money(row.outwardTax)}</td><td class="num">${money(row.itc)}</td><td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td>Financial year</td><td class="num">${money(annual.totals.outwardTaxable)}</td><td class="num">${money(annual.totals.outwardTax)}</td><td class="num">${money(annual.totals.itc)}</td><td class="num">${money(annual.totals.net)}</td></tr></tfoot>
+      </table>`,
+      `Monthly GSTR-1/GSTR-3B working totals for ${esc(dateLabel(annual.from))} to ${esc(dateLabel(annual.to))}. This is not GSTR-9, an annual return or a filing.`,
+    )}`;
 }
 
 function readinessBadge(ready, label = 'Ready') {
@@ -18199,6 +18490,7 @@ function tdsScreen() {
   const from = filters.tds.from || active.fyStart;
   const to = filters.tds.to || active.fyEnd;
   const report = withholdingSummary(active, { kind, from, to });
+  const certificates = withholdingCertificates(active, { kind, from, to });
   const totals = ledgerTotals(active, { to });
   const ledgers = withholdingTaxLedgers(active);
   const kindNoun = kind === 'TDS' ? 'deducted' : 'collected';
@@ -18450,7 +18742,18 @@ function tdsScreen() {
       `Period ${esc(dateLabel(from))} to ${esc(dateLabel(to))}${report.tan ? ` · TAN ${esc(report.tan)}` : ''}. Working papers only — deductions, thresholds and challans are tracked locally and nothing is filed.`,
     )}`;
 
-  return `${setupPanel}${sectionsPanel}${challanPanel}${tds.enabled || report.count ? reportPanels : ''}`;
+  return `${setupPanel}${sectionsPanel}${challanPanel}${tds.enabled || report.count ? reportPanels : ''}
+    ${panel(
+      `${kind} certificate working paper`,
+      certificates.rows.length
+        ? `<table class="data-table compact">
+            <thead><tr><th>Deductee</th><th>PAN</th><th>Quarter</th><th>Sections</th><th class="num">Vouchers</th><th class="num">Base</th><th class="num">${kind}</th></tr></thead>
+            <tbody>${certificates.rows.map((row) => `<tr><td>${esc(row.party)}</td><td>${row.pan ? esc(row.pan) : '<span class="badge overdue">missing PAN</span>'}</td><td>${esc(row.quarterLabel)}</td><td>${esc(row.sections)}</td><td class="num">${row.count}</td><td class="num">${money(row.base)}</td><td class="num">${money(row.amount)}</td></tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="5">Total</td><td class="num">${money(certificates.totals.base)}</td><td class="num">${money(certificates.totals.amount)}</td></tr></tfoot>
+          </table>`
+        : '<p class="muted">No deductor/collector entries in this period.</p>',
+      `Deductee-and-quarter totals for preparing Form 16A/27D-style certificates${certificates.tan ? ` under TAN ${esc(certificates.tan)}` : ''}. No certificate is generated, signed or filed.`,
+    )}`;
 }
 
 
@@ -21637,6 +21940,29 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'recurring-voucher-form') {
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = addRecurringVoucher(active, {
+      voucherId: data.get('voucherId'),
+      name: data.get('name'),
+      frequency: data.get('frequency'),
+      nextDate: data.get('nextDate'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'recurring-voucher-error');
+      return;
+    }
+    logAudit('recurring.create', `Created recurring voucher template "${result.template.name}".`, active, result.template.id);
+    persist();
+    setFlash(`Recurring template "${result.template.name}" created.`);
+    navigate('vouchers');
+    return;
+  }
+
   if (form.id === 'document-number-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -24168,6 +24494,36 @@ async function handleClick(event) {
       setFlash(`Downloaded e-invoice draft for ${row.ref}. Nothing was transmitted.`);
       break;
     }
+    case 'use-recurring-voucher': {
+      if (!requirePermission('voucher.write')) break;
+      const active = company();
+      const template = (active?.recurringVouchers ?? []).find((entry) => entry.id === trigger.dataset.id);
+      if (!active || !template) {
+        setFlash('Recurring template not found.', 'warn');
+        break;
+      }
+      prepareDraft(template.type, { ...template, date: template.nextDate });
+      navigate('voucherNew', { type: template.type });
+      setFlash(`Prefilled "${template.name}". Review and accept it.`, 'ok');
+      break;
+    }
+
+    case 'delete-recurring-voucher': {
+      if (!requirePermission('voucher.write')) break;
+      const active = company();
+      if (!active || !window.confirm('Delete this recurring voucher template?')) break;
+      const result = deleteRecurringVoucher(active, trigger.dataset.id);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit('recurring.delete', `Deleted recurring voucher template "${result.template.name}".`, active, trigger.dataset.id);
+      persist();
+      setFlash('Recurring template deleted.');
+      render();
+      break;
+    }
+
     case 'payment-reminder': {
       view.reminderPartyId = trigger.dataset.id;
       render();

@@ -11,7 +11,7 @@ import {
   updateLedger,
   updateVoucher,
 } from '../src/store.js';
-import { interestWorkingPaper, outstanding, stockSummary } from '../src/accounting.js';
+import { cashForecast, interestWorkingPaper, outstanding, stockSummary } from '../src/accounting.js';
 
 function groupKeyFor(company, key) {
   return company.groups.find((group) => group.key === key).id;
@@ -88,6 +88,17 @@ test('a party credit limit is tracked against open receivables', () => {
 
   assert.equal(updateLedger(company, customer.id, { creditLimit: '' }).ok, true);
   assert.equal(outstanding(company, { asOn: '2026-04-30' }).parties[0].creditLimit, 0);
+});
+
+test('cash forecast buckets open bills without posting anything', () => {
+  const { company, customer, sales } = billsFixture();
+  sale(company, customer, sales, 1000, '2026-04-05', { ref: 'INV-CASH', dueDate: '2026-05-05' });
+  const forecast = cashForecast(company, { asOn: '2026-04-30', days: 30 });
+  assert.equal(forecast.opening, 0);
+  assert.equal(forecast.rows.find((row) => row.label === '1–7 days').receipts, 1000);
+  assert.equal(forecast.totals.receipts, 1000);
+  assert.equal(forecast.totals.closing, 1000);
+  assert.equal(company.vouchers.length, 1);
 });
 
 test('overdue interest is computed as a simple working paper', () => {

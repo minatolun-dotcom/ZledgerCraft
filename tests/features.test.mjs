@@ -4,11 +4,13 @@ import {
   addCompany,
   addGroup,
   addLedger,
+  addRecurringVoucher,
   addVoucher,
   createCompany,
   deleteCompany,
   deleteGroup,
   deleteLedger,
+  deleteRecurringVoucher,
   exportState,
   findLedgerByName,
   importState,
@@ -131,6 +133,27 @@ test('credit and debit notes are first-class voucher types', () => {
   assert.equal(pnl.netProfit, 350);
   assert.equal(ledgerTotals(company).get(sharma.id).closing, 300);
   assert.equal(ledgerTotals(company).get(sales.id).closing, -900);
+});
+
+test('recurring templates copy a posted voucher and remain editable as a draft', () => {
+  const { company } = tradingFixture();
+  const source = company.vouchers.find((entry) => entry.type === 'Sales');
+  assert.equal(addRecurringVoucher(company, { voucherId: source.id, name: '', frequency: 'Monthly', nextDate: '2026-05-01' }).ok, false);
+  assert.equal(addRecurringVoucher(company, { voucherId: source.id, name: 'Monthly sale', frequency: 'Hourly', nextDate: '2026-05-01' }).ok, false);
+  assert.equal(addRecurringVoucher(company, { voucherId: 'missing', name: 'Monthly sale', frequency: 'Monthly', nextDate: '2026-05-01' }).ok, false);
+
+  const added = addRecurringVoucher(company, {
+    voucherId: source.id,
+    name: 'Monthly sale',
+    frequency: 'Monthly',
+    nextDate: '2026-05-01',
+  });
+  assert.equal(added.ok, true, added.error);
+  assert.equal(added.template.type, 'Sales');
+  assert.deepEqual(added.template.lines, source.lines);
+  assert.equal(added.template.total, source.total);
+  assert.equal(deleteRecurringVoucher(company, added.template.id).ok, true);
+  assert.equal(company.recurringVouchers.length, 0);
 });
 
 test('the next voucher number can be set above the last used number', () => {

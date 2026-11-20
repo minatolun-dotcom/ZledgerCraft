@@ -1526,6 +1526,66 @@ function finishSections(map) {
 }
 
 /** Cash flow: where cash came from and where it went, grouped by primary group. */
+function addIsoDays(iso, days) {
+  return new Date(Date.UTC(
+    Number(iso.slice(0, 4)),
+    Number(iso.slice(5, 7)) - 1,
+    Number(iso.slice(8, 10)) + days,
+  )).toISOString().slice(0, 10);
+}
+
+/** Projected cash from open bills, without posting anything. */
+export function cashForecast(company, filters = {}) {
+  const asOn = filters.asOn || company.fyEnd;
+  const horizon = Math.max(1, Math.min(365, Number(filters.days) || 30));
+  const totals = ledgerTotals(company, { to: asOn });
+  const opening = round2(
+    cashBankLedgers(company).reduce((sum, ledger) => sum + (totals.get(ledger.id)?.closing ?? 0), 0),
+  );
+  const receivable = outstanding(company, { side: 'receivable', asOn });
+  const payable = outstanding(company, { side: 'payable', asOn });
+  const expected = (bill) => (bill.dueDate && bill.dueDate > asOn ? bill.dueDate : asOn);
+  const end = addIsoDays(asOn, horizon);
+  const buckets = [
+    { label: 'Due now', from: asOn, to: asOn },
+    { label: '1–7 days', from: addIsoDays(asOn, 1), to: addIsoDays(asOn, 7) },
+    { label: '8–14 days', from: addIsoDays(asOn, 8), to: addIsoDays(asOn, 14) },
+    { label: '15–30 days', from: addIsoDays(asOn, 15), to: addIsoDays(asOn, 30) },
+  ];
+  if (horizon > 30) {
+    buckets.push({ label: `31–${horizon} days`, from: addIsoDays(asOn, 31), to: end });
+  }
+
+  const collect = (sideReport) =>
+    sideReport.parties.flatMap((party) =>
+      party.bills.map((bill) => ({ party: party.name, amount: bill.amount, date: expected(bill), ref: bill.ref })),
+    );
+  const receipts = collect(receivable).filter((row) => row.date <= end);
+  const payments = collect(payable).filter((row) => row.date <= end);
+  const sum = (rows, from, to) =>
+    round2(rows.filter((row) => row.date >= from && row.date <= to).reduce((total, row) => total + row.amount, 0));
+
+  let running = opening;
+  const rows = buckets.map((bucket) => {
+    const receipt = sum(receipts, bucket.from, bucket.to);
+    const payment = sum(payments, bucket.from, bucket.to);
+    const net = round2(receipt - payment);
+    running = round2(running + net);
+    return { ...bucket, receipts: receipt, payments: payment, net, closing: running };
+  });
+  return {
+    asOn,
+    days: horizon,
+    opening,
+    rows,
+    totals: {
+      receipts: round2(rows.reduce((sum, row) => sum + row.receipts, 0)),
+      payments: round2(rows.reduce((sum, row) => sum + row.payments, 0)),
+      closing: running,
+    },
+  };
+}
+
 export function cashFlow(company, filters = {}) {
   const { from, to } = dateRange(company, filters);
   const ledgers = cashBankLedgers(company);
@@ -2450,6 +2510,49 @@ export function gstReturns(company, filters = {}) {
   };
 }
 
+export function gstAnnualSummary(company, filters = {}) {
+  const from = filters.from || company.fyStart;
+  const to = filters.to || company.fyEnd;
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const rows = [];
+  let year = Number(from.slice(0, 4));
+  let month = Number(from.slice(5, 7)) - 1;
+  const endYear = Number(to.slice(0, 4));
+  const endMonth = Number(to.slice(5, 7)) - 1;
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    const monthStart = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+    const monthEnd = new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10);
+    const start = monthStart < from ? from : monthStart;
+    const finish = monthEnd > to ? to : monthEnd;
+    const report = gstReturns(company, { from: start, to: finish });
+    rows.push({
+      from: start,
+      to: finish,
+      label: `${names[month]} ${year}`,
+      outwardTaxable: report.gstr3b.outwardTaxable,
+      outwardTax: report.gstr3b.outwardTaxTotal,
+      itc: report.gstr3b.itcTotal,
+      net: report.gstr3b.netTotal,
+    });
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return {
+    from,
+    to,
+    rows,
+    totals: {
+      outwardTaxable: round2(rows.reduce((sum, row) => sum + row.outwardTaxable, 0)),
+      outwardTax: round2(rows.reduce((sum, row) => sum + row.outwardTax, 0)),
+      itc: round2(rows.reduce((sum, row) => sum + row.itc, 0)),
+      net: round2(rows.reduce((sum, row) => sum + row.net, 0)),
+    },
+  };
+}
+
 function withholdingQuarter(date) {
   const month = Number(String(date).slice(5, 7));
   if (month >= 4 && month <= 6) return { key: 'Q1', label: 'Q1 · Apr–Jun' };
@@ -2609,6 +2712,47 @@ export function withholdingSummary(company, filters = {}) {
     challans,
     challanTotal: round2(challans.reduce((sum, challan) => sum + challan.amount, 0)),
     thresholdRows,
+  };
+}
+
+/** Deductee-wise certificate working paper, one row per party and quarter. */
+export function withholdingCertificates(company, filters = {}) {
+  const summary = withholdingSummary(company, filters);
+  const map = new Map();
+  for (const document of summary.documents) {
+    const key = `${document.party}|${document.pan}|${document.quarter}`;
+    let row = map.get(key);
+    if (!row) {
+      row = {
+        party: document.party || 'Unassigned',
+        pan: document.pan,
+        quarter: document.quarter,
+        quarterLabel: document.quarterLabel,
+        base: 0,
+        amount: 0,
+        count: 0,
+        sections: new Set(),
+      };
+      map.set(key, row);
+    }
+    row.base = round2(row.base + document.base);
+    row.amount = round2(row.amount + document.amount);
+    row.count += 1;
+    row.sections.add(document.code);
+  }
+  const rows = [...map.values()]
+    .map((row) => ({ ...row, sections: [...row.sections].sort().join(', ') }))
+    .sort((a, b) => a.quarter.localeCompare(b.quarter) || a.party.localeCompare(b.party));
+  return {
+    kind: summary.kind,
+    from: summary.from,
+    to: summary.to,
+    tan: summary.tan,
+    rows,
+    totals: {
+      base: round2(rows.reduce((sum, row) => sum + row.base, 0)),
+      amount: round2(rows.reduce((sum, row) => sum + row.amount, 0)),
+    },
   };
 }
 

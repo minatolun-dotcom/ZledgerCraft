@@ -477,8 +477,13 @@ disabled.
 - TDS/TCS register for a period: deducted or collected amounts, section and
   party summaries, quarterly totals, a threshold watch for the financial year to
   date, and a voucher list with PAN and drill-down. Tax challans can be recorded
-  and deleted, with payable to date, challans paid and outstanding shown. Nothing
-  is filed and no certificates are generated.
+  and deleted, with payable to date, challans paid and outstanding shown. A
+  deductee-and-quarter certificate working paper shows PAN, sections, base and
+  tax for preparing Form 16A/27D-style certificates. Nothing is filed, generated
+  as a certificate or acknowledged by TRACES.
+- GST annual working paper: month-by-month outward taxable value, output tax,
+  ITC and net tax for the financial year, with totals. It is not GSTR-9 or a
+  filed annual return.
 - GST returns as working papers for a period: GSTR-1 outward supplies by rate
   (sales less credit notes), B2B invoices with GSTIN and place of supply, B2C
   supplies by rate, credit notes, an HSN/SAC summary with quantity split by
@@ -678,7 +683,8 @@ voucher types, voucher alteration, day book, ledgers, trial balance, P&L,
 balance sheet, cash/bank books, registers, receivables/payables with ageing,
 group summary, cash flow, ratio analysis, statistics, period selection,
 bill-wise receivables, bill-wise register and party statement, godowns, batches,
-stock transfers, sales/purchase orders, BOMs and production, GST tax on
+stock transfers, partially fulfilled sales/purchase orders, recurring voucher
+templates, cash-flow forecasting, BOMs and production, GST tax on
 invoices with GSTR-1/GSTR-3B working papers, e-invoice/e-way bill drafts, a
 user-managed compliance calendar and tax-audit reconciliations, TDS/TCS deduction with registers
 and challan tracking, payroll runs with payslips and a salary register, report

@@ -22,8 +22,10 @@ import {
 import {
   eInvoiceRegister,
   ewayBillRegister,
+  gstAnnualSummary,
   gstReturns,
   taxAuditSummary,
+  withholdingCertificates,
 } from '../src/accounting.js';
 
 function groupId(company, key) {
@@ -342,6 +344,40 @@ test('compliance tasks validate, update, toggle and survive a backup', () => {
   assert.equal(deleteComplianceTask(company, added.task.id).ok, true);
   assert.equal(company.complianceTasks.length, 1);
   assert.equal(deleteComplianceTask(company, added.task.id).ok, false);
+});
+
+test('GST annual working paper totals the financial-year months', () => {
+  const { company, customer, item } = fixture();
+  sale(company, { customer, item });
+  const annual = gstAnnualSummary(company, { from: '2026-04-01', to: '2027-03-31' });
+  assert.equal(annual.rows.length, 12);
+  assert.equal(annual.rows[0].label, 'Apr 2026');
+  assert.equal(annual.totals.outwardTaxable, 1000);
+  assert.equal(annual.totals.outwardTax, 180);
+  assert.equal(annual.totals.net, 180);
+});
+
+test('TDS certificate working paper groups by deductee and quarter', () => {
+  const { company, customer, item, supplier } = fixture();
+  sale(company, { customer, item });
+  const purchase = addVoucher(company, {
+    type: 'Purchase',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: findLedgerByName(company, 'Purchases').id, side: 'Dr', amount: 10000 },
+      { ledgerId: supplier.id, side: 'Cr', amount: 10000 },
+    ],
+    tds: { sectionId: company.tds.sections.find((entry) => entry.code === '194J').id, pan: 'ABCDE1234F' },
+  });
+  assert.equal(purchase.ok, true, purchase.error);
+  const report = withholdingCertificates(company, { kind: 'TDS', from: '2026-04-01', to: '2026-06-30' });
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].party, 'Consultant');
+  assert.equal(report.rows[0].pan, 'ABCDE1234F');
+  assert.equal(report.rows[0].quarter, 'Q1');
+  assert.equal(report.rows[0].sections, '194J');
+  assert.equal(report.totals.amount, 1000);
+  assert.equal(company.vouchers.length, 2);
 });
 
 test('tax audit reconciles turnover, GST and TDS and survives a backup', () => {

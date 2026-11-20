@@ -793,6 +793,7 @@ export function loadState() {
   for (const company of parsed.companies) normalizeStockCounts(company);
   for (const company of parsed.companies) normalizeEwayPartB(company);
   for (const company of parsed.companies) normalizeComplianceTasks(company);
+  for (const company of parsed.companies) normalizeRecurringVouchers(company);
   parsed.audit = normalizeAudit(parsed.audit);
   seedUsers(parsed);
   return parsed;
@@ -3350,6 +3351,71 @@ function orderLinkFor(company, type, orderId) {
   return { ok: true, order };
 }
 
+const RECURRING_FREQUENCIES = new Set(['Weekly', 'Monthly', 'Quarterly', 'Yearly']);
+
+export function addRecurringVoucher(company, input = {}) {
+  const voucher = (company.vouchers ?? []).find((entry) => entry.id === input.voucherId);
+  if (!voucher) return { ok: false, error: 'Choose a posted voucher to use as the template.' };
+  const name = String(input.name ?? '').trim().slice(0, 100);
+  if (!name) return { ok: false, error: 'Enter a template name.' };
+  if (!RECURRING_FREQUENCIES.has(input.frequency)) {
+    return { ok: false, error: 'Choose a valid repeat frequency.' };
+  }
+  const nextDate = String(input.nextDate ?? '');
+  if (!isValidIsoDate(nextDate)) return { ok: false, error: 'Enter a valid next date.' };
+  company.recurringVouchers = Array.isArray(company.recurringVouchers) ? company.recurringVouchers : [];
+  if (company.recurringVouchers.length >= 100) {
+    return { ok: false, error: 'Keep at most 100 recurring voucher templates.' };
+  }
+  const copy = JSON.parse(JSON.stringify(voucher));
+  const template = {
+    id: uid('rtpl'),
+    name,
+    type: voucher.type,
+    frequency: input.frequency,
+    nextDate,
+    narration: copy.narration ?? '',
+    lines: copy.lines ?? [],
+    total: copy.total ?? 0,
+    ...(copy.items ? { items: copy.items } : {}),
+    ...(copy.bill ? { bill: copy.bill } : {}),
+    ...(copy.instrument ? { instrument: { ...copy.instrument, status: undefined } } : {}),
+    ...(copy.gst ? { gst: copy.gst } : {}),
+    ...(copy.tds ? { tds: copy.tds } : {}),
+    ...(copy.currencyCode ? { currencyCode: copy.currencyCode, exchangeRate: copy.exchangeRate, currencyTotal: copy.currencyTotal } : {}),
+    createdAt: new Date().toISOString(),
+  };
+  delete template.instrument?.status;
+  company.recurringVouchers.push(template);
+  return { ok: true, template };
+}
+
+export function deleteRecurringVoucher(company, templateId) {
+  const template = (company.recurringVouchers ?? []).find((entry) => entry.id === templateId);
+  if (!template) return { ok: false, error: 'Recurring template not found.' };
+  company.recurringVouchers = company.recurringVouchers.filter((entry) => entry.id !== templateId);
+  return { ok: true, template };
+}
+
+export function normalizeRecurringVouchers(company) {
+  if (!Array.isArray(company.recurringVouchers)) {
+    company.recurringVouchers = [];
+    return company;
+  }
+  const seen = new Set();
+  company.recurringVouchers = company.recurringVouchers
+    .filter((template) => {
+      if (!template || !template.id || seen.has(template.id)) return false;
+      if (!VOUCHER_TYPES[template.type] || !RECURRING_FREQUENCIES.has(template.frequency)) return false;
+      if (!String(template.name ?? '').trim() || !isValidIsoDate(template.nextDate)) return false;
+      if (!Array.isArray(template.lines) || !template.lines.length) return false;
+      seen.add(template.id);
+      return true;
+    })
+    .slice(-100);
+  return company;
+}
+
 export function setNextVoucherNumber(company, type, nextValue) {
   if (!VOUCHER_TYPES[type]) return { ok: false, error: 'Choose a valid voucher type.' };
   const next = Number(nextValue);
@@ -5682,6 +5748,31 @@ function validateImportedCompany(company) {
     }
   }
 
+  if (company.recurringVouchers !== undefined) {
+    if (!Array.isArray(company.recurringVouchers) || company.recurringVouchers.length > 100) {
+      return `Company "${name}" has invalid recurring voucher templates.`;
+    }
+    const templateIds = new Set();
+    for (const template of company.recurringVouchers) {
+      if (!template || !template.id || templateIds.has(template.id)) {
+        return `Company "${name}" has a duplicate or missing recurring template id.`;
+      }
+      templateIds.add(template.id);
+      if (String(template.name ?? '').trim().length === 0 || String(template.name).length > 100) {
+        return `Company "${name}" has a recurring template with an invalid name.`;
+      }
+      if (!VOUCHER_TYPES[template.type] || !['Weekly', 'Monthly', 'Quarterly', 'Yearly'].includes(template.frequency)) {
+        return `Company "${name}" has a recurring template with an invalid type or frequency.`;
+      }
+      if (!isValidIsoDate(template.nextDate)) {
+        return `Company "${name}" has a recurring template with an invalid next date.`;
+      }
+      if (!Array.isArray(template.lines) || !template.lines.length) {
+        return `Company "${name}" has a recurring template without lines.`;
+      }
+    }
+  }
+
   if (company.complianceTasks !== undefined) {
     if (!Array.isArray(company.complianceTasks) || company.complianceTasks.length > 1000) {
       return `Company "${name}" has invalid compliance tasks.`;
@@ -6016,6 +6107,7 @@ export function importState(json) {
     normalizeStockCounts(mapped);
     normalizeEwayPartB(mapped);
     normalizeComplianceTasks(mapped);
+    normalizeRecurringVouchers(mapped);
     return mapped;
   });
 

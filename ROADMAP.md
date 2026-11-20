@@ -344,6 +344,20 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 47: forecasting and statutory working papers
+
+- Treasury: a 30-day cash-flow forecast from cash/bank balances and open
+  receivable/payable bills, bucketed into due-now, weekly and 15–30-day periods.
+- Vouchers: recurring templates copied from posted vouchers with weekly, monthly,
+  quarterly or yearly frequency; Use prefills a draft and never auto-posts.
+- GST: a month-by-month financial-year working paper with outward taxable value,
+  output tax, ITC and net tax, explicitly not GSTR-9 or a filing.
+- TDS/TCS: a deductee-and-quarter certificate working paper with PAN, sections,
+  base and tax, explicitly not a generated or TRACES-filed certificate.
+- Verification: cash buckets, recurring validation, annual monthly totals and
+  certificate grouping; full suite 295 tests (294 pass, 1 skipped) and a
+  1,023.8 kB build.
+
 ### 2026-11-20 — Phase 46: operational depth bundle
 
 - Inventory: approximate FIFO stock ageing by receipt bucket, and partial order

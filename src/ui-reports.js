@@ -14,6 +14,7 @@ import {
   billWiseRegister,
   cashBankBook,
   cashBankLedgers,
+  cashForecast,
   cashFlow,
   dayBook,
   groupSummary,
@@ -429,6 +430,8 @@ export function cashBankScreen() {
   const from = current.from || active.fyStart;
   const to = current.to || active.fyEnd;
   const report = cashBankBook(active, { from, to, ledgerId: current.ledgerId || undefined });
+  const forecastDate = todayIso() >= from && todayIso() <= to ? todayIso() : to;
+  const forecast = cashForecast(active, { asOn: forecastDate, days: 30 });
   const options = [
     `<option value="">All cash & bank ledgers</option>`,
     ...cashBankLedgers(active).map(
@@ -463,7 +466,7 @@ export function cashBankScreen() {
       </table>
     </div>`;
 
-  return panel(
+  return `${panel(
     'Cash & Bank Book',
     `<form id="cashbook-form" class="filter-bar">
       <label class="field inline-field"><span>Ledger</span><select name="ledgerId">${options}</select></label>
@@ -476,7 +479,19 @@ export function cashBankScreen() {
       : '<p class="muted">No cash or bank ledgers yet. Create one under Cash-in-Hand or Bank Accounts.</p>'}
     <p class="verdict ok">Cash & bank: ${money(report.closing)} · receipts ${money(report.receiptTotal)} · payments ${money(report.paymentTotal)}</p>`,
     `${esc(dateLabel(from))} to ${esc(dateLabel(to))} · opening ${money(report.opening)}`,
-  );
+  )}
+  ${panel(
+    'Cash-flow forecast',
+    `<table class="data-table compact">
+      <thead><tr><th>Period</th><th class="num">Expected receipts</th><th class="num">Expected payments</th><th class="num">Net</th><th class="num">Projected cash</th></tr></thead>
+      <tbody>
+        <tr><td>Opening cash & bank</td><td></td><td></td><td></td><td class="num">${money(forecast.opening)}</td></tr>
+        ${forecast.rows.map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${row.receipts ? money(row.receipts) : '—'}</td><td class="num">${row.payments ? money(row.payments) : '—'}</td><td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td><td class="num ${row.closing < 0 ? 'neg' : ''}">${money(row.closing)}</td></tr>`).join('')}
+      </tbody>
+      <tfoot><tr><td>Projected ${forecast.days}-day closing</td><td class="num">${money(forecast.totals.receipts)}</td><td class="num">${money(forecast.totals.payments)}</td><td class="num">${money(forecast.totals.receipts - forecast.totals.payments)}</td><td class="num">${money(forecast.totals.closing)}</td></tr></tfoot>
+    </table>`,
+    `From ${esc(dateLabel(forecast.asOn))}. Uses cash/bank balances and open receivable/payable bills with due dates; bills already due are assumed due now. It does not forecast orders, recurring entries or unscheduled payments.`,
+  )}`;
 }
 
 export function registersScreen() {

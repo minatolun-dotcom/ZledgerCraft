@@ -1176,6 +1176,18 @@ export function vouchersScreen() {
   if (!company()) return emptyCompanyScreen('Vouchers');
   const active = company();
   const recent = dayBook(active).slice(0, 12);
+  const recurring = [...(active.recurringVouchers ?? [])].sort((a, b) => a.nextDate.localeCompare(b.nextDate));
+  const recurringRows = recurring
+    .map((template) => `<tr>
+      <td><strong>${esc(template.name)}</strong><div class="muted small">${esc(voucherLabel(template.type))} · ${esc(template.frequency)}</div></td>
+      <td>${esc(dateLabel(template.nextDate))}</td>
+      <td class="num">${money(template.total)}</td>
+      <td class="row-actions">
+        <button class="btn small" type="button" data-action="use-recurring-voucher" data-id="${esc(template.id)}">Use</button>
+        <button class="btn small danger" type="button" data-action="delete-recurring-voucher" data-id="${esc(template.id)}">Delete</button>
+      </td>
+    </tr>`)
+    .join('');
   const cards = Object.entries(VOUCHER_TYPES)
     .map(
       ([type, meta]) => `
@@ -1211,6 +1223,25 @@ export function vouchersScreen() {
               .join('')}</tbody>
           </table>`
         : '<p class="muted">No vouchers yet. Press F5 to record a payment, or F8 for a sale.</p>',
+    )}
+    ${panel(
+      'Recurring voucher templates',
+      `<form id="recurring-voucher-form" class="form-grid" novalidate>
+        <label class="field"><span>Source voucher</span><select name="voucherId">${[...(active.vouchers ?? [])]
+          .sort((a, b) => b.date.localeCompare(a.date) || b.no - a.no)
+          .slice(0, 100)
+          .map((voucher) => `<option value="${esc(voucher.id)}">${esc(dateLabel(voucher.date))} · ${esc(voucherLabel(voucher.type))} ${voucher.no} · ${money(voucher.total)}</option>`)
+          .join('')}</select></label>
+        <label class="field"><span>Template name</span><input name="name" maxlength="100" placeholder="e.g. Monthly office rent"></label>
+        <label class="field"><span>Repeat</span><select name="frequency"><option>Monthly</option><option>Quarterly</option><option>Yearly</option><option>Weekly</option></select></label>
+        <label class="field"><span>Next date</span><input name="nextDate" type="date"></label>
+        <div class="form-actions"><button class="btn primary" type="submit">Create template</button></div>
+        <p id="recurring-voucher-error" class="form-error" role="alert"></p>
+      </form>
+      ${recurring.length
+        ? `<table class="data-table compact"><thead><tr><th>Template</th><th>Next date</th><th class="num">Amount</th><th></th></tr></thead><tbody>${recurringRows}</tbody></table>`
+        : '<p class="muted">No templates yet. Pick a posted voucher above to reuse its lines.</p>'}`,
+      'Use prefills a new voucher with the template lines and next date; it does not auto-post. The template is not advanced automatically.',
     )}`;
 }
 

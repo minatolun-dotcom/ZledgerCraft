@@ -20,6 +20,7 @@ import {
   addEmployee,
   addGodown,
   addOrder,
+  addRecurringVoucher,
   addPayHead,
   auditEntries,
   addFinancialYear,
@@ -69,6 +70,7 @@ import {
   deleteTaxChallan,
   deleteLedger,
   deleteManufacture,
+  deleteRecurringVoucher,
   deleteStockCount,
   deleteStockGroup,
   deleteStockItem,
@@ -2607,6 +2609,29 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'recurring-voucher-form') {
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = addRecurringVoucher(active, {
+      voucherId: data.get('voucherId'),
+      name: data.get('name'),
+      frequency: data.get('frequency'),
+      nextDate: data.get('nextDate'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'recurring-voucher-error');
+      return;
+    }
+    logAudit('recurring.create', `Created recurring voucher template "${result.template.name}".`, active, result.template.id);
+    persist();
+    setFlash(`Recurring template "${result.template.name}" created.`);
+    navigate('vouchers');
+    return;
+  }
+
   if (form.id === 'document-number-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -5138,6 +5163,36 @@ async function handleClick(event) {
       setFlash(`Downloaded e-invoice draft for ${row.ref}. Nothing was transmitted.`);
       break;
     }
+    case 'use-recurring-voucher': {
+      if (!requirePermission('voucher.write')) break;
+      const active = company();
+      const template = (active?.recurringVouchers ?? []).find((entry) => entry.id === trigger.dataset.id);
+      if (!active || !template) {
+        setFlash('Recurring template not found.', 'warn');
+        break;
+      }
+      prepareDraft(template.type, { ...template, date: template.nextDate });
+      navigate('voucherNew', { type: template.type });
+      setFlash(`Prefilled "${template.name}". Review and accept it.`, 'ok');
+      break;
+    }
+
+    case 'delete-recurring-voucher': {
+      if (!requirePermission('voucher.write')) break;
+      const active = company();
+      if (!active || !window.confirm('Delete this recurring voucher template?')) break;
+      const result = deleteRecurringVoucher(active, trigger.dataset.id);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      logAudit('recurring.delete', `Deleted recurring voucher template "${result.template.name}".`, active, trigger.dataset.id);
+      persist();
+      setFlash('Recurring template deleted.');
+      render();
+      break;
+    }
+
     case 'payment-reminder': {
       view.reminderPartyId = trigger.dataset.id;
       render();

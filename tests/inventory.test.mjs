@@ -693,6 +693,38 @@ test('stock transfers move quantity between godowns and are guarded', () => {
   assert.equal(deleteGodown(company, warehouse.id).ok, true);
 });
 
+test('deleting a transfer is refused when later destination stock depends on it', () => {
+  const { company, item } = inventoryFixture();
+  const main = defaultGodownId(company);
+  const warehouse = addGodown(company, { name: 'Warehouse' }).godown;
+  const first = addStockTransfer(company, {
+    date: '2026-04-03',
+    fromGodownId: main,
+    toGodownId: warehouse.id,
+    stockItemId: item.id,
+    qty: 4,
+  });
+  assert.equal(first.ok, true, first.error);
+  const second = addStockTransfer(company, {
+    date: '2026-04-04',
+    fromGodownId: warehouse.id,
+    toGodownId: main,
+    stockItemId: item.id,
+    qty: 3,
+  });
+  assert.equal(second.ok, true, second.error);
+
+  const refused = deleteStockTransfer(company, first.transfer.id);
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /stock in Warehouse negative/i);
+  assert.equal(company.stockTransfers.length, 2, 'a refused delete changes nothing');
+  assert.equal(stockOnHand(company, item.id, '2026-04-04', { godownId: warehouse.id }), 1);
+
+  assert.equal(deleteStockTransfer(company, second.transfer.id).ok, true);
+  assert.equal(deleteStockTransfer(company, first.transfer.id).ok, true);
+  assert.equal(company.stockTransfers.length, 0);
+});
+
 test('a transfer can carry several items and validates every line before writing', () => {
   const { company, item } = inventoryFixture();
   const main = defaultGodownId(company);

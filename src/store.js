@@ -1250,11 +1250,12 @@ export function normalizeGst(company) {
         rate: value,
         cess,
         ...(isValidIsoDate(String(rate.effectiveFrom ?? '')) ? { effectiveFrom: String(rate.effectiveFrom) } : {}),
+        ...(isValidIsoDate(String(rate.effectiveTo ?? '')) ? { effectiveTo: String(rate.effectiveTo) } : {}),
       };
     })
     .filter((rate) => {
       if (!rate) return false;
-      const key = `${rate.rate}:${rate.cess}:${rate.effectiveFrom ?? ''}`;
+      const key = `${rate.rate}:${rate.cess}:${rate.effectiveFrom ?? ''}:${rate.effectiveTo ?? ''}`;
       if (seenRates.has(key)) return false;
       seenRates.add(key);
       return true;
@@ -2578,12 +2579,32 @@ export function addGstRate(company, input = {}) {
   company.gst = company.gst ?? normalizeGst(company).gst;
   company.gst.rates = company.gst.rates ?? [];
   const effectiveFrom = String(input.effectiveFrom ?? '').trim();
-  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective date.' };
-  if (company.gst.rates.some((entry) => entry.rate === rate && entry.cess === cess && (entry.effectiveFrom ?? '') === effectiveFrom)) {
-    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with that effective date.` };
+  const effectiveTo = String(input.effectiveTo ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective-from date.' };
+  if (effectiveTo && !isValidIsoDate(effectiveTo)) return { ok: false, error: 'Enter a valid effective-to date.' };
+  if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) {
+    return { ok: false, error: 'The effective-to date cannot be before the effective-from date.' };
+  }
+  if (
+    company.gst.rates.some(
+      (entry) =>
+        entry.rate === rate &&
+        entry.cess === cess &&
+        (entry.effectiveFrom ?? '') === effectiveFrom &&
+        (entry.effectiveTo ?? '') === effectiveTo,
+    )
+  ) {
+    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with those effective dates.` };
   }
   const label = String(input.label ?? '').trim().slice(0, 40) || gstRateLabel(rate, cess);
-  const entry = { id: uid('gst'), label, rate, cess, ...(effectiveFrom ? { effectiveFrom } : {}) };
+  const entry = {
+    id: uid('gst'),
+    label,
+    rate,
+    cess,
+    ...(effectiveFrom ? { effectiveFrom } : {}),
+    ...(effectiveTo ? { effectiveTo } : {}),
+  };
   company.gst.rates.push(entry);
   return { ok: true, rate: entry };
 }
@@ -2596,13 +2617,23 @@ export function updateGstRate(company, rateId, input = {}) {
   if (rate === null || rate < 0 || rate > 50) return { ok: false, error: 'GST rate must be between 0% and 50%.' };
   if (cess === null || cess < 0 || cess > 50) return { ok: false, error: 'Cess rate must be between 0% and 50%.' };
   const effectiveFrom = String(input.effectiveFrom ?? entry.effectiveFrom ?? '').trim();
-  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective date.' };
+  const effectiveTo = String(input.effectiveTo ?? entry.effectiveTo ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective-from date.' };
+  if (effectiveTo && !isValidIsoDate(effectiveTo)) return { ok: false, error: 'Enter a valid effective-to date.' };
+  if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) {
+    return { ok: false, error: 'The effective-to date cannot be before the effective-from date.' };
+  }
   if (
     (company.gst.rates ?? []).some(
-      (other) => other.id !== rateId && other.rate === rate && (other.cess ?? 0) === cess && (other.effectiveFrom ?? '') === effectiveFrom,
+      (other) =>
+        other.id !== rateId &&
+        other.rate === rate &&
+        (other.cess ?? 0) === cess &&
+        (other.effectiveFrom ?? '') === effectiveFrom &&
+        (other.effectiveTo ?? '') === effectiveTo,
     )
   ) {
-    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with that effective date.` };
+    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with those effective dates.` };
   }
   const label = String(input.label ?? '').trim().slice(0, 40) || gstRateLabel(rate, cess);
   entry.label = label;
@@ -2610,6 +2641,8 @@ export function updateGstRate(company, rateId, input = {}) {
   entry.cess = cess;
   if (effectiveFrom) entry.effectiveFrom = effectiveFrom;
   else delete entry.effectiveFrom;
+  if (effectiveTo) entry.effectiveTo = effectiveTo;
+  else delete entry.effectiveTo;
   return { ok: true, rate: entry };
 }
 
@@ -4804,7 +4837,28 @@ export function updateStockTransfer(company, transferId, input = {}) {
 export function deleteStockTransfer(company, transferId) {
   const transfer = (company.stockTransfers ?? []).find((item) => item.id === transferId);
   if (!transfer) return { ok: false, error: 'Stock transfer not found.' };
-  company.stockTransfers = (company.stockTransfers ?? []).filter((item) => item.id !== transferId);
+  const original = company.stockTransfers;
+  company.stockTransfers = original.filter((item) => item.id !== transferId);
+  const asOn = [...(company.years ?? []).map((year) => year.end), company.fyEnd]
+    .filter((date) => isValidIsoDate(String(date ?? '')))
+    .sort()
+    .pop() ?? company.fyEnd;
+  for (const line of transfer.items ?? []) {
+    const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
+    if (!item) continue;
+    const balance = stockOnHand(company, item.id, asOn, {
+      godownId: transfer.toGodownId,
+      batchNo: item.batchTracking ? line.batchNo || OPENING_BATCH : null,
+    });
+    if (balance < -0.0005) {
+      company.stockTransfers = original;
+      const godown = (company.godowns ?? []).find((entry) => entry.id === transfer.toGodownId);
+      return {
+        ok: false,
+        error: `Deleting this transfer would make stock in ${godown?.name ?? 'the destination godown'} negative for "${item.name}" on or after ${asOn}. Delete or reverse the later transactions first.`,
+      };
+    }
+  }
   return { ok: true, transfer };
 }
 
@@ -5987,7 +6041,7 @@ function validateImportedCompany(company) {
       if (value === null || value < 0 || value > 50 || cess === null || cess < 0 || cess > 50) {
         return `Company "${name}" has a GST rate outside 0–50%.`;
       }
-      const key = `${value}:${cess}`;
+      const key = `${value}:${cess}:${rate.effectiveFrom ?? ''}:${rate.effectiveTo ?? ''}`;
       if (seenRateIds.has(rate.id) || seenRateValues.has(key)) {
         return `Company "${name}" has duplicate GST rates.`;
       }

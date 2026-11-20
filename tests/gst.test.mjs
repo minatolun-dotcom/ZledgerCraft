@@ -524,6 +524,17 @@ test('GST rate effective dates allow a future rate change', () => {
   assert.equal(addGstRate(company, { rate: 18, effectiveFrom: '2026-07-01' }).ok, false);
   assert.equal(addGstRate(company, { rate: 18, effectiveFrom: 'not-a-date' }).ok, false);
   assert.equal(updateGstRate(company, added.rate.id, { effectiveFrom: '2026-08-01' }).rate.effectiveFrom, '2026-08-01');
+
+  const windowed = addGstRate(company, { rate: 40, effectiveFrom: '2026-04-01', effectiveTo: '2026-06-30' });
+  assert.equal(windowed.ok, true, windowed.error);
+  assert.equal(windowed.rate.effectiveTo, '2026-06-30');
+  assert.equal(addGstRate(company, { rate: 40, effectiveFrom: '2026-04-01', effectiveTo: '2026-06-30' }).ok, false);
+  assert.equal(addGstRate(company, { rate: 40, effectiveFrom: '2026-08-01', effectiveTo: '2026-07-01' }).ok, false);
+  assert.equal(addGstRate(company, { rate: 40, effectiveTo: 'not-a-date' }).ok, false);
+  const extended = updateGstRate(company, windowed.rate.id, { effectiveTo: '2026-09-30' });
+  assert.equal(extended.ok, true, extended.error);
+  assert.equal(extended.rate.effectiveTo, '2026-09-30');
+  assert.equal(updateGstRate(company, windowed.rate.id, { effectiveTo: '2026-03-31' }).ok, false);
 });
 
 test('GST rates are unique and used rates cannot be deleted', () => {

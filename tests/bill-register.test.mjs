@@ -180,6 +180,28 @@ test('bill-wise register shows movement since a prior as-on date', () => {
   assert.equal(invalid.compareAsOn, null);
 });
 
+test('bill movement total includes bills outside the selected bill period', () => {
+  const { company, customer, sales, cash } = fixture();
+  const bill = sale(company, customer, sales, 1000, '2026-04-05', {
+    ref: 'INV-OUTSIDE',
+    dueDate: '2026-05-05',
+  });
+  receipt(company, cash, customer, 400, '2026-04-25', [{ voucherId: bill.id, amount: 400 }]);
+
+  const report = billWiseRegister(company, {
+    side: 'receivable',
+    from: '2026-04-10',
+    to: '2026-04-30',
+    asOn: '2026-04-30',
+    compareAsOn: '2026-04-01',
+  });
+  assert.equal(report.count, 0);
+  assert.equal(report.totalSettledDuring, 0);
+  assert.equal(report.allSettledDuring, 400);
+  assert.equal(report.movementBillCount, 1);
+  assert.equal(report.movementOutsideCount, 1);
+});
+
 test('bill-wise register exposes each bill movement and resulting status', () => {
   const { company, customer, sales, cash } = fixture();
   const bill = sale(company, customer, sales, 1000, '2026-04-05', {

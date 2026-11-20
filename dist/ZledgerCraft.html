@@ -3676,11 +3676,12 @@ function normalizeGst(company) {
         rate: value,
         cess,
         ...(isValidIsoDate(String(rate.effectiveFrom ?? '')) ? { effectiveFrom: String(rate.effectiveFrom) } : {}),
+        ...(isValidIsoDate(String(rate.effectiveTo ?? '')) ? { effectiveTo: String(rate.effectiveTo) } : {}),
       };
     })
     .filter((rate) => {
       if (!rate) return false;
-      const key = `${rate.rate}:${rate.cess}:${rate.effectiveFrom ?? ''}`;
+      const key = `${rate.rate}:${rate.cess}:${rate.effectiveFrom ?? ''}:${rate.effectiveTo ?? ''}`;
       if (seenRates.has(key)) return false;
       seenRates.add(key);
       return true;
@@ -5004,12 +5005,32 @@ function addGstRate(company, input = {}) {
   company.gst = company.gst ?? normalizeGst(company).gst;
   company.gst.rates = company.gst.rates ?? [];
   const effectiveFrom = String(input.effectiveFrom ?? '').trim();
-  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective date.' };
-  if (company.gst.rates.some((entry) => entry.rate === rate && entry.cess === cess && (entry.effectiveFrom ?? '') === effectiveFrom)) {
-    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with that effective date.` };
+  const effectiveTo = String(input.effectiveTo ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective-from date.' };
+  if (effectiveTo && !isValidIsoDate(effectiveTo)) return { ok: false, error: 'Enter a valid effective-to date.' };
+  if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) {
+    return { ok: false, error: 'The effective-to date cannot be before the effective-from date.' };
+  }
+  if (
+    company.gst.rates.some(
+      (entry) =>
+        entry.rate === rate &&
+        entry.cess === cess &&
+        (entry.effectiveFrom ?? '') === effectiveFrom &&
+        (entry.effectiveTo ?? '') === effectiveTo,
+    )
+  ) {
+    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with those effective dates.` };
   }
   const label = String(input.label ?? '').trim().slice(0, 40) || gstRateLabel(rate, cess);
-  const entry = { id: uid('gst'), label, rate, cess, ...(effectiveFrom ? { effectiveFrom } : {}) };
+  const entry = {
+    id: uid('gst'),
+    label,
+    rate,
+    cess,
+    ...(effectiveFrom ? { effectiveFrom } : {}),
+    ...(effectiveTo ? { effectiveTo } : {}),
+  };
   company.gst.rates.push(entry);
   return { ok: true, rate: entry };
 }
@@ -5022,13 +5043,23 @@ function updateGstRate(company, rateId, input = {}) {
   if (rate === null || rate < 0 || rate > 50) return { ok: false, error: 'GST rate must be between 0% and 50%.' };
   if (cess === null || cess < 0 || cess > 50) return { ok: false, error: 'Cess rate must be between 0% and 50%.' };
   const effectiveFrom = String(input.effectiveFrom ?? entry.effectiveFrom ?? '').trim();
-  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective date.' };
+  const effectiveTo = String(input.effectiveTo ?? entry.effectiveTo ?? '').trim();
+  if (effectiveFrom && !isValidIsoDate(effectiveFrom)) return { ok: false, error: 'Enter a valid effective-from date.' };
+  if (effectiveTo && !isValidIsoDate(effectiveTo)) return { ok: false, error: 'Enter a valid effective-to date.' };
+  if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) {
+    return { ok: false, error: 'The effective-to date cannot be before the effective-from date.' };
+  }
   if (
     (company.gst.rates ?? []).some(
-      (other) => other.id !== rateId && other.rate === rate && (other.cess ?? 0) === cess && (other.effectiveFrom ?? '') === effectiveFrom,
+      (other) =>
+        other.id !== rateId &&
+        other.rate === rate &&
+        (other.cess ?? 0) === cess &&
+        (other.effectiveFrom ?? '') === effectiveFrom &&
+        (other.effectiveTo ?? '') === effectiveTo,
     )
   ) {
-    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with that effective date.` };
+    return { ok: false, error: `${gstRateLabel(rate, cess)} already exists with those effective dates.` };
   }
   const label = String(input.label ?? '').trim().slice(0, 40) || gstRateLabel(rate, cess);
   entry.label = label;
@@ -5036,6 +5067,8 @@ function updateGstRate(company, rateId, input = {}) {
   entry.cess = cess;
   if (effectiveFrom) entry.effectiveFrom = effectiveFrom;
   else delete entry.effectiveFrom;
+  if (effectiveTo) entry.effectiveTo = effectiveTo;
+  else delete entry.effectiveTo;
   return { ok: true, rate: entry };
 }
 
@@ -7230,7 +7263,28 @@ function updateStockTransfer(company, transferId, input = {}) {
 function deleteStockTransfer(company, transferId) {
   const transfer = (company.stockTransfers ?? []).find((item) => item.id === transferId);
   if (!transfer) return { ok: false, error: 'Stock transfer not found.' };
-  company.stockTransfers = (company.stockTransfers ?? []).filter((item) => item.id !== transferId);
+  const original = company.stockTransfers;
+  company.stockTransfers = original.filter((item) => item.id !== transferId);
+  const asOn = [...(company.years ?? []).map((year) => year.end), company.fyEnd]
+    .filter((date) => isValidIsoDate(String(date ?? '')))
+    .sort()
+    .pop() ?? company.fyEnd;
+  for (const line of transfer.items ?? []) {
+    const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
+    if (!item) continue;
+    const balance = stockOnHand(company, item.id, asOn, {
+      godownId: transfer.toGodownId,
+      batchNo: item.batchTracking ? line.batchNo || OPENING_BATCH : null,
+    });
+    if (balance < -0.0005) {
+      company.stockTransfers = original;
+      const godown = (company.godowns ?? []).find((entry) => entry.id === transfer.toGodownId);
+      return {
+        ok: false,
+        error: `Deleting this transfer would make stock in ${godown?.name ?? 'the destination godown'} negative for "${item.name}" on or after ${asOn}. Delete or reverse the later transactions first.`,
+      };
+    }
+  }
   return { ok: true, transfer };
 }
 
@@ -8413,7 +8467,7 @@ function validateImportedCompany(company) {
       if (value === null || value < 0 || value > 50 || cess === null || cess < 0 || cess > 50) {
         return `Company "${name}" has a GST rate outside 0–50%.`;
       }
-      const key = `${value}:${cess}`;
+      const key = `${value}:${cess}:${rate.effectiveFrom ?? ''}:${rate.effectiveTo ?? ''}`;
       if (seenRateIds.has(rate.id) || seenRateValues.has(key)) {
         return `Company "${name}" has duplicate GST rates.`;
       }
@@ -11183,6 +11237,9 @@ function billWiseRegister(company, filters = {}) {
     : null;
   const groupKey = side === 'receivable' ? 'sundryDebtors' : 'sundryCreditors';
   const rows = [];
+  let allSettledDuring = 0;
+  let movementBillCount = 0;
+  let movementOutsideCount = 0;
 
   for (const ledger of company.ledgers) {
     if (!inGroupKey(company, ledger, groupKey)) continue;
@@ -11195,12 +11252,20 @@ function billWiseRegister(company, filters = {}) {
         )
       : null;
     for (const bill of data.allBills) {
+      const prior = priorBills?.get(bill.voucherId) ?? null;
+      const priorSettled = compareAsOn && prior ? prior.settled : 0;
+      if (compareAsOn && bill.isBill) {
+        const settledDuring = round2(bill.settled - priorSettled);
+        if (Math.abs(settledDuring) > EPSILON) {
+          allSettledDuring = round2(allSettledDuring + settledDuring);
+          movementBillCount += 1;
+          if (bill.date < from || bill.date > to) movementOutsideCount += 1;
+        }
+      }
       if (!bill.isBill || bill.date < from || bill.date > to) continue;
       if (status === 'Open' && bill.status === 'Settled') continue;
       if (status === 'Settled' && bill.status !== 'Settled') continue;
       if (status === 'Overdue' && !bill.overdue) continue;
-      const prior = priorBills?.get(bill.voucherId) ?? null;
-      const priorSettled = compareAsOn && prior ? prior.settled : 0;
       const priorStatus = compareAsOn
         ? bill.date > compareAsOn
           ? 'Not raised'
@@ -11248,6 +11313,9 @@ function billWiseRegister(company, filters = {}) {
       ? rows.filter((row) => row.priorStatus !== 'Settled' && row.status === 'Settled').length
       : 0,
     statusChangeCount: compareAsOn ? rows.filter((row) => row.statusChanged).length : 0,
+    allSettledDuring: compareAsOn ? round2(allSettledDuring) : 0,
+    movementBillCount: compareAsOn ? movementBillCount : 0,
+    movementOutsideCount: compareAsOn ? movementOutsideCount : 0,
     totalOriginal: sum('original'),
     totalSettled: sum('settled'),
     totalOutstanding: sum('amount'),
@@ -17605,7 +17673,7 @@ function billRegisterScreen() {
       <button class="btn small" type="submit">Apply</button>
     </form>
     ${compared
-      ? `<p class="muted small">Compared with ${esc(dateLabel(report.compareAsOn))}: ${report.openedCount} bill${report.openedCount === 1 ? '' : 's'} raised, ${report.closedCount} settled, ${report.statusChangeCount} status change${report.statusChangeCount === 1 ? '' : 's'}, ${money(report.totalSettledDuring)} settled in total.</p>`
+      ? `<p class="muted small">Compared with ${esc(dateLabel(report.compareAsOn))}: ${report.openedCount} listed bill${report.openedCount === 1 ? '' : 's'} raised, ${report.closedCount} settled, ${report.statusChangeCount} status change${report.statusChangeCount === 1 ? '' : 's'}. ${money(report.allSettledDuring)} settled across ${report.movementBillCount} bill${report.movementBillCount === 1 ? '' : 's'}${report.movementOutsideCount ? ` (${report.movementOutsideCount} outside this bill period)` : ''}.</p>`
       : ''}
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact bill-register-table">
@@ -20017,11 +20085,18 @@ function gstScreen() {
   const rateRows = (gst.rates ?? [])
     .map((rate) => {
       const used = active.vouchers.filter((voucher) => voucher.gst?.rateId === rate.id).length;
+      const effective = rate.effectiveFrom && rate.effectiveTo
+        ? `${esc(dateLabel(rate.effectiveFrom))} – ${esc(dateLabel(rate.effectiveTo))}`
+        : rate.effectiveFrom
+          ? `From ${esc(dateLabel(rate.effectiveFrom))}`
+          : rate.effectiveTo
+            ? `Until ${esc(dateLabel(rate.effectiveTo))}`
+            : '<span class="muted">Always</span>';
       return `<tr>
         <td><strong>${esc(rate.label)}</strong></td>
         <td class="num">${rate.rate}%</td>
         <td class="num">${rate.cess ? `${rate.cess}%` : '—'}</td>
-        <td>${rate.effectiveFrom ? esc(dateLabel(rate.effectiveFrom)) : '<span class="muted">Always</span>'}</td>
+        <td>${effective}</td>
         <td class="num">${used}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-gst-rate" data-id="${esc(rate.id)}">Edit</button>
@@ -20089,13 +20164,14 @@ function gstScreen() {
       <input name="rate" inputmode="decimal" placeholder="Rate %" aria-label="GST rate percent" value="${esc(editingGstRate?.rate ?? '')}" required>
       <input name="cess" inputmode="decimal" placeholder="Cess %" aria-label="Cess percent" value="${esc(editingGstRate?.cess ?? '')}">
       <input name="effectiveFrom" type="date" aria-label="Effective from" value="${esc(editingGstRate?.effectiveFrom ?? '')}">
+      <input name="effectiveTo" type="date" aria-label="Effective to" value="${esc(editingGstRate?.effectiveTo ?? '')}">
       <button class="btn small" type="submit">${editingGstRate ? 'Save rate' : 'Add rate'}</button>
       ${editingGstRate ? '<button class="btn small ghost" type="button" data-action="cancel-gst-rate-edit">Cancel</button>' : ''}
       <p id="gst-rate-error" class="form-error" role="alert"></p>
     </form>
-    <p class="muted small">A rate is selectable from its effective date onwards. Editing a rate changes future vouchers only; posted vouchers keep the rate they were saved with.</p>
+    <p class="muted small">A rate is selectable between its effective-from and effective-to dates; blank dates leave that side open. Editing a rate changes future vouchers only; posted vouchers keep the rate they were saved with.</p>
     <div class="table-scroll" tabindex="0"><table class="data-table compact">
-      <thead><tr><th>Rate</th><th class="num">GST</th><th class="num">Cess</th><th>Effective from</th><th class="num">Vouchers</th><th></th></tr></thead>
+      <thead><tr><th>Rate</th><th class="num">GST</th><th class="num">Cess</th><th>Effective</th><th class="num">Vouchers</th><th></th></tr></thead>
       <tbody>${rateRows}</tbody>
     </table></div>`,
     'One rate applies to the whole invoice. Rates used by vouchers cannot be deleted.',
@@ -23308,7 +23384,11 @@ function gstVoucherBlock(active) {
   const rateOptions = [
     `<option value="">No GST</option>`,
     ...(gst.rates ?? [])
-      .filter((rate) => !rate.effectiveFrom || !draft.date || rate.effectiveFrom <= draft.date)
+      .filter(
+        (rate) =>
+          (!rate.effectiveFrom || !draft.date || rate.effectiveFrom <= draft.date) &&
+          (!rate.effectiveTo || !draft.date || rate.effectiveTo >= draft.date),
+      )
       .map(
       (rate) =>
         `<option value="${esc(rate.id)}"${draft.gst?.rateId === rate.id ? ' selected' : ''}>${esc(rate.label)}</option>`,
@@ -24978,6 +25058,7 @@ async function handleSubmit(event) {
       rate: data.get('rate'),
       cess: data.get('cess') || 0,
       effectiveFrom: data.get('effectiveFrom'),
+      effectiveTo: data.get('effectiveTo'),
     };
     const result = editingRateId
       ? updateGstRate(active, editingRateId, payload)

@@ -1,6 +1,6 @@
 # ZledgerCraft roadmap and status
 
-Last updated: 2026-11-20
+Last updated: 2026-11-21
 
 This file is the source of truth for **where the app stands** and **what gets
 built next**. Every completed task updates the tracker below and the final task
@@ -343,6 +343,20 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
+
+### 2026-11-21 — Phase 52: integrity and rate-window bundle
+
+- Deleting a stock transfer is now refused when later destination-godown
+  activity would make stock negative without it, including batch balances; a
+  refused delete leaves every transfer untouched.
+- Bill-register comparison totals settlements across every bill, including
+  bills outside the selected bill period, and reports how many movement bills
+  sit outside that period.
+- GST rates support optional effective-from and effective-to dates, with date
+  order validation, duplicate-window detection and a window display in the rate
+  master; posted vouchers still keep their saved rate snapshot.
+- Verification: transfer dependency, all-bill movement total and GST rate
+  window tests; 334 tests (333 pass, 1 skipped) and a 1,175.4 kB build.
 
 ### 2026-11-20 — Phase 51: compliance filing history
 

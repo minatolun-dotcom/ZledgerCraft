@@ -789,7 +789,7 @@ export function billRegisterScreen() {
       <button class="btn small" type="submit">Apply</button>
     </form>
     ${compared
-      ? `<p class="muted small">Compared with ${esc(dateLabel(report.compareAsOn))}: ${report.openedCount} bill${report.openedCount === 1 ? '' : 's'} raised, ${report.closedCount} settled, ${report.statusChangeCount} status change${report.statusChangeCount === 1 ? '' : 's'}, ${money(report.totalSettledDuring)} settled in total.</p>`
+      ? `<p class="muted small">Compared with ${esc(dateLabel(report.compareAsOn))}: ${report.openedCount} listed bill${report.openedCount === 1 ? '' : 's'} raised, ${report.closedCount} settled, ${report.statusChangeCount} status change${report.statusChangeCount === 1 ? '' : 's'}. ${money(report.allSettledDuring)} settled across ${report.movementBillCount} bill${report.movementBillCount === 1 ? '' : 's'}${report.movementOutsideCount ? ` (${report.movementOutsideCount} outside this bill period)` : ''}.</p>`
       : ''}
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact bill-register-table">

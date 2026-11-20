@@ -330,8 +330,9 @@ disabled.
   currency and are posted to the books in INR. Currencies used by vouchers
   cannot be deleted.
 - GST registration with GSTIN, legal/trade name, registered address, city, PIN
-  and home state, plus a rate master (add, edit or delete, optional cess). Enabling GST
-  creates or reuses CGST, SGST, IGST and Cess ledgers under Duties & Taxes.
+  and home state, plus a rate master (add, edit or delete, optional cess and
+  optional effective-from/effective-to dates). Enabling GST creates or reuses
+  CGST, SGST, IGST and Cess ledgers under Duties & Taxes.
 - TDS/TCS registration with a TAN and a section master (kind, code, description,
   rate and threshold; seeded with common 194C/194J/194I/194H and two TCS
   sections). A section's description, rate and threshold can be edited without
@@ -428,8 +429,9 @@ disabled.
   godown and batch on the voucher date; returns, purchases, transfers and edits
   are checked the same way. Negative closing balances are flagged.
 - Stock transfers between godowns with source availability checks, a transfer
-  register, audit events and deletion. Transfers move quantity and cost but do
-  not change total stock value or post to the ledger.
+  register, audit events and deletion. A transfer cannot be deleted when later
+  destination-godown activity would become negative without it. Transfers move
+  quantity and cost but do not change total stock value or post to the ledger.
 - Stock Summary with opening, inward, outward, closing quantity and value at
   weighted-average cost, open-sales-order commitments, available-to-sell
   quantity, plus a reorder level per item and Low badges when the closing
@@ -577,8 +579,9 @@ disabled.
   overdue days, totals and drill-down to the voucher or the party statement.
   Each bill can expand to a dated timeline of when it was raised, settled or
   became overdue, including the settlement voucher and resulting status. The
-  timeline can be downloaded as CSV with amount and post-event balances.
-  Fully settled bills remain listed.
+  timeline can be downloaded as CSV with amount and post-event balances. The
+  comparison also totals settlements across all bills, including bills outside
+  the selected bill period. Fully settled bills remain listed.
 - Party credit limits, a printable payment reminder per customer, and simple
   overdue interest at each party's stored annual rate. Interest can be posted
   as a Journal with incremental accrual and duplicate-date protection; reminder

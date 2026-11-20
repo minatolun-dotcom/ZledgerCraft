@@ -1542,7 +1542,11 @@ export function gstVoucherBlock(active) {
   const rateOptions = [
     `<option value="">No GST</option>`,
     ...(gst.rates ?? [])
-      .filter((rate) => !rate.effectiveFrom || !draft.date || rate.effectiveFrom <= draft.date)
+      .filter(
+        (rate) =>
+          (!rate.effectiveFrom || !draft.date || rate.effectiveFrom <= draft.date) &&
+          (!rate.effectiveTo || !draft.date || rate.effectiveTo >= draft.date),
+      )
       .map(
       (rate) =>
         `<option value="${esc(rate.id)}"${draft.gst?.rateId === rate.id ? ' selected' : ''}>${esc(rate.label)}</option>`,
@@ -3212,6 +3216,7 @@ export async function handleSubmit(event) {
       rate: data.get('rate'),
       cess: data.get('cess') || 0,
       effectiveFrom: data.get('effectiveFrom'),
+      effectiveTo: data.get('effectiveTo'),
     };
     const result = editingRateId
       ? updateGstRate(active, editingRateId, payload)

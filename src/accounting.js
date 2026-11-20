@@ -1746,6 +1746,9 @@ export function billWiseRegister(company, filters = {}) {
     : null;
   const groupKey = side === 'receivable' ? 'sundryDebtors' : 'sundryCreditors';
   const rows = [];
+  let allSettledDuring = 0;
+  let movementBillCount = 0;
+  let movementOutsideCount = 0;
 
   for (const ledger of company.ledgers) {
     if (!inGroupKey(company, ledger, groupKey)) continue;
@@ -1758,12 +1761,20 @@ export function billWiseRegister(company, filters = {}) {
         )
       : null;
     for (const bill of data.allBills) {
+      const prior = priorBills?.get(bill.voucherId) ?? null;
+      const priorSettled = compareAsOn && prior ? prior.settled : 0;
+      if (compareAsOn && bill.isBill) {
+        const settledDuring = round2(bill.settled - priorSettled);
+        if (Math.abs(settledDuring) > EPSILON) {
+          allSettledDuring = round2(allSettledDuring + settledDuring);
+          movementBillCount += 1;
+          if (bill.date < from || bill.date > to) movementOutsideCount += 1;
+        }
+      }
       if (!bill.isBill || bill.date < from || bill.date > to) continue;
       if (status === 'Open' && bill.status === 'Settled') continue;
       if (status === 'Settled' && bill.status !== 'Settled') continue;
       if (status === 'Overdue' && !bill.overdue) continue;
-      const prior = priorBills?.get(bill.voucherId) ?? null;
-      const priorSettled = compareAsOn && prior ? prior.settled : 0;
       const priorStatus = compareAsOn
         ? bill.date > compareAsOn
           ? 'Not raised'
@@ -1811,6 +1822,9 @@ export function billWiseRegister(company, filters = {}) {
       ? rows.filter((row) => row.priorStatus !== 'Settled' && row.status === 'Settled').length
       : 0,
     statusChangeCount: compareAsOn ? rows.filter((row) => row.statusChanged).length : 0,
+    allSettledDuring: compareAsOn ? round2(allSettledDuring) : 0,
+    movementBillCount: compareAsOn ? movementBillCount : 0,
+    movementOutsideCount: compareAsOn ? movementOutsideCount : 0,
     totalOriginal: sum('original'),
     totalSettled: sum('settled'),
     totalOutstanding: sum('amount'),

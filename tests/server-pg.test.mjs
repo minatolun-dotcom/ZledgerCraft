@@ -200,6 +200,12 @@ test(
       });
       assert.equal(sharedRateToken.status, 200, JSON.stringify(sharedRateToken.body));
       const sharedRateHeaders = { authorization: `Bearer ${sharedRateToken.body.token}` };
+      // The limiter uses fixed one-minute windows. Start near the beginning of
+      // one so the second instance cannot land in the next window and reset it.
+      const msLeftInWindow = 60_000 - (Date.now() % 60_000);
+      if (msLeftInWindow < 30_000) {
+        await new Promise((resolve) => setTimeout(resolve, msLeftInWindow + 1000));
+      }
       for (let attempt = 0; attempt < 3; attempt += 1) {
         assert.equal((await owner.request('/api/v1/companies', { headers: sharedRateHeaders })).status, 200);
       }

@@ -1951,6 +1951,56 @@ export function stockSummary(company, filters = {}) {
   };
 }
 
+export function reorderReport(company, filters = {}) {
+  const summary = stockSummary(company, {
+    from: filters.from || company.fyStart,
+    to: filters.to || company.fyEnd,
+  });
+  const items = new Map((company.stockItems ?? []).map((item) => [item.id, item]));
+  const rows = summary.rows
+    .filter((row) => row.lowStock)
+    .map((row) => {
+      const item = items.get(row.itemId);
+      const shortfall = round3(Math.max(0, row.reorderLevel - row.closingQty));
+      return {
+        ...row,
+        shortfall,
+        sellingPrice: round2(item?.sellingPrice ?? 0),
+        purchasePrice: round2(item?.purchasePrice ?? 0),
+        estimatedCost: round2(shortfall * (item?.purchasePrice || row.averageRate || 0)),
+      };
+    });
+  return {
+    from: summary.from,
+    to: summary.to,
+    rows,
+    totals: {
+      items: rows.length,
+      estimatedCost: round2(rows.reduce((sum, row) => sum + row.estimatedCost, 0)),
+    },
+  };
+}
+
+/** Item-level price list. `priceType` is `selling` or `purchase`. */
+export function priceList(company, filters = {}) {
+  const priceType = filters.priceType === 'purchase' ? 'purchase' : 'selling';
+  const field = priceType === 'purchase' ? 'purchasePrice' : 'sellingPrice';
+  const groups = new Map((company.stockGroups ?? []).map((group) => [group.id, group]));
+  const units = new Map((company.units ?? []).map((unit) => [unit.id, unit]));
+  const rows = [...(company.stockItems ?? [])]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((item) => ({
+      itemId: item.id,
+      name: item.name,
+      groupName: groups.get(item.stockGroupId)?.name ?? 'Primary',
+      unit: units.get(item.unitId)?.symbol ?? '',
+      hsn: item.hsn ?? '',
+      price: round2(item[field] ?? 0),
+      hasPrice: Number(item[field] ?? 0) > 0,
+    }));
+  return { priceType, rows, priced: rows.filter((row) => row.hasPrice).length };
+}
+
 function stockQuantityEvents(company, to) {
   return stockMovementEvents(company, to);
 }

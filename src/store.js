@@ -3918,6 +3918,14 @@ function validateStockItemInput(company, input, ignoreId) {
   if (reorderLevel === null || reorderLevel < 0) {
     return { ok: false, error: 'Reorder level must be zero or more.' };
   }
+  const sellingPrice = parseAmount(input.sellingPrice ?? 0);
+  if (sellingPrice === null || sellingPrice < 0) {
+    return { ok: false, error: 'Selling price must be zero or more.' };
+  }
+  const purchasePrice = parseAmount(input.purchasePrice ?? 0);
+  if (purchasePrice === null || purchasePrice < 0) {
+    return { ok: false, error: 'Purchase price must be zero or more.' };
+  }
   return {
     ok: true,
     name,
@@ -3927,6 +3935,8 @@ function validateStockItemInput(company, input, ignoreId) {
     openingRate,
     hsn,
     reorderLevel,
+    sellingPrice,
+    purchasePrice,
     batchTracking,
     openingBatches: batches.batches,
   };
@@ -3944,6 +3954,8 @@ export function addStockItem(company, input) {
     openingRate: checked.openingRate,
     batchTracking: checked.batchTracking,
     ...(checked.reorderLevel > 0 ? { reorderLevel: checked.reorderLevel } : {}),
+    ...(checked.sellingPrice > 0 ? { sellingPrice: checked.sellingPrice } : {}),
+    ...(checked.purchasePrice > 0 ? { purchasePrice: checked.purchasePrice } : {}),
     ...(checked.openingBatches.length ? { openingBatches: checked.openingBatches } : {}),
     ...(checked.hsn ? { hsn: checked.hsn } : {}),
     createdAt: new Date().toISOString(),
@@ -3971,6 +3983,8 @@ export function updateStockItem(company, itemId, input) {
     openingRate: input.openingRate ?? item.openingRate,
     hsn: input.hsn ?? item.hsn,
     reorderLevel: input.reorderLevel ?? item.reorderLevel,
+    sellingPrice: input.sellingPrice ?? item.sellingPrice,
+    purchasePrice: input.purchasePrice ?? item.purchasePrice,
     batchTracking: input.batchTracking ?? item.batchTracking,
     openingBatches: requestedBatches ?? item.openingBatches,
   }, itemId);
@@ -3983,6 +3997,10 @@ export function updateStockItem(company, itemId, input) {
   item.batchTracking = checked.batchTracking;
   if (checked.reorderLevel > 0) item.reorderLevel = checked.reorderLevel;
   else delete item.reorderLevel;
+  if (checked.sellingPrice > 0) item.sellingPrice = checked.sellingPrice;
+  else delete item.sellingPrice;
+  if (checked.purchasePrice > 0) item.purchasePrice = checked.purchasePrice;
+  else delete item.purchasePrice;
   if (checked.openingBatches.length) item.openingBatches = checked.openingBatches;
   else delete item.openingBatches;
   if (checked.hsn) item.hsn = checked.hsn;

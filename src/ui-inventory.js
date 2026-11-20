@@ -14,6 +14,8 @@ import {
   batchStockSummary,
   expiringBatches,
   godownStockSummary,
+  priceList,
+  reorderReport,
   stockAgeing,
   stockMovements,
   stockSummary,
@@ -255,6 +257,11 @@ export function inventoryScreen() {
   const batchReport = batchStockSummary(active, { from, to });
   const expiryReport = expiringBatches(active, { asOn: to, days: 90 });
   const ageingReport = stockAgeing(active, { asOn: to });
+  const reorder = reorderReport(active, { from, to });
+  const priceRows = priceList(active);
+  const purchasePrices = new Map(
+    priceList(active, { priceType: 'purchase' }).rows.map((row) => [row.itemId, row.price]),
+  );
   const transfers = [...(active.stockTransfers ?? [])].sort(
     (a, b) => b.date.localeCompare(a.date) || b.no - a.no,
   );
@@ -410,6 +417,8 @@ export function inventoryScreen() {
         <td>${item.batchTracking ? 'Yes' : '<span class="muted">No</span>'}${item.openingBatches?.length ? `<div class="muted small">${item.openingBatches.length} opening</div>` : ''}</td>
         <td class="num">${fmtQty(item.openingQty)}</td>
         <td class="num">${item.reorderLevel ? fmtQty(item.reorderLevel) : '—'}</td>
+        <td class="num">${item.sellingPrice ? money(item.sellingPrice) : '—'}</td>
+        <td class="num">${item.purchasePrice ? money(item.purchasePrice) : '—'}</td>
         <td class="num">${money(item.openingRate)}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-stock-item" data-id="${esc(item.id)}">Edit</button>
@@ -611,6 +620,43 @@ export function inventoryScreen() {
         : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,
       'Click an item to see its voucher-wise movement.',
     )}
+    ${reorder.rows.length
+      ? panel(
+          'Reorder watch',
+          `<table class="data-table compact">
+            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">In stock</th><th class="num">Reorder at</th><th class="num">Shortfall</th><th class="num">Buy price</th><th class="num">Estimated cost</th></tr></thead>
+            <tbody>${reorder.rows.map((row) => `<tr>
+              <td><strong>${esc(row.name)}</strong></td>
+              <td class="muted">${esc(row.groupName)}</td>
+              <td>${esc(row.unit)}</td>
+              <td class="num">${fmtQty(row.closingQty)}</td>
+              <td class="num">${fmtQty(row.reorderLevel)}</td>
+              <td class="num">${fmtQty(row.shortfall)}</td>
+              <td class="num">${row.purchasePrice ? money(row.purchasePrice) : '—'}</td>
+              <td class="num">${money(row.estimatedCost)}</td>
+            </tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="7">${reorder.totals.items} item(s) to reorder</td><td class="num">${money(reorder.totals.estimatedCost)}</td></tr></tfoot>
+          </table>`,
+          'Items at or below their reorder level. Estimated cost uses the item purchase price, falling back to average stock rate.',
+        )
+      : ''}
+    ${priceRows.priced
+      ? panel(
+          'Price list',
+          `<table class="data-table compact">
+            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th>HSN / SAC</th><th class="num">Selling price</th><th class="num">Purchase price</th></tr></thead>
+            <tbody>${priceRows.rows.map((row) => `<tr>
+              <td><strong>${esc(row.name)}</strong></td>
+              <td class="muted">${esc(row.groupName)}</td>
+              <td>${esc(row.unit)}</td>
+              <td>${row.hsn ? esc(row.hsn) : '—'}</td>
+              <td class="num">${row.hasPrice ? money(row.price) : '—'}</td>
+              <td class="num">${purchasePrices.get(row.itemId) ? money(purchasePrices.get(row.itemId)) : '—'}</td>
+            </tr>`).join('')}</tbody>
+          </table>`,
+          'Item price list for quotation and purchase reference. Prices are per stock unit and do not include tax.',
+        )
+      : ''}
     ${ageingRows
       ? panel(
           'Stock ageing',
@@ -807,6 +853,14 @@ export function inventoryScreen() {
           <span>Reorder level</span>
           <input name="reorderLevel" inputmode="decimal" placeholder="0 = no alert" value="${esc(editing?.reorderLevel ?? '')}">
         </label>
+        <label class="field">
+          <span>Selling price</span>
+          <input name="sellingPrice" inputmode="decimal" placeholder="0.00" value="${esc(editing?.sellingPrice ?? '')}">
+        </label>
+        <label class="field">
+          <span>Purchase price</span>
+          <input name="purchasePrice" inputmode="decimal" placeholder="0.00" value="${esc(editing?.purchasePrice ?? '')}">
+        </label>
         <label class="field gst-check">
           <input type="checkbox" name="batchTracking"${editing?.batchTracking ? ' checked' : ''}>
           <span>Track batches and expiry</span>
@@ -824,7 +878,7 @@ export function inventoryScreen() {
       </form>
       ${items.length
         ? `<table class="data-table">
-            <thead><tr><th>Item</th><th>Stock group</th><th>Unit</th><th>HSN / SAC</th><th>Batches</th><th class="num">Opening qty</th><th class="num">Reorder</th><th class="num">Opening rate</th><th></th></tr></thead>
+            <thead><tr><th>Item</th><th>Stock group</th><th>Unit</th><th>HSN / SAC</th><th>Batches</th><th class="num">Opening qty</th><th class="num">Reorder</th><th class="num">Selling</th><th class="num">Purchase</th><th class="num">Opening rate</th><th></th></tr></thead>
             <tbody>${itemRows}</tbody>
           </table>`
         : '<p class="muted">No stock items yet. Create units and a stock group first if you need them.</p>'}`,

@@ -429,6 +429,9 @@ disabled.
 - Stock ageing buckets closing quantities by approximate FIFO receipt age
   (0–30, 31–60, 61–90, 91–180 and over 180 days), with the oldest remaining
   layer per item. Opening stock is the oldest layer and transfers are ignored.
+- A dedicated Reorder watch lists items at or below their reorder level with
+  shortfall and estimated purchase cost, and a Price list shows each item's
+  selling and purchase price per stock unit.
 - Sales and purchase orders with party, delivery date, up to 50 item lines
   (each with godown, batch, expiry, quantity and rate), status
   (Open/Closed/Cancelled), filters and a Create voucher action that prefills the
@@ -714,7 +717,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 
 | TallyPrime area | Status |
 | --- | --- |
-| Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, stock ageing, dated stock counts with book/counted differences and batch-level count lines, partially fulfilled sales/purchase orders, BOM recipes and production; no multi-level BOM, wastage, job work, count adjustments, batch-wise costing, WIP accounting or stock posting to the financial statements |
+| Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, stock ageing, reorder watch, price list, dated stock counts with book/counted differences and batch-level count lines, partially fulfilled sales/purchase orders, BOM recipes, production and wastage; no multi-level BOM, job work, count adjustments, batch-wise costing, WIP accounting or stock posting to the financial statements |
 | GST registration, rates and tax on vouchers | Partial — GSTIN and home state, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and invoice-level tax on four voucher types; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way drafts with saved Part B details and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, validity tracking, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |

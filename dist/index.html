@@ -6280,6 +6280,14 @@ function validateStockItemInput(company, input, ignoreId) {
   if (reorderLevel === null || reorderLevel < 0) {
     return { ok: false, error: 'Reorder level must be zero or more.' };
   }
+  const sellingPrice = parseAmount(input.sellingPrice ?? 0);
+  if (sellingPrice === null || sellingPrice < 0) {
+    return { ok: false, error: 'Selling price must be zero or more.' };
+  }
+  const purchasePrice = parseAmount(input.purchasePrice ?? 0);
+  if (purchasePrice === null || purchasePrice < 0) {
+    return { ok: false, error: 'Purchase price must be zero or more.' };
+  }
   return {
     ok: true,
     name,
@@ -6289,6 +6297,8 @@ function validateStockItemInput(company, input, ignoreId) {
     openingRate,
     hsn,
     reorderLevel,
+    sellingPrice,
+    purchasePrice,
     batchTracking,
     openingBatches: batches.batches,
   };
@@ -6306,6 +6316,8 @@ function addStockItem(company, input) {
     openingRate: checked.openingRate,
     batchTracking: checked.batchTracking,
     ...(checked.reorderLevel > 0 ? { reorderLevel: checked.reorderLevel } : {}),
+    ...(checked.sellingPrice > 0 ? { sellingPrice: checked.sellingPrice } : {}),
+    ...(checked.purchasePrice > 0 ? { purchasePrice: checked.purchasePrice } : {}),
     ...(checked.openingBatches.length ? { openingBatches: checked.openingBatches } : {}),
     ...(checked.hsn ? { hsn: checked.hsn } : {}),
     createdAt: new Date().toISOString(),
@@ -6333,6 +6345,8 @@ function updateStockItem(company, itemId, input) {
     openingRate: input.openingRate ?? item.openingRate,
     hsn: input.hsn ?? item.hsn,
     reorderLevel: input.reorderLevel ?? item.reorderLevel,
+    sellingPrice: input.sellingPrice ?? item.sellingPrice,
+    purchasePrice: input.purchasePrice ?? item.purchasePrice,
     batchTracking: input.batchTracking ?? item.batchTracking,
     openingBatches: requestedBatches ?? item.openingBatches,
   }, itemId);
@@ -6345,6 +6359,10 @@ function updateStockItem(company, itemId, input) {
   item.batchTracking = checked.batchTracking;
   if (checked.reorderLevel > 0) item.reorderLevel = checked.reorderLevel;
   else delete item.reorderLevel;
+  if (checked.sellingPrice > 0) item.sellingPrice = checked.sellingPrice;
+  else delete item.sellingPrice;
+  if (checked.purchasePrice > 0) item.purchasePrice = checked.purchasePrice;
+  else delete item.purchasePrice;
   if (checked.openingBatches.length) item.openingBatches = checked.openingBatches;
   else delete item.openingBatches;
   if (checked.hsn) item.hsn = checked.hsn;
@@ -10546,6 +10564,56 @@ function stockSummary(company, filters = {}) {
       closingValue: round2(rows.reduce((sum, row) => sum + row.closingValue, 0)),
     },
   };
+}
+
+function reorderReport(company, filters = {}) {
+  const summary = stockSummary(company, {
+    from: filters.from || company.fyStart,
+    to: filters.to || company.fyEnd,
+  });
+  const items = new Map((company.stockItems ?? []).map((item) => [item.id, item]));
+  const rows = summary.rows
+    .filter((row) => row.lowStock)
+    .map((row) => {
+      const item = items.get(row.itemId);
+      const shortfall = round3(Math.max(0, row.reorderLevel - row.closingQty));
+      return {
+        ...row,
+        shortfall,
+        sellingPrice: round2(item?.sellingPrice ?? 0),
+        purchasePrice: round2(item?.purchasePrice ?? 0),
+        estimatedCost: round2(shortfall * (item?.purchasePrice || row.averageRate || 0)),
+      };
+    });
+  return {
+    from: summary.from,
+    to: summary.to,
+    rows,
+    totals: {
+      items: rows.length,
+      estimatedCost: round2(rows.reduce((sum, row) => sum + row.estimatedCost, 0)),
+    },
+  };
+}
+
+/** Item-level price list. `priceType` is `selling` or `purchase`. */
+function priceList(company, filters = {}) {
+  const priceType = filters.priceType === 'purchase' ? 'purchase' : 'selling';
+  const field = priceType === 'purchase' ? 'purchasePrice' : 'sellingPrice';
+  const groups = new Map((company.stockGroups ?? []).map((group) => [group.id, group]));
+  const units = new Map((company.units ?? []).map((unit) => [unit.id, unit]));
+  const rows = [...(company.stockItems ?? [])]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((item) => ({
+      itemId: item.id,
+      name: item.name,
+      groupName: groups.get(item.stockGroupId)?.name ?? 'Primary',
+      unit: units.get(item.unitId)?.symbol ?? '',
+      hsn: item.hsn ?? '',
+      price: round2(item[field] ?? 0),
+      hasPrice: Number(item[field] ?? 0) > 0,
+    }));
+  return { priceType, rows, priced: rows.filter((row) => row.hasPrice).length };
 }
 
 function stockQuantityEvents(company, to) {
@@ -16975,6 +17043,11 @@ function inventoryScreen() {
   const batchReport = batchStockSummary(active, { from, to });
   const expiryReport = expiringBatches(active, { asOn: to, days: 90 });
   const ageingReport = stockAgeing(active, { asOn: to });
+  const reorder = reorderReport(active, { from, to });
+  const priceRows = priceList(active);
+  const purchasePrices = new Map(
+    priceList(active, { priceType: 'purchase' }).rows.map((row) => [row.itemId, row.price]),
+  );
   const transfers = [...(active.stockTransfers ?? [])].sort(
     (a, b) => b.date.localeCompare(a.date) || b.no - a.no,
   );
@@ -17130,6 +17203,8 @@ function inventoryScreen() {
         <td>${item.batchTracking ? 'Yes' : '<span class="muted">No</span>'}${item.openingBatches?.length ? `<div class="muted small">${item.openingBatches.length} opening</div>` : ''}</td>
         <td class="num">${fmtQty(item.openingQty)}</td>
         <td class="num">${item.reorderLevel ? fmtQty(item.reorderLevel) : '—'}</td>
+        <td class="num">${item.sellingPrice ? money(item.sellingPrice) : '—'}</td>
+        <td class="num">${item.purchasePrice ? money(item.purchasePrice) : '—'}</td>
         <td class="num">${money(item.openingRate)}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-stock-item" data-id="${esc(item.id)}">Edit</button>
@@ -17331,6 +17406,43 @@ function inventoryScreen() {
         : '<p class="muted">No stock items yet. Add one below to start tracking quantities.</p>'}`,
       'Click an item to see its voucher-wise movement.',
     )}
+    ${reorder.rows.length
+      ? panel(
+          'Reorder watch',
+          `<table class="data-table compact">
+            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th class="num">In stock</th><th class="num">Reorder at</th><th class="num">Shortfall</th><th class="num">Buy price</th><th class="num">Estimated cost</th></tr></thead>
+            <tbody>${reorder.rows.map((row) => `<tr>
+              <td><strong>${esc(row.name)}</strong></td>
+              <td class="muted">${esc(row.groupName)}</td>
+              <td>${esc(row.unit)}</td>
+              <td class="num">${fmtQty(row.closingQty)}</td>
+              <td class="num">${fmtQty(row.reorderLevel)}</td>
+              <td class="num">${fmtQty(row.shortfall)}</td>
+              <td class="num">${row.purchasePrice ? money(row.purchasePrice) : '—'}</td>
+              <td class="num">${money(row.estimatedCost)}</td>
+            </tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="7">${reorder.totals.items} item(s) to reorder</td><td class="num">${money(reorder.totals.estimatedCost)}</td></tr></tfoot>
+          </table>`,
+          'Items at or below their reorder level. Estimated cost uses the item purchase price, falling back to average stock rate.',
+        )
+      : ''}
+    ${priceRows.priced
+      ? panel(
+          'Price list',
+          `<table class="data-table compact">
+            <thead><tr><th>Item</th><th>Group</th><th>Unit</th><th>HSN / SAC</th><th class="num">Selling price</th><th class="num">Purchase price</th></tr></thead>
+            <tbody>${priceRows.rows.map((row) => `<tr>
+              <td><strong>${esc(row.name)}</strong></td>
+              <td class="muted">${esc(row.groupName)}</td>
+              <td>${esc(row.unit)}</td>
+              <td>${row.hsn ? esc(row.hsn) : '—'}</td>
+              <td class="num">${row.hasPrice ? money(row.price) : '—'}</td>
+              <td class="num">${purchasePrices.get(row.itemId) ? money(purchasePrices.get(row.itemId)) : '—'}</td>
+            </tr>`).join('')}</tbody>
+          </table>`,
+          'Item price list for quotation and purchase reference. Prices are per stock unit and do not include tax.',
+        )
+      : ''}
     ${ageingRows
       ? panel(
           'Stock ageing',
@@ -17527,6 +17639,14 @@ function inventoryScreen() {
           <span>Reorder level</span>
           <input name="reorderLevel" inputmode="decimal" placeholder="0 = no alert" value="${esc(editing?.reorderLevel ?? '')}">
         </label>
+        <label class="field">
+          <span>Selling price</span>
+          <input name="sellingPrice" inputmode="decimal" placeholder="0.00" value="${esc(editing?.sellingPrice ?? '')}">
+        </label>
+        <label class="field">
+          <span>Purchase price</span>
+          <input name="purchasePrice" inputmode="decimal" placeholder="0.00" value="${esc(editing?.purchasePrice ?? '')}">
+        </label>
         <label class="field gst-check">
           <input type="checkbox" name="batchTracking"${editing?.batchTracking ? ' checked' : ''}>
           <span>Track batches and expiry</span>
@@ -17544,7 +17664,7 @@ function inventoryScreen() {
       </form>
       ${items.length
         ? `<table class="data-table">
-            <thead><tr><th>Item</th><th>Stock group</th><th>Unit</th><th>HSN / SAC</th><th>Batches</th><th class="num">Opening qty</th><th class="num">Reorder</th><th class="num">Opening rate</th><th></th></tr></thead>
+            <thead><tr><th>Item</th><th>Stock group</th><th>Unit</th><th>HSN / SAC</th><th>Batches</th><th class="num">Opening qty</th><th class="num">Reorder</th><th class="num">Selling</th><th class="num">Purchase</th><th class="num">Opening rate</th><th></th></tr></thead>
             <tbody>${itemRows}</tbody>
           </table>`
         : '<p class="muted">No stock items yet. Create units and a stock group first if you need them.</p>'}`,
@@ -22365,6 +22485,8 @@ async function handleSubmit(event) {
       openingRate: data.get('openingRate') || 0,
       hsn: data.get('hsn') || '',
       reorderLevel: data.get('reorderLevel') || 0,
+      sellingPrice: data.get('sellingPrice') || 0,
+      purchasePrice: data.get('purchasePrice') || 0,
       batchTracking: data.get('batchTracking') === 'on',
     };
     if (batchRows.length) payload.openingBatches = batchRows;

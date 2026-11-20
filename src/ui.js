@@ -2749,6 +2749,8 @@ export async function handleSubmit(event) {
       openingRate: data.get('openingRate') || 0,
       hsn: data.get('hsn') || '',
       reorderLevel: data.get('reorderLevel') || 0,
+      sellingPrice: data.get('sellingPrice') || 0,
+      purchasePrice: data.get('purchasePrice') || 0,
       batchTracking: data.get('batchTracking') === 'on',
     };
     if (batchRows.length) payload.openingBatches = batchRows;

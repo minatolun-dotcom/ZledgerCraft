@@ -42,6 +42,8 @@ import {
   batchStockSummary,
   expiringBatches,
   godownStockSummary,
+  priceList,
+  reorderReport,
   statistics,
   stockAgeing,
   stockMovements,
@@ -214,6 +216,34 @@ test('reorder levels flag items at or below the level', () => {
   assert.equal(cleared.ok, true, cleared.error);
   assert.equal(cleared.item.reorderLevel, undefined);
   assert.equal(updateStockItem(company, item.id, { reorderLevel: -1 }).ok, false);
+});
+
+test('reorder report calculates shortfall from item buy price', () => {
+  const { company, item } = inventoryFixture();
+  const priced = updateStockItem(company, item.id, {
+    reorderLevel: 12,
+    purchasePrice: 80,
+    sellingPrice: 120,
+  });
+  assert.equal(priced.ok, true, priced.error);
+  const report = reorderReport(company);
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].shortfall, 2);
+  assert.equal(report.rows[0].purchasePrice, 80);
+  assert.equal(report.rows[0].estimatedCost, 160);
+  assert.equal(report.totals.estimatedCost, 160);
+  assert.equal(updateStockItem(company, item.id, { purchasePrice: -1 }).ok, false);
+});
+
+test('price list separates selling and purchase prices', () => {
+  const { company, item } = inventoryFixture();
+  updateStockItem(company, item.id, { sellingPrice: 145.5, purchasePrice: 101 });
+  const selling = priceList(company);
+  assert.equal(selling.rows[0].price, 145.5);
+  assert.equal(selling.rows[0].hasPrice, true);
+  assert.equal(priceList(company, { priceType: 'purchase' }).rows[0].price, 101);
+  updateStockItem(company, item.id, { sellingPrice: 0 });
+  assert.equal(priceList(company).rows[0].hasPrice, false);
 });
 
 test('stock counts snapshot book quantities without moving stock', () => {

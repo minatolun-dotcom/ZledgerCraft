@@ -5,6 +5,7 @@ import {
   dateLabel,
   defaultGodownId,
   round2,
+  stockBatchesOnHand,
   stockOnHand,
   todayIso,
 } from './store.js';
@@ -209,11 +210,23 @@ export function inventoryScreen() {
     : null;
   const countDraft = view.stockCountDraft ?? null;
   const countDraftRows = countDraft
-    ? items.map((item) => ({
-        item,
-        unit: (active.units ?? []).find((entry) => entry.id === item.unitId)?.symbol ?? '',
-        systemQty: stockOnHand(active, item.id, countDraft.date, { godownId: countDraft.godownId }),
-      }))
+    ? items.flatMap((item) => {
+        const unit = (active.units ?? []).find((entry) => entry.id === item.unitId)?.symbol ?? '';
+        if (!item.batchTracking) {
+          return [{
+            item,
+            unit,
+            batchNo: '',
+            systemQty: stockOnHand(active, item.id, countDraft.date, { godownId: countDraft.godownId }),
+          }];
+        }
+        return [
+          ...stockBatchesOnHand(active, item.id, countDraft.date, {
+            godownId: countDraft.godownId,
+          }).map((batch) => ({ item, unit, batchNo: batch.batchNo, systemQty: batch.qty })),
+          { item, unit, batchNo: '', systemQty: 0, unlisted: true },
+        ];
+      })
     : [];
 
   const stockCountRows = stockCounts
@@ -238,6 +251,7 @@ export function inventoryScreen() {
           const diff = Math.abs(row.difference) >= 0.0005 ? row.difference : 0;
           return `<tr>
             <td>${esc(row.name)}</td>
+            <td>${row.batchNo ? esc(row.batchNo) : '—'}</td>
             <td>${esc(row.unit)}</td>
             <td class="num">${fmtQty(row.systemQty)}</td>
             <td class="num">${fmtQty(row.countedQty)}</td>
@@ -250,17 +264,20 @@ export function inventoryScreen() {
     ? `<form id="stock-count-form" novalidate>
         <input type="hidden" name="date" value="${esc(countDraft.date)}">
         <input type="hidden" name="godownId" value="${esc(countDraft.godownId)}">
-        <p class="muted">Counting <strong>${esc(godowns.find((godown) => godown.id === countDraft.godownId)?.name ?? 'godown')}</strong> on ${esc(dateLabel(countDraft.date))}. Counted quantities start at the book quantity; change the ones that differ.</p>
-        ${items.length
+        <p class="muted">Counting <strong>${esc(godowns.find((godown) => godown.id === countDraft.godownId)?.name ?? 'godown')}</strong> on ${esc(dateLabel(countDraft.date))}. Counted quantities start at the book quantity; change the ones that differ. Batch-tracked items are counted lot by lot; use the unlisted row to record stock found in a lot that is not shown.</p>
+        ${countDraftRows.length
           ? `<div class="table-wrap"><table class="data-table compact">
-              <thead><tr><th>Item</th><th>Unit</th><th class="num">Book qty</th><th class="num">Counted qty</th></tr></thead>
+              <thead><tr><th>Item</th><th>Batch</th><th>Unit</th><th class="num">Book qty</th><th class="num">Counted qty</th></tr></thead>
               <tbody>${countDraftRows
                 .map(
-                  ({ item, unit, systemQty }) => `<tr>
+                  ({ item, unit, batchNo, systemQty, unlisted }, index) => `<tr>
                     <td>${esc(item.name)}</td>
+                    <td>${unlisted
+                      ? `<input name="batch-${index}" data-count-batch-input="${esc(item.id)}" maxlength="30" placeholder="Unlisted lot" aria-label="Batch for unlisted ${esc(item.name)} stock">`
+                      : esc(batchNo)}</td>
                     <td>${esc(unit)}</td>
                     <td class="num">${fmtQty(systemQty)}</td>
-                    <td class="num"><input name="counted-${esc(item.id)}" data-count-item="${esc(item.id)}" inputmode="decimal" value="${systemQty}" aria-label="Counted quantity for ${esc(item.name)}"></td>
+                    <td class="num"><input name="counted-${index}" data-count-item="${esc(item.id)}" data-count-batch="${esc(batchNo)}" inputmode="decimal" value="${systemQty}" aria-label="Counted quantity for ${esc(item.name)}${batchNo ? ` batch ${esc(batchNo)}` : unlisted ? ' unlisted lot' : ''}"></td>
                   </tr>`,
                 )
                 .join('')}</tbody>
@@ -270,7 +287,7 @@ export function inventoryScreen() {
               <button class="btn primary" type="submit">Save count</button>
               <button class="btn ghost" type="button" data-action="cancel-stock-count">Cancel</button>
             </div>`
-          : '<p class="muted">Create a stock item before starting a count.</p>'}
+          : '<p class="muted">There is no book stock to count in this godown. Post a purchase or transfer first, or add a stock item.</p>'}
         <p id="stock-count-error" class="form-error" role="alert"></p>
       </form>`
     : `<form id="stock-count-start-form" class="filter-bar" novalidate>
@@ -524,14 +541,14 @@ export function inventoryScreen() {
             <h3>SC-${selectedCount.no} · ${esc(dateLabel(selectedCount.date))} · ${esc(selectedCount.godownName || selectedCount.godownId)}</h3>
             ${selectedCount.narration ? `<p class="muted">${esc(selectedCount.narration)}</p>` : ''}
             <table class="data-table compact">
-              <thead><tr><th>Item</th><th>Unit</th><th class="num">Book qty</th><th class="num">Counted</th><th class="num">Difference</th></tr></thead>
+              <thead><tr><th>Item</th><th>Batch</th><th>Unit</th><th class="num">Book qty</th><th class="num">Counted</th><th class="num">Difference</th></tr></thead>
               <tbody>${stockCountDetailRows}</tbody>
             </table>
           </div>`
         : ''}
       ${stockCounts.length
         ? `<table class="data-table compact">
-            <thead><tr><th>Count</th><th>Date</th><th>Godown</th><th class="num">Items</th><th class="num">Differences</th><th></th></tr></thead>
+            <thead><tr><th>Count</th><th>Date</th><th>Godown</th><th class="num">Lines</th><th class="num">Differences</th><th></th></tr></thead>
             <tbody>${stockCountRows}</tbody>
           </table>`
         : '<p class="muted">No stock counts recorded yet.</p>'}`,

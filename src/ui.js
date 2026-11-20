@@ -2821,6 +2821,9 @@ export async function handleSubmit(event) {
     const data = new FormData(form);
     const rows = [...form.querySelectorAll('[data-count-item]')].map((input) => ({
       stockItemId: input.dataset.countItem,
+      batchNo:
+        input.closest('tr')?.querySelector('[data-count-batch-input]')?.value ??
+        input.dataset.countBatch ?? '',
       countedQty: input.value,
     }));
     const result = addStockCount(active, {

@@ -4024,6 +4024,47 @@ export function deleteStockTransfer(company, transferId) {
  * Records a physical stock count. Book quantities are snapped at the count
  * date and godown, but counting never moves stock or posts an adjustment.
  */
+/** Batch numbers with a non-zero book quantity for one item and godown. */
+export function stockBatchesOnHand(company, itemId, asOn, options = {}) {
+  const item = (company.stockItems ?? []).find((entry) => entry.id === itemId);
+  if (!item?.batchTracking) return [];
+  const candidates = new Set();
+  const openingBatches = (item.openingBatches ?? []).filter(
+    (batch) => String(batch.batchNo ?? '').trim() && Number(batch.qty) > 0,
+  );
+  if (openingBatches.length) {
+    for (const batch of openingBatches) candidates.add(batch.batchNo);
+  } else if ((item.openingQty ?? 0) > 0) {
+    candidates.add(OPENING_BATCH);
+  }
+  for (const voucher of company.vouchers ?? []) {
+    if (voucher.date > asOn || !INVENTORY_TYPES.includes(voucher.type)) continue;
+    for (const line of voucher.items ?? []) {
+      if (line.stockItemId === itemId) candidates.add(line.batchNo || OPENING_BATCH);
+    }
+  }
+  for (const transfer of company.stockTransfers ?? []) {
+    if (transfer.date > asOn) continue;
+    for (const line of transfer.items ?? []) {
+      if (line.stockItemId === itemId) candidates.add(line.batchNo || OPENING_BATCH);
+    }
+  }
+  for (const manufacture of company.manufactures ?? []) {
+    if (manufacture.date > asOn) continue;
+    if (manufacture.outputItemId === itemId) candidates.add(manufacture.outputBatchNo || OPENING_BATCH);
+    if ((manufacture.components ?? []).some((line) => line.stockItemId === itemId)) {
+      candidates.add(OPENING_BATCH);
+    }
+  }
+  return [...candidates]
+    .map((batchNo) => ({
+      batchNo,
+      qty: round3(stockOnHand(company, itemId, asOn, { ...options, batchNo })),
+    }))
+    .filter((batch) => Math.abs(batch.qty) >= 0.0005)
+    .sort((a, b) => a.batchNo.localeCompare(b.batchNo));
+}
+
 export function addStockCount(company, input) {
   const date = String(input.date ?? '');
   if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid count date.' };
@@ -4041,22 +4082,39 @@ export function addStockCount(company, input) {
   for (const raw of requested) {
     const item = (company.stockItems ?? []).find((entry) => entry.id === raw?.stockItemId);
     if (!item) return { ok: false, error: 'Choose a stock item for every count line.' };
-    if (seen.has(item.id)) return { ok: false, error: `"${item.name}" appears twice in the count.` };
-    seen.add(item.id);
+    const batchNo = item.batchTracking ? String(raw?.batchNo ?? '').trim().slice(0, 30) : '';
+    const key = `${item.id}:${batchNo}`;
+    if (seen.has(key)) {
+      return {
+        ok: false,
+        error: batchNo
+          ? `"${item.name}" batch ${batchNo} appears twice in the count.`
+          : `"${item.name}" appears twice in the count.`,
+      };
+    }
+    seen.add(key);
     const countedQty = parseQty(raw?.countedQty);
     if (countedQty === null || countedQty < 0) {
       return { ok: false, error: `Counted quantity for "${item.name}" must be zero or more.` };
     }
-    const systemQty = round3(stockOnHand(company, item.id, date, { godownId: godown.id }));
+    if (item.batchTracking && !batchNo) {
+      if (countedQty === 0) continue;
+      return { ok: false, error: `Enter the batch or lot for the unlisted "${item.name}" stock.` };
+    }
+    const systemQty = round3(
+      stockOnHand(company, item.id, date, { godownId: godown.id, ...(batchNo ? { batchNo } : {}) }),
+    );
     rows.push({
       stockItemId: item.id,
       name: item.name,
+      ...(batchNo ? { batchNo } : {}),
       unit: (company.units ?? []).find((unit) => unit.id === item.unitId)?.symbol ?? '',
       systemQty,
       countedQty,
       difference: round3(countedQty - systemQty),
     });
   }
+  if (!rows.length) return { ok: false, error: 'Enter a counted quantity or an unlisted batch to save this count.' };
   company.stockCounts = company.stockCounts ?? [];
   company.counters = company.counters ?? {};
   company.counters.__stockCount = Math.max(
@@ -4102,9 +4160,11 @@ export function normalizeStockCounts(company) {
           const item = items.get(row.stockItemId);
           const countedQty = round3(Number(row.countedQty));
           const systemQty = round3(Number(row.systemQty) || 0);
+          const batchNo = item?.batchTracking ? String(row.batchNo ?? '').trim().slice(0, 30) : '';
           return {
             stockItemId: String(row.stockItemId ?? ''),
             name: item?.name ?? String(row.name ?? 'Unknown item'),
+            ...(batchNo ? { batchNo } : {}),
             unit: item ? units.get(item.unitId)?.symbol ?? '' : String(row.unit ?? ''),
             systemQty,
             countedQty,
@@ -5401,10 +5461,14 @@ function validateImportedCompany(company) {
       if (!stockItemIds.has(row.stockItemId)) {
         return `Company "${name}": stock count ${count.no ?? ''} uses a missing stock item.`;
       }
-      if (countItems.has(row.stockItemId)) {
-        return `Company "${name}": stock count ${count.no ?? ''} lists an item twice.`;
+      const rowKey = `${row.stockItemId}:${String(row.batchNo ?? '').trim()}`;
+      if (countItems.has(rowKey)) {
+        return `Company "${name}": stock count ${count.no ?? ''} lists an item or batch twice.`;
       }
-      countItems.add(row.stockItemId);
+      countItems.add(rowKey);
+      if (String(row.batchNo ?? '').length > 30) {
+        return `Company "${name}": stock count ${count.no ?? ''} has an invalid batch.`;
+      }
       const countedQty = parseQty(row.countedQty);
       const systemQty = parseQty(row.systemQty ?? 0);
       if (countedQty === null || countedQty < 0 || systemQty === null || systemQty < 0) {

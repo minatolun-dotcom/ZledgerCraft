@@ -29,6 +29,7 @@ import {
   findLedgerByName,
   importState,
   setOrderStatus,
+  stockBatchesOnHand,
   stockOnHand,
   updateStockItem,
   updateVoucher,
@@ -277,6 +278,77 @@ test('stock counts snapshot book quantities without moving stock', () => {
   const removed = deleteStockCount(company, count.count.id);
   assert.equal(removed.ok, true, removed.error);
   assert.equal(company.stockCounts.length, 1);
+});
+
+test('stock counts split batch-tracked items lot by lot', () => {
+  const company = createCompany('Batch Count Co', '2026-04-01').company;
+  const unit = company.units.find((entry) => entry.symbol === 'Nos');
+  const item = addStockItem(company, {
+    name: 'Batch Syrup',
+    stockGroupId: company.stockGroups[0].id,
+    unitId: unit.id,
+    openingRate: 40,
+    batchTracking: true,
+    openingBatches: [
+      { batchNo: 'LOT-A', qty: 3 },
+      { batchNo: 'LOT-B', qty: 2 },
+    ],
+  }).item;
+  const godownId = defaultGodownId(company);
+  const batches = stockBatchesOnHand(company, item.id, '2026-04-30', { godownId });
+  assert.deepEqual(
+    batches.map((batch) => [batch.batchNo, batch.qty]),
+    [['LOT-A', 3], ['LOT-B', 2]],
+  );
+
+  const needsBatch = addStockCount(company, {
+    date: '2026-04-30',
+    godownId,
+    rows: [{ stockItemId: item.id, countedQty: 1 }],
+  });
+  assert.equal(needsBatch.ok, false);
+  assert.match(needsBatch.error, /batch or lot/);
+
+  const count = addStockCount(company, {
+    date: '2026-04-30',
+    godownId,
+    rows: [
+      { stockItemId: item.id, batchNo: 'LOT-A', countedQty: 2 },
+      { stockItemId: item.id, batchNo: 'LOT-B', countedQty: 2 },
+      { stockItemId: item.id, batchNo: 'LOT-C', countedQty: 4 },
+      { stockItemId: item.id, countedQty: 0 },
+    ],
+  });
+  assert.equal(count.ok, true, count.error);
+  assert.equal(count.count.rows.length, 3, 'the empty unlisted row is skipped');
+  const lotA = count.count.rows.find((row) => row.batchNo === 'LOT-A');
+  assert.equal(lotA.systemQty, 3);
+  assert.equal(lotA.difference, -1);
+  const lotC = count.count.rows.find((row) => row.batchNo === 'LOT-C');
+  assert.equal(lotC.systemQty, 0);
+  assert.equal(lotC.difference, 4);
+  assert.equal(stockOnHand(company, item.id, '2026-04-30', { batchNo: 'LOT-A' }), 3);
+  assert.equal(stockOnHand(company, item.id, '2026-04-30'), 5);
+
+  const duplicate = addStockCount(company, {
+    date: '2026-04-30',
+    godownId,
+    rows: [
+      { stockItemId: item.id, batchNo: 'LOT-A', countedQty: 1 },
+      { stockItemId: item.id, batchNo: 'LOT-A', countedQty: 2 },
+    ],
+  });
+  assert.equal(duplicate.ok, false);
+  assert.match(duplicate.error, /batch LOT-A appears twice/);
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  const restoredCount = restored.state.companies[0].stockCounts[0];
+  assert.equal(restoredCount.rows.find((row) => row.batchNo === 'LOT-A').difference, -1);
+  assert.equal(restoredCount.rows.find((row) => row.batchNo === 'LOT-C').countedQty, 4);
 });
 
 test('voucher inventory lines must match the voucher total and the item masters', () => {

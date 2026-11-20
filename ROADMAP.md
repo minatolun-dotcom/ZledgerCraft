@@ -344,6 +344,19 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-20 — Phase 44: batch-level stock counts
+
+- Physical stock counts now snapshot batch-tracked items lot by lot in the
+  selected godown, with batch numbers stored on count lines and shown in the
+  count register. An unlisted-lot row lets a counter record stock found outside
+  the listed batches after naming the lot.
+- Blank unlisted rows at zero count are skipped; duplicate item/batch lines and
+  unlisted positive counts without a lot are rejected. Counts remain working
+  papers and never move stock or post an adjustment.
+- Verification: batch lot lookup, per-lot book/counted differences, unlisted lot
+  handling, duplicate rejection and backup round trip; 285 tests (284 pass,
+  1 skipped) and a 970.0 kB build pass.
+
 ### 2026-11-20 — Phase 43: e-way Part B details
 
 - Outward sales invoices can store Part B transporter name, transporter ID,

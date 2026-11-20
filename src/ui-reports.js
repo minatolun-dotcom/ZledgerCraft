@@ -756,7 +756,8 @@ export function billRegisterScreen() {
                       ? `${esc(dateLabel(event.date))} · Due date passed · Overdue`
                       : `${esc(dateLabel(event.date))} · ${esc(voucherLabel(event.type))} ${event.no} · ${money(event.amount)} · ${esc(event.statusAfter)}`,
                 )
-                .join('<br>')}</div></details>`
+                .join('<br>')}</div>
+              <button class="btn small ghost" type="button" data-action="download-bill-timeline" data-id="${esc(row.voucherId)}">Download timeline CSV</button></details>`
             : ''}
         </td>
         <td>${esc(dateLabel(row.date))}</td>

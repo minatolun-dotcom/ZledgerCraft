@@ -574,7 +574,8 @@ disabled.
   and outstanding amounts, settlements since the comparison, status changes,
   overdue days, totals and drill-down to the voucher or the party statement.
   Each bill can expand to a dated timeline of when it was raised, settled or
-  became overdue, including the settlement voucher and resulting status.
+  became overdue, including the settlement voucher and resulting status. The
+  timeline can be downloaded as CSV with amount and post-event balances.
   Fully settled bills remain listed.
 - Party credit limits, a printable payment reminder per customer, and simple
   overdue interest at each party's stored annual rate. Interest can be posted

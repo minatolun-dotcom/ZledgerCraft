@@ -540,14 +540,15 @@ disabled.
   build.
 - The optional server workspace persists to `data/workspace.sqlite` through
   Node's built-in SQLite module, or to Neon Postgres when `DATABASE_URL` is set.
-  In SQLite mode, companies, ledgers, vouchers and voucher lines are relational
-  tables; every remaining top-level company collection (groups, stock, GST, TDS,
-  payroll, banking, budgets, currencies and settings) is stored one row per
-  record in `company_records`, with stock items also indexed in `stock_items`.
-  Company header fields, stock-item identity/opening/batch fields and ledger
-  opening/tax/address/GST-role fields are typed columns; the rest of each record
-  stays JSON. Nested configuration stays JSON inside its row so the current
-  accounting engine keeps its shape. In Postgres mode the whole workspace is a JSONB
+  In SQLite mode, companies, account groups, ledgers, vouchers, voucher lines
+  and stock items are relational tables; every other top-level company
+  collection (financial years, cost centres, budgets, currencies, units, stock
+  groups, godowns, transfers, orders, BOMs, production and tax challans) is
+  stored one row per record in `company_records`. Company header fields,
+  account-group name/parent/nature, stock-item identity/opening/batch fields and
+  ledger opening/tax/address/GST-role fields are typed columns; the rest of each
+  record stays JSON. Nested configuration stays JSON inside its row so the
+  current accounting engine keeps its shape. In Postgres mode the whole workspace is a JSONB
   document with revision history, leases and Postgres audit tables. An older
   whole-workspace blob is migrated once, then removed. On localhost the
   workspace is shared by browser profiles on the same machine without a login.

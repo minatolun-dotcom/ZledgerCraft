@@ -16,9 +16,9 @@ and e-invoice/e-way bill plus tax-audit working papers are done. Stage 4 —
 Depth and scale is in progress (1 of 4 complete): inventory depth is complete
 with godowns, batches, stock transfers, orders, BOMs and manufacturing; the
 server workspace now uses a local SQLite database with normalized company,
-ledger, voucher and line tables; company headers, stock-item fields and common
-ledger fields are typed columns, with a row for every remaining company
-collection, server accounts, sign-in sessions, role enforcement, company-level
+ledger, voucher and line tables; company headers, account groups, stock-item
+fields and common ledger fields are typed columns, with a row for every
+remaining company collection, server accounts, sign-in sessions, role enforcement, company-level
 access scoping, revision-checked saves and enforced voucher edit leases. Tally XML
 account groups, ledgers, stock masters, vouchers with matching stock lines and
 Excel `.xlsx` ledgers/vouchers can be imported through a hardened parser path.
@@ -50,8 +50,8 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 App-level encryption (passphrase-encrypted JSON downloads and optional
 AES-256-GCM encryption for server/R2 backups are complete; live-workspace
 encryption remains), incremental master-column promotion (company headers,
-stock-item fields and ledger opening/tax/address/GST-role fields are now typed
-SQLite columns), APIs/webhooks and statutory integrations. Voucher
+account groups, stock-item fields and ledger opening/tax/address/GST-role fields
+are now typed SQLite columns), APIs/webhooks and statutory integrations. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
 now complete.
 
@@ -335,6 +335,23 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-20 — Phase 13: account-group normalization
+
+- Moved account groups out of the generic `company_records` collection table
+  into a dedicated `account_groups` table with typed name, parent, nature and
+  key columns. Group JSON now holds only fields that are not promoted.
+- Raised the normalized SQLite schema to version 5. Version-4 databases are
+  migrated in place: groups are read from the old collection rows, written to
+  the new table, and the old rows are removed. Backups without the new table
+  still fall back to `company_records` and company JSON.
+- Reads prefer `account_groups`, including parent-child ordering, while the
+  reconstructed company object keeps the same shape for the accounting engine.
+- Postgres remains one JSONB workspace document; this phase changes SQLite
+  storage only.
+- Verification: v4-to-v5 migration, empty-group preservation, JSON fallback,
+  write-side synchronization and full round-trip tests; 251/251 engine tests and
+  an 880.5 kB single-file build pass.
 
 ### 2026-11-20 — Phase 12: company and stock-item column promotion
 

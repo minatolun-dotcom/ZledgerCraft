@@ -50,7 +50,7 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 App-level encryption (passphrase-encrypted JSON downloads and optional
 AES-256-GCM encryption for server/R2 backups are complete; live-workspace
 encryption remains), incremental master-column promotion (company headers,
-account groups, financial years, stock-item fields and ledger
+account groups, financial years, cost masters, stock-item fields and ledger
 opening/tax/address/GST-role fields are now typed SQLite columns), APIs/webhooks
 and statutory integrations. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
@@ -82,8 +82,9 @@ Working now:
   profiles, not authentication.
 - Optional local server workspace in `data/workspace.sqlite`, shared across
   browser profiles on the same machine, with browser storage as the fallback and
-  local mirror. Companies, ledgers, vouchers and voucher lines are relational
-  rows; other company masters stay in a JSON column. Legacy `workspace.json` and
+  local mirror. Companies, account groups, financial years, cost masters,
+  ledgers, vouchers and voucher lines are relational rows; other company masters
+  stay in a JSON column. Legacy `workspace.json` and
   the old whole-workspace blob are migrated automatically and removed. Saves
   carry a revision; a stale session gets a conflict banner and must reload
   instead of overwriting another session. The workspace database is excluded
@@ -337,6 +338,24 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 ## Progress log
 
+### 2026-11-20 — Phase 15: cost-master normalization
+
+- Moved cost categories and cost centres out of the generic `company_records`
+  collection table into dedicated `cost_categories` and `cost_centres` tables.
+  Names, centre category links and creation times are typed columns; the
+  remaining record JSON is kept as a compatibility fallback.
+- Raised the normalized SQLite schema to version 7. Version-6 databases migrate
+  in place: both masters are read from the old collection rows, written to the
+  new tables, and the old rows are removed.
+- Reads preserve category and centre order and rebuild the same arrays used by
+  cost-centre entry, summaries and guarded deletes. Backups without the new
+  tables still fall back to `company_records` and company JSON.
+- Postgres remains one JSONB workspace document; this phase changes SQLite
+  storage only.
+- Verification: v6-to-v7 migration, typed name/category/creation restoration,
+  JSON  stripping, write-side synchronization and full round-trip tests; 253 tests
+  (252 pass, 1 skipped) and an 880.5 kB single-file build pass.
+
 ### 2026-11-20 — Phase 14: financial-year normalization
 
 - Moved financial years out of the generic `company_records` collection table
@@ -351,8 +370,8 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - Postgres remains one JSONB workspace document; this phase changes SQLite
   storage only.
 - Verification: v5-to-v6 migration, typed date/closed restoration, JSON
-  stripping, write-side synchronization and full round-trip tests; 252/252
-  engine tests and an 880.5 kB single-file build pass.
+  stripping, write-side synchronization and full round-trip tests; 252 tests
+  (251 pass, 1 skipped) and an 880.5 kB single-file build pass.
 
 ### 2026-11-20 — Phase 13: account-group normalization
 

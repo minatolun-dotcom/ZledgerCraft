@@ -1,13 +1,13 @@
 // ZledgerCraft - relational workspace storage.
-// Companies, account groups, financial years, ledgers, vouchers and stock items
-// are canonical rows. Every other company collection is stored as one ordered
-// record row with searchable hints, while the complete record JSON preserves
-// fields the engine has not promoted to columns yet. Expiring leases provide
-// advisory-but-enforced record ownership.
+// Companies, account groups, financial years, cost masters, ledgers, vouchers
+// and stock items are canonical rows. Every other company collection is stored
+// as one ordered record row with searchable hints, while the complete record
+// JSON preserves fields the engine has not promoted to columns yet. Expiring
+// leases provide advisory-but-enforced record ownership.
 import { createHash, randomBytes } from 'node:crypto';
 import { deepEqual, mergeWorkspaceStates, repairVoucherNumbers } from './server-merge.js';
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const HISTORY_LIMIT = 20;
 // Header fields that are useful as typed columns. The complete JSON is still
 // kept for compatibility, but these values are removed from it when present.
@@ -39,6 +39,7 @@ const PROMOTED_YEAR_FIELDS = [
   ['end_date', 'end'],
   ['closed', 'closed'],
 ];
+const PROMOTED_COST_MASTER_FIELDS = [['created_at', 'createdAt']];
 const PROMOTED_COMPANY_COLUMNS = [['created_at', 'TEXT']];
 const PROMOTED_STOCK_COLUMNS = [['created_at', 'TEXT']];
 const PROMOTED_LEDGER_COLUMNS = [
@@ -57,11 +58,9 @@ const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 const MAX_LEASE_MS = 10 * 60 * 1000;
 
 // Top-level company arrays stored in company_records. Account groups, financial
-// years and stock items have their own tables because they are queried by
-// parent, dates, group, unit and HSN independently.
+// years, cost masters and stock items have their own tables because they are
+// queried by parent, dates, category, group, unit and HSN independently.
 const RECORD_COLLECTIONS = [
-  'costCategories',
-  'costCentres',
   'budgets',
   'currencies',
   'units',
@@ -168,6 +167,39 @@ function yearRows(rows) {
   return byCompany;
 }
 
+function costCategoryRows(rows) {
+  const byCompany = new Map();
+  for (const row of rows) {
+    if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
+    const data = JSON.parse(row.data);
+    const category = { ...data, id: row.id, name: row.name ?? data.name };
+    if (row.created_at !== null && row.created_at !== undefined && row.created_at !== '') {
+      category.createdAt = row.created_at;
+    }
+    byCompany.get(row.company_id).push(category);
+  }
+  return byCompany;
+}
+
+function costCentreRows(rows) {
+  const byCompany = new Map();
+  for (const row of rows) {
+    if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
+    const data = JSON.parse(row.data);
+    const centre = {
+      ...data,
+      id: row.id,
+      name: row.name ?? data.name,
+      categoryId: row.category_id ?? data.categoryId,
+    };
+    if (row.created_at !== null && row.created_at !== undefined && row.created_at !== '') {
+      centre.createdAt = row.created_at;
+    }
+    byCompany.get(row.company_id).push(centre);
+  }
+  return byCompany;
+}
+
 function stockRows(rows) {
   const byCompany = new Map();
   for (const row of rows) {
@@ -215,6 +247,8 @@ function stateFromRows({
   lines,
   groups = [],
   years = [],
+  costCategories = [],
+  costCentres = [],
   records = [],
   stockItems = [],
 }) {
@@ -231,6 +265,8 @@ function stateFromRows({
   const linesByVoucher = new Map();
   const groupsByCompany = groupRows(groups);
   const yearsByCompany = yearRows(years);
+  const costCategoriesByCompany = costCategoryRows(costCategories);
+  const costCentresByCompany = costCentreRows(costCentres);
   const recordsByCompany = collectionRows(records);
   const stockByCompany = stockRows(stockItems);
 
@@ -300,6 +336,10 @@ function stateFromRows({
     if (storedGroups) company.groups = storedGroups;
     const storedYears = yearsByCompany.get(row.id);
     if (storedYears) company.years = storedYears;
+    const storedCostCategories = costCategoriesByCompany.get(row.id);
+    if (storedCostCategories) company.costCategories = storedCostCategories;
+    const storedCostCentres = costCentresByCompany.get(row.id);
+    if (storedCostCentres) company.costCentres = storedCostCentres;
     const storedStockItems = stockByCompany.get(row.id);
     if (storedStockItems) company.stockItems = storedStockItems;
     company.ledgers = ledgersByCompany.get(row.id) ?? [];
@@ -337,6 +377,11 @@ export function readWorkspaceSnapshot(db) {
       companies: select('SELECT * FROM companies ORDER BY position'),
       groups: optionalRows(db, 'SELECT * FROM account_groups ORDER BY company_id, position'),
       years: optionalRows(db, 'SELECT * FROM financial_years ORDER BY company_id, position'),
+      costCategories: optionalRows(
+        db,
+        'SELECT * FROM cost_categories ORDER BY company_id, position',
+      ),
+      costCentres: optionalRows(db, 'SELECT * FROM cost_centres ORDER BY company_id, position'),
       ledgers: select('SELECT * FROM ledgers ORDER BY position'),
       vouchers: select('SELECT * FROM vouchers ORDER BY position'),
       lines: select('SELECT * FROM voucher_lines ORDER BY position'),
@@ -414,6 +459,25 @@ export class WorkspaceStore {
         start_date TEXT,
         end_date TEXT,
         closed INTEGER NOT NULL DEFAULT 0,
+        data TEXT NOT NULL,
+        PRIMARY KEY (company_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS cost_categories (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        name TEXT,
+        created_at TEXT,
+        data TEXT NOT NULL,
+        PRIMARY KEY (company_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS cost_centres (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        name TEXT,
+        category_id TEXT,
+        created_at TEXT,
         data TEXT NOT NULL,
         PRIMARY KEY (company_id, id)
       );
@@ -497,6 +561,9 @@ export class WorkspaceStore {
       CREATE INDEX IF NOT EXISTS account_groups_parent ON account_groups(company_id, parent_id);
       CREATE INDEX IF NOT EXISTS financial_years_company ON financial_years(company_id, position);
       CREATE INDEX IF NOT EXISTS financial_years_dates ON financial_years(company_id, start_date, end_date);
+      CREATE INDEX IF NOT EXISTS cost_categories_company ON cost_categories(company_id, position);
+      CREATE INDEX IF NOT EXISTS cost_centres_company ON cost_centres(company_id, position);
+      CREATE INDEX IF NOT EXISTS cost_centres_category ON cost_centres(company_id, category_id);
       CREATE INDEX IF NOT EXISTS ledgers_company ON ledgers(company_id, position);
       CREATE INDEX IF NOT EXISTS vouchers_company ON vouchers(company_id, position);
       CREATE INDEX IF NOT EXISTS voucher_lines_voucher ON voucher_lines(voucher_id, position);
@@ -525,6 +592,10 @@ export class WorkspaceStore {
     this.companies = this.db.prepare('SELECT * FROM companies ORDER BY position');
     this.groups = this.db.prepare('SELECT * FROM account_groups ORDER BY company_id, position');
     this.years = this.db.prepare('SELECT * FROM financial_years ORDER BY company_id, position');
+    this.costCategories = this.db.prepare(
+      'SELECT * FROM cost_categories ORDER BY company_id, position',
+    );
+    this.costCentres = this.db.prepare('SELECT * FROM cost_centres ORDER BY company_id, position');
     this.ledgers = this.db.prepare('SELECT * FROM ledgers ORDER BY position');
     this.vouchers = this.db.prepare('SELECT * FROM vouchers ORDER BY position');
     this.lines = this.db.prepare('SELECT * FROM voucher_lines ORDER BY position');
@@ -556,6 +627,14 @@ export class WorkspaceStore {
     this.insertYear = this.db.prepare(`
       INSERT INTO financial_years
         (company_id, id, position, start_date, end_date, closed, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.insertCostCategory = this.db.prepare(`
+      INSERT INTO cost_categories (company_id, id, position, name, created_at, data)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    this.insertCostCentre = this.db.prepare(`
+      INSERT INTO cost_centres (company_id, id, position, name, category_id, created_at, data)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     this.insertLedger = this.db.prepare(`
@@ -590,6 +669,8 @@ export class WorkspaceStore {
     this.clearCompanies = this.db.prepare('DELETE FROM companies');
     this.clearGroups = this.db.prepare('DELETE FROM account_groups');
     this.clearYears = this.db.prepare('DELETE FROM financial_years');
+    this.clearCostCategories = this.db.prepare('DELETE FROM cost_categories');
+    this.clearCostCentres = this.db.prepare('DELETE FROM cost_centres');
     this.clearRecords = this.db.prepare('DELETE FROM company_records');
     this.clearStockItems = this.db.prepare('DELETE FROM stock_items');
     this.clearUsers = this.db.prepare('DELETE FROM workspace_users');
@@ -658,6 +739,8 @@ export class WorkspaceStore {
       companies: this.companies.all(),
       groups: this.groups.all(),
       years: this.years.all(),
+      costCategories: this.costCategories.all(),
+      costCentres: this.costCentres.all(),
       ledgers: this.ledgers.all(),
       vouchers: this.vouchers.all(),
       lines: this.lines.all(),
@@ -753,6 +836,8 @@ export class WorkspaceStore {
       this.clearStockItems.run();
       this.clearGroups.run();
       this.clearYears.run();
+      this.clearCostCategories.run();
+      this.clearCostCentres.run();
       this.clearCompanies.run();
       this.clearUsers.run();
       this.clearLog.run();
@@ -775,6 +860,8 @@ export class WorkspaceStore {
       this.clearStockItems.run();
       this.clearGroups.run();
       this.clearYears.run();
+      this.clearCostCategories.run();
+      this.clearCostCentres.run();
       this.clearCompanies.run();
       this.clearUsers.run();
       this.clearLog.run();
@@ -813,6 +900,12 @@ export class WorkspaceStore {
         if (hasGroups) delete companyData.groups;
         const hasYears = Array.isArray(company.years) && company.years.length > 0;
         if (hasYears) delete companyData.years;
+        const hasCostCategories =
+          Array.isArray(company.costCategories) && company.costCategories.length > 0;
+        if (hasCostCategories) delete companyData.costCategories;
+        const hasCostCentres =
+          Array.isArray(company.costCentres) && company.costCentres.length > 0;
+        if (hasCostCentres) delete companyData.costCentres;
         const hasStockItems = Array.isArray(company.stockItems) && company.stockItems.length > 0;
         if (hasStockItems) delete companyData.stockItems;
         this.insertCompany.run(
@@ -855,6 +948,40 @@ export class WorkspaceStore {
               text(year.end) || null,
               year.closed ? 1 : 0,
               JSON.stringify(yearData),
+            );
+          }
+        }
+        if (hasCostCategories) {
+          for (const [position, category] of company.costCategories.entries()) {
+            const categoryData = { ...category };
+            delete categoryData.id;
+            delete categoryData.name;
+            for (const [, field] of PROMOTED_COST_MASTER_FIELDS) delete categoryData[field];
+            this.insertCostCategory.run(
+              text(company.id),
+              text(category.id) || `costCategories-${position}`,
+              position,
+              text(category.name) || null,
+              optionalText(category.createdAt),
+              JSON.stringify(categoryData),
+            );
+          }
+        }
+        if (hasCostCentres) {
+          for (const [position, centre] of company.costCentres.entries()) {
+            const centreData = { ...centre };
+            delete centreData.id;
+            delete centreData.name;
+            delete centreData.categoryId;
+            for (const [, field] of PROMOTED_COST_MASTER_FIELDS) delete centreData[field];
+            this.insertCostCentre.run(
+              text(company.id),
+              text(centre.id) || `costCentres-${position}`,
+              position,
+              text(centre.name) || null,
+              text(centre.categoryId) || null,
+              optionalText(centre.createdAt),
+              JSON.stringify(centreData),
             );
           }
         }

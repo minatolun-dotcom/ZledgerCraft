@@ -50,8 +50,9 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 App-level encryption (passphrase-encrypted JSON downloads and optional
 AES-256-GCM encryption for server/R2 backups are complete; live-workspace
 encryption remains), incremental master-column promotion (company headers,
-account groups, financial years, cost masters, stock-item fields and ledger
-opening/tax/address/GST-role fields are now typed SQLite columns), APIs/webhooks
+account groups, financial years, cost masters, inventory masters, stock-item
+fields and ledger opening/tax/address/GST-role fields are now typed SQLite
+columns), APIs/webhooks
 and statutory integrations. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
 now complete.
@@ -83,8 +84,8 @@ Working now:
 - Optional local server workspace in `data/workspace.sqlite`, shared across
   browser profiles on the same machine, with browser storage as the fallback and
   local mirror. Companies, account groups, financial years, cost masters,
-  ledgers, vouchers and voucher lines are relational rows; other company masters
-  stay in a JSON column. Legacy `workspace.json` and
+  inventory masters, ledgers, vouchers and voucher lines are relational rows;
+  other company masters stay in a JSON column. Legacy `workspace.json` and
   the old whole-workspace blob are migrated automatically and removed. Saves
   carry a revision; a stale session gets a conflict banner and must reload
   instead of overwriting another session. The workspace database is excluded
@@ -337,6 +338,26 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-20 — Phase 16: inventory-master normalization
+
+- Moved units, stock groups and godowns out of the generic `company_records`
+  collection table into dedicated `units`, `stock_groups` and `godowns` tables.
+  Unit names and symbols, master names and primary flags are typed columns; the
+  remaining record JSON is kept as a compatibility fallback for unpromoted
+  fields such as imported group codes.
+- Raised the normalized SQLite schema to version 8. Version-7 databases migrate
+  in place: all three masters are read from the old collection rows, written to
+  the new tables, and the old rows are removed.
+- Reads preserve unit, stock-group and godown order and rebuild the same arrays
+  used by item entry, transfers, orders and production. Backups without the new
+  tables still fall back to `company_records` and company JSON.
+- Postgres remains one JSONB workspace document; this phase changes SQLite
+  storage only.
+- Verification: v7-to-v8 migration, typed name/symbol/primary restoration, JSON
+  stripping, unpromoted JSON preservation, write-side synchronization and full
+  round-trip tests; 254 tests (253 pass, 1 skipped) and an 880.5 kB single-file
+  build pass.
 
 ### 2026-11-20 — Phase 15: cost-master normalization
 

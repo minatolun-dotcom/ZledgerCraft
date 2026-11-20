@@ -350,18 +350,24 @@ test('schema version 1 workspaces migrate their JSON collections into rows', () 
   db.prepare('DELETE FROM financial_years').run();
   db.prepare('DELETE FROM cost_categories').run();
   db.prepare('DELETE FROM cost_centres').run();
+  db.prepare('DELETE FROM units').run();
+  db.prepare('DELETE FROM stock_groups').run();
+  db.prepare('DELETE FROM godowns').run();
   db.prepare('DELETE FROM stock_items').run();
   db.prepare('UPDATE workspace_meta SET schema_version = 1').run();
 
   const upgraded = new WorkspaceStore(db);
   assert.equal(
     db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version,
-    7,
+    8,
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM account_groups').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM financial_years').get().count, 2);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM cost_categories').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM cost_centres').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM units').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stock_groups').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM godowns').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stock_items').get().count, 1);
   assert.deepEqual(upgraded.read().state, expected);
 });
@@ -383,7 +389,7 @@ test('schema version 2 promotes ledger JSON fields into typed columns', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 2').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 7);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
   const row = db.prepare('SELECT * FROM ledgers WHERE id = ?').get('led1');
   assert.equal(row.opening, 0);
   assert.equal(row.opening_type, 'Dr');
@@ -410,7 +416,7 @@ test('schema version 3 promotes company and stock item JSON fields into typed co
   db.prepare('UPDATE workspace_meta SET schema_version = 3').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 7);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
   const company = db.prepare('SELECT * FROM companies WHERE id = ?').get('co1');
   assert.equal(company.created_at, '2026-03-01T00:00:00.000Z');
   assert.equal(JSON.parse(company.data).name, undefined);
@@ -444,7 +450,7 @@ test('schema version 4 moves account groups out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 4').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 7);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'groups'").get().count,
     0,
@@ -476,7 +482,7 @@ test('schema version 5 moves financial years out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 5').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 7);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'years'").get().count,
     0,
@@ -514,7 +520,7 @@ test('schema version 6 moves cost masters out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 6').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 7);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
   for (const collection of ['costCategories', 'costCentres']) {
     assert.equal(
       db.prepare('SELECT COUNT(*) AS count FROM company_records WHERE collection = ?').get(collection)
@@ -540,7 +546,62 @@ test('schema version 6 moves cost masters out of collection rows', () => {
   assert.deepEqual(upgraded.read().state, expected);
 });
 
-test('normalized writes keep promoted company, group, year, cost master, stock item and ledger columns in sync', () => {
+test('schema version 7 moves inventory masters out of collection rows', () => {
+  const original = fixture();
+  const { db, store } = legacyStore(original);
+  store.migrateLegacy();
+  const expected = store.read().state;
+  const masters = [
+    ['units', 'unit1', original.companies[0].units[0]],
+    ['stockGroups', 'sg1', original.companies[0].stockGroups[0]],
+    ['godowns', 'gd1', original.companies[0].godowns[0]],
+  ];
+  db.prepare('DELETE FROM units').run();
+  db.prepare('DELETE FROM stock_groups').run();
+  db.prepare('DELETE FROM godowns').run();
+  for (const [collection, id, master] of masters) {
+    db.prepare(
+      `INSERT INTO company_records
+         (company_id, collection, id, position, name, parent_id, reference_id, amount, data)
+       VALUES (?, ?, ?, 0, ?, NULL, NULL, NULL, ?)`,
+    ).run('co1', collection, id, master.name, JSON.stringify(master));
+  }
+  db.prepare('UPDATE workspace_meta SET schema_version = 7').run();
+
+  const upgraded = new WorkspaceStore(db);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 8);
+  for (const collection of ['units', 'stockGroups', 'godowns']) {
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM company_records WHERE collection = ?').get(collection)
+        .count,
+      0,
+    );
+  }
+  const unit = db.prepare('SELECT * FROM units WHERE id = ?').get('unit1');
+  assert.equal(unit.name, 'Numbers');
+  assert.equal(unit.symbol, 'Nos');
+  const unitData = JSON.parse(unit.data);
+  for (const field of ['id', 'name', 'symbol']) {
+    assert.equal(unitData[field], undefined, `${field} should not remain in unit JSON`);
+  }
+  const group = db.prepare('SELECT * FROM stock_groups WHERE id = ?').get('sg1');
+  assert.equal(group.name, 'Primary');
+  assert.equal(group.is_primary, 1);
+  const groupData = JSON.parse(group.data);
+  for (const field of ['id', 'name', 'primary']) {
+    assert.equal(groupData[field], undefined, `${field} should not remain in stock group JSON`);
+  }
+  const godown = db.prepare('SELECT * FROM godowns WHERE id = ?').get('gd1');
+  assert.equal(godown.name, 'Main Location');
+  assert.equal(godown.is_primary, 1);
+  const godownData = JSON.parse(godown.data);
+  for (const field of ['id', 'name', 'primary']) {
+    assert.equal(godownData[field], undefined, `${field} should not remain in godown JSON`);
+  }
+  assert.deepEqual(upgraded.read().state, expected);
+});
+
+test('normalized writes keep promoted company, group, year, cost master, inventory master, stock item and ledger columns in sync', () => {
   const { db, store } = legacyStore(fixture());
   store.migrateLegacy();
   const before = store.read();
@@ -564,6 +625,13 @@ test('normalized writes keep promoted company, group, year, cost master, stock i
     categoryId: 'ccat1',
     createdAt: '2026-05-03T00:00:00.000Z',
   });
+  Object.assign(next.companies[0].units[0], { name: 'Pieces', symbol: 'Pcs' });
+  Object.assign(next.companies[0].stockGroups[0], {
+    name: 'Trade Goods',
+    primary: false,
+    code: 'SG-1',
+  });
+  Object.assign(next.companies[0].godowns[0], { name: 'Warehouse', primary: true });
   Object.assign(next.companies[0].stockItems[0], {
     name: 'Gadget',
     hsn: '5678',
@@ -610,6 +678,21 @@ test('normalized writes keep promoted company, group, year, cost master, stock i
   assert.equal(centre.category_id, 'ccat1');
   assert.equal(centre.created_at, '2026-05-03T00:00:00.000Z');
   assert.equal(JSON.parse(centre.data).name, undefined);
+  const unit = db.prepare('SELECT * FROM units WHERE id = ?').get('unit1');
+  assert.equal(unit.name, 'Pieces');
+  assert.equal(unit.symbol, 'Pcs');
+  assert.equal(JSON.parse(unit.data).name, undefined);
+  const stockGroup = db.prepare('SELECT * FROM stock_groups WHERE id = ?').get('sg1');
+  assert.equal(stockGroup.name, 'Trade Goods');
+  assert.equal(stockGroup.is_primary, 0);
+  const stockGroupData = JSON.parse(stockGroup.data);
+  assert.equal(stockGroupData.name, undefined);
+  assert.equal(stockGroupData.primary, undefined);
+  assert.equal(stockGroupData.code, 'SG-1');
+  const godown = db.prepare('SELECT * FROM godowns WHERE id = ?').get('gd1');
+  assert.equal(godown.name, 'Warehouse');
+  assert.equal(godown.is_primary, 1);
+  assert.equal(JSON.parse(godown.data).name, undefined);
   const stockItem = db.prepare('SELECT * FROM stock_items WHERE id = ?').get('item1');
   assert.equal(stockItem.name, 'Gadget');
   assert.equal(stockItem.hsn, '5678');

@@ -98,6 +98,73 @@ function fixture() {
             createdAt: '2026-03-04T00:00:00.000Z',
           },
         ],
+        stockTransfers: [
+          {
+            id: 'xfer1',
+            no: 1,
+            date: '2026-04-12',
+            fromGodownId: 'gd1',
+            toGodownId: 'gd2',
+            items: [{ stockItemId: 'item1', qty: 2, batchNo: 'B1' }],
+            narration: 'Move to shop',
+            createdAt: '2026-04-12T00:00:00.000Z',
+          },
+        ],
+        orders: [
+          {
+            id: 'ord1',
+            type: 'Sales',
+            no: 1,
+            date: '2026-04-13',
+            partyLedgerId: 'led1',
+            deliveryDate: '2026-04-20',
+            items: [{ stockItemId: 'item1', qty: 5, rate: 100, amount: 500, godownId: 'gd1' }],
+            total: 500,
+            status: 'Open',
+            narration: 'SO-1',
+            createdAt: '2026-04-13T00:00:00.000Z',
+          },
+        ],
+        boms: [
+          {
+            id: 'bom1',
+            name: 'Widget kit',
+            outputItemId: 'item1',
+            outputQty: 1,
+            components: [{ stockItemId: 'comp1', qty: 3 }],
+            createdAt: '2026-04-14T00:00:00.000Z',
+          },
+        ],
+        manufactures: [
+          {
+            id: 'mfg1',
+            no: 1,
+            date: '2026-04-15',
+            bomId: 'bom1',
+            bomName: 'Widget kit',
+            bomOutputQty: 1,
+            outputItemId: 'item1',
+            outputQty: 2,
+            componentGodownId: 'gd1',
+            outputGodownId: 'gd1',
+            components: [{ stockItemId: 'comp1', qty: 6 }],
+            outputBatchNo: 'MB1',
+            expiryDate: '2027-04-15',
+            narration: 'Production run',
+            createdAt: '2026-04-15T00:00:00.000Z',
+          },
+        ],
+        taxChallans: [
+          {
+            id: 'challan1',
+            kind: 'TDS',
+            date: '2026-04-16',
+            amount: 1200,
+            reference: 'CH-1',
+            bsrCode: '0001234',
+            sectionId: 'tds1',
+          },
+        ],
       },
       {
         id: 'co2',
@@ -354,6 +421,11 @@ test('schema version 1 workspaces migrate their JSON collections into rows', () 
       'godowns',
       'budgets',
       'currencies',
+      'stockTransfers',
+      'orders',
+      'boms',
+      'manufactures',
+      'taxChallans',
     ]) {
       if (Array.isArray(company[collection])) {
         companyData[collection] = structuredClone(company[collection]);
@@ -374,13 +446,18 @@ test('schema version 1 workspaces migrate their JSON collections into rows', () 
   db.prepare('DELETE FROM godowns').run();
   db.prepare('DELETE FROM budgets').run();
   db.prepare('DELETE FROM currencies').run();
+  db.prepare('DELETE FROM stock_transfers').run();
+  db.prepare('DELETE FROM orders').run();
+  db.prepare('DELETE FROM boms').run();
+  db.prepare('DELETE FROM manufactures').run();
+  db.prepare('DELETE FROM tax_challans').run();
   db.prepare('DELETE FROM stock_items').run();
   db.prepare('UPDATE workspace_meta SET schema_version = 1').run();
 
   const upgraded = new WorkspaceStore(db);
   assert.equal(
     db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version,
-    9,
+    11,
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM account_groups').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM financial_years').get().count, 2);
@@ -412,7 +489,7 @@ test('schema version 2 promotes ledger JSON fields into typed columns', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 2').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 11);
   const row = db.prepare('SELECT * FROM ledgers WHERE id = ?').get('led1');
   assert.equal(row.opening, 0);
   assert.equal(row.opening_type, 'Dr');
@@ -439,7 +516,7 @@ test('schema version 3 promotes company and stock item JSON fields into typed co
   db.prepare('UPDATE workspace_meta SET schema_version = 3').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 11);
   const company = db.prepare('SELECT * FROM companies WHERE id = ?').get('co1');
   assert.equal(company.created_at, '2026-03-01T00:00:00.000Z');
   assert.equal(JSON.parse(company.data).name, undefined);
@@ -473,7 +550,7 @@ test('schema version 4 moves account groups out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 4').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 11);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'groups'").get().count,
     0,
@@ -505,7 +582,7 @@ test('schema version 5 moves financial years out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 5').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 11);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'years'").get().count,
     0,
@@ -543,7 +620,7 @@ test('schema version 6 moves cost masters out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 6').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 11);
   for (const collection of ['costCategories', 'costCentres']) {
     assert.equal(
       db.prepare('SELECT COUNT(*) AS count FROM company_records WHERE collection = ?').get(collection)
@@ -592,7 +669,7 @@ test('schema version 7 moves inventory masters out of collection rows', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 7').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 11);
   for (const collection of ['units', 'stockGroups', 'godowns']) {
     assert.equal(
       db.prepare('SELECT COUNT(*) AS count FROM company_records WHERE collection = ?').get(collection)
@@ -646,7 +723,7 @@ test('schema version 8 moves budgets and currencies out of collection rows', () 
   db.prepare('UPDATE workspace_meta SET schema_version = 8').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 9);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 11);
   for (const collection of ['budgets', 'currencies']) {
     assert.equal(
       db.prepare('SELECT COUNT(*) AS count FROM company_records WHERE collection = ?').get(collection)
@@ -675,6 +752,152 @@ test('schema version 8 moves budgets and currencies out of collection rows', () 
     assert.equal(currencyData[field], undefined, `${field} should not remain in currency JSON`);
   }
   assert.deepEqual(currencyData.rates, [{ date: '2026-04-01', rate: 83 }]);
+  assert.deepEqual(upgraded.read().state, expected);
+});
+
+test('schema version 9 moves stock transfers and orders out of collection rows', () => {
+  const original = fixture();
+  const { db, store } = legacyStore(original);
+  store.migrateLegacy();
+  const expected = store.read().state;
+  const transfer = original.companies[0].stockTransfers[0];
+  const order = original.companies[0].orders[0];
+  db.prepare('DELETE FROM stock_transfers').run();
+  db.prepare('DELETE FROM orders').run();
+  db.prepare(
+    `INSERT INTO company_records
+       (company_id, collection, id, position, name, parent_id, reference_id, amount, data)
+     VALUES (?, 'stockTransfers', ?, 0, NULL, ?, NULL, NULL, ?)`,
+  ).run('co1', transfer.id, transfer.fromGodownId, JSON.stringify(transfer));
+  db.prepare(
+    `INSERT INTO company_records
+       (company_id, collection, id, position, name, parent_id, reference_id, amount, data)
+     VALUES (?, 'orders', ?, 0, NULL, ?, NULL, ?, ?)`,
+  ).run('co1', order.id, order.partyLedgerId, order.total, JSON.stringify(order));
+  db.prepare('UPDATE workspace_meta SET schema_version = 9').run();
+
+  const upgraded = new WorkspaceStore(db);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 11);
+  for (const collection of ['stockTransfers', 'orders']) {
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM company_records WHERE collection = ?').get(collection)
+        .count,
+      0,
+    );
+  }
+  const transferRow = db.prepare('SELECT * FROM stock_transfers WHERE id = ?').get('xfer1');
+  assert.equal(transferRow.no, 1);
+  assert.equal(transferRow.date, '2026-04-12');
+  assert.equal(transferRow.from_godown_id, 'gd1');
+  assert.equal(transferRow.to_godown_id, 'gd2');
+  assert.equal(transferRow.narration, 'Move to shop');
+  assert.equal(transferRow.created_at, '2026-04-12T00:00:00.000Z');
+  const transferData = JSON.parse(transferRow.data);
+  for (const field of ['id', 'no', 'date', 'fromGodownId', 'toGodownId', 'narration', 'createdAt']) {
+    assert.equal(transferData[field], undefined, `${field} should not remain in transfer JSON`);
+  }
+  assert.equal(transferData.items[0].qty, 2);
+  const orderRow = db.prepare('SELECT * FROM orders WHERE id = ?').get('ord1');
+  assert.equal(orderRow.type, 'Sales');
+  assert.equal(orderRow.no, 1);
+  assert.equal(orderRow.date, '2026-04-13');
+  assert.equal(orderRow.party_ledger_id, 'led1');
+  assert.equal(orderRow.delivery_date, '2026-04-20');
+  assert.equal(orderRow.total, 500);
+  assert.equal(orderRow.status, 'Open');
+  assert.equal(orderRow.created_at, '2026-04-13T00:00:00.000Z');
+  const orderData = JSON.parse(orderRow.data);
+  for (const field of ['id', 'type', 'no', 'date', 'partyLedgerId', 'deliveryDate', 'total', 'status', 'narration', 'createdAt']) {
+    assert.equal(orderData[field], undefined, `${field} should not remain in order JSON`);
+  }
+  assert.equal(orderData.items[0].rate, 100);
+  assert.deepEqual(upgraded.read().state, expected);
+});
+
+test('schema version 10 moves BOMs, production runs and tax challans out of collection rows', () => {
+  const original = fixture();
+  const { db, store } = legacyStore(original);
+  store.migrateLegacy();
+  const expected = store.read().state;
+  const bom = original.companies[0].boms[0];
+  const manufacture = original.companies[0].manufactures[0];
+  const challan = original.companies[0].taxChallans[0];
+  db.prepare('DELETE FROM boms').run();
+  db.prepare('DELETE FROM manufactures').run();
+  db.prepare('DELETE FROM tax_challans').run();
+  db.prepare(
+    `INSERT INTO company_records
+       (company_id, collection, id, position, name, parent_id, reference_id, amount, data)
+     VALUES (?, 'boms', ?, 0, ?, NULL, ?, NULL, ?)`,
+  ).run('co1', bom.id, bom.name, bom.outputItemId, JSON.stringify(bom));
+  db.prepare(
+    `INSERT INTO company_records
+       (company_id, collection, id, position, name, parent_id, reference_id, amount, data)
+     VALUES (?, 'manufactures', ?, 0, NULL, ?, ?, ?, ?)`,
+  ).run(
+    'co1',
+    manufacture.id,
+    manufacture.bomId,
+    manufacture.outputItemId,
+    manufacture.outputQty,
+    JSON.stringify(manufacture),
+  );
+  db.prepare(
+    `INSERT INTO company_records
+       (company_id, collection, id, position, name, parent_id, reference_id, amount, data)
+     VALUES (?, 'taxChallans', ?, 0, NULL, NULL, NULL, ?, ?)`,
+  ).run('co1', challan.id, challan.amount, JSON.stringify(challan));
+  db.prepare('UPDATE workspace_meta SET schema_version = 10').run();
+
+  const upgraded = new WorkspaceStore(db);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 11);
+  for (const collection of ['boms', 'manufactures', 'taxChallans']) {
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM company_records WHERE collection = ?').get(collection)
+        .count,
+      0,
+    );
+  }
+  const bomRow = db.prepare('SELECT * FROM boms WHERE id = ?').get('bom1');
+  assert.equal(bomRow.name, 'Widget kit');
+  assert.equal(bomRow.output_item_id, 'item1');
+  assert.equal(bomRow.output_qty, 1);
+  assert.equal(bomRow.created_at, '2026-04-14T00:00:00.000Z');
+  const bomData = JSON.parse(bomRow.data);
+  for (const field of ['id', 'name', 'outputItemId', 'outputQty', 'createdAt']) {
+    assert.equal(bomData[field], undefined, `${field} should not remain in BOM JSON`);
+  }
+  assert.deepEqual(bomData.components, [{ stockItemId: 'comp1', qty: 3 }]);
+  const manufactureRow = db.prepare('SELECT * FROM manufactures WHERE id = ?').get('mfg1');
+  assert.equal(manufactureRow.no, 1);
+  assert.equal(manufactureRow.date, '2026-04-15');
+  assert.equal(manufactureRow.bom_id, 'bom1');
+  assert.equal(manufactureRow.bom_name, 'Widget kit');
+  assert.equal(manufactureRow.bom_output_qty, 1);
+  assert.equal(manufactureRow.output_item_id, 'item1');
+  assert.equal(manufactureRow.output_qty, 2);
+  assert.equal(manufactureRow.component_godown_id, 'gd1');
+  assert.equal(manufactureRow.output_godown_id, 'gd1');
+  assert.equal(manufactureRow.output_batch_no, 'MB1');
+  assert.equal(manufactureRow.expiry_date, '2027-04-15');
+  assert.equal(manufactureRow.narration, 'Production run');
+  assert.equal(manufactureRow.created_at, '2026-04-15T00:00:00.000Z');
+  const manufactureData = JSON.parse(manufactureRow.data);
+  for (const field of ['id', 'no', 'date', 'bomId', 'bomName', 'outputItemId', 'outputQty', 'createdAt']) {
+    assert.equal(manufactureData[field], undefined, `${field} should not remain in production JSON`);
+  }
+  assert.deepEqual(manufactureData.components, [{ stockItemId: 'comp1', qty: 6 }]);
+  const challanRow = db.prepare('SELECT * FROM tax_challans WHERE id = ?').get('challan1');
+  assert.equal(challanRow.kind, 'TDS');
+  assert.equal(challanRow.date, '2026-04-16');
+  assert.equal(challanRow.amount, 1200);
+  assert.equal(challanRow.reference, 'CH-1');
+  assert.equal(challanRow.bsr_code, '0001234');
+  assert.equal(challanRow.section_id, 'tds1');
+  const challanData = JSON.parse(challanRow.data);
+  for (const field of ['id', 'kind', 'date', 'amount', 'reference', 'bsrCode', 'sectionId']) {
+    assert.equal(challanData[field], undefined, `${field} should not remain in challan JSON`);
+  }
   assert.deepEqual(upgraded.read().state, expected);
 });
 
@@ -724,6 +947,54 @@ test('normalized writes keep promoted company, group, year, cost master, invento
     symbol: '€',
     createdAt: '2026-05-05T00:00:00.000Z',
     note: 'Travel',
+  });
+  Object.assign(next.companies[0].stockTransfers[0], {
+    no: 2,
+    date: '2026-05-06',
+    fromGodownId: 'gd2',
+    toGodownId: 'gd1',
+    narration: 'Return to main',
+    createdAt: '2026-05-06T00:00:00.000Z',
+  });
+  Object.assign(next.companies[0].orders[0], {
+    type: 'Purchase',
+    no: 2,
+    date: '2026-05-07',
+    partyLedgerId: 'led2',
+    deliveryDate: '2026-05-10',
+    total: 750.5,
+    status: 'Closed',
+    narration: 'PO-2',
+    createdAt: '2026-05-07T00:00:00.000Z',
+  });
+  Object.assign(next.companies[0].boms[0], {
+    name: 'Gadget kit',
+    outputItemId: 'item2',
+    outputQty: 2,
+    createdAt: '2026-05-08T00:00:00.000Z',
+  });
+  Object.assign(next.companies[0].manufactures[0], {
+    no: 2,
+    date: '2026-05-09',
+    bomId: 'bom1',
+    bomName: 'Gadget kit',
+    bomOutputQty: 2,
+    outputItemId: 'item2',
+    outputQty: 4,
+    componentGodownId: 'gd2',
+    outputGodownId: 'gd1',
+    outputBatchNo: 'MB2',
+    expiryDate: '2027-05-09',
+    narration: 'Second run',
+    createdAt: '2026-05-09T00:00:00.000Z',
+  });
+  Object.assign(next.companies[0].taxChallans[0], {
+    kind: 'TCS',
+    date: '2026-05-11',
+    amount: 2400,
+    reference: 'CH-2',
+    bsrCode: '0005678',
+    sectionId: 'tcs1',
   });
   Object.assign(next.companies[0].stockItems[0], {
     name: 'Gadget',
@@ -807,6 +1078,65 @@ test('normalized writes keep promoted company, group, year, cost master, invento
   assert.equal(currencyData.name, undefined);
   assert.equal(currencyData.note, 'Travel');
   assert.deepEqual(currencyData.rates, [{ date: '2026-04-01', rate: 83 }]);
+  const transfer = db.prepare('SELECT * FROM stock_transfers WHERE id = ?').get('xfer1');
+  assert.equal(transfer.no, 2);
+  assert.equal(transfer.date, '2026-05-06');
+  assert.equal(transfer.from_godown_id, 'gd2');
+  assert.equal(transfer.to_godown_id, 'gd1');
+  assert.equal(transfer.narration, 'Return to main');
+  assert.equal(transfer.created_at, '2026-05-06T00:00:00.000Z');
+  const transferData = JSON.parse(transfer.data);
+  assert.equal(transferData.date, undefined);
+  assert.equal(transferData.narration, undefined);
+  assert.equal(transferData.items[0].qty, 2);
+  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get('ord1');
+  assert.equal(order.type, 'Purchase');
+  assert.equal(order.no, 2);
+  assert.equal(order.date, '2026-05-07');
+  assert.equal(order.party_ledger_id, 'led2');
+  assert.equal(order.delivery_date, '2026-05-10');
+  assert.equal(order.total, 750.5);
+  assert.equal(order.status, 'Closed');
+  assert.equal(order.narration, 'PO-2');
+  assert.equal(order.created_at, '2026-05-07T00:00:00.000Z');
+  const orderData = JSON.parse(order.data);
+  assert.equal(orderData.total, undefined);
+  assert.equal(orderData.status, undefined);
+  assert.equal(orderData.items[0].rate, 100);
+  const bom = db.prepare('SELECT * FROM boms WHERE id = ?').get('bom1');
+  assert.equal(bom.name, 'Gadget kit');
+  assert.equal(bom.output_item_id, 'item2');
+  assert.equal(bom.output_qty, 2);
+  assert.equal(bom.created_at, '2026-05-08T00:00:00.000Z');
+  const bomData = JSON.parse(bom.data);
+  assert.equal(bomData.name, undefined);
+  assert.equal(bomData.outputQty, undefined);
+  assert.deepEqual(bomData.components, [{ stockItemId: 'comp1', qty: 3 }]);
+  const manufacture = db.prepare('SELECT * FROM manufactures WHERE id = ?').get('mfg1');
+  assert.equal(manufacture.no, 2);
+  assert.equal(manufacture.date, '2026-05-09');
+  assert.equal(manufacture.bom_id, 'bom1');
+  assert.equal(manufacture.bom_name, 'Gadget kit');
+  assert.equal(manufacture.bom_output_qty, 2);
+  assert.equal(manufacture.output_item_id, 'item2');
+  assert.equal(manufacture.output_qty, 4);
+  assert.equal(manufacture.component_godown_id, 'gd2');
+  assert.equal(manufacture.output_godown_id, 'gd1');
+  assert.equal(manufacture.output_batch_no, 'MB2');
+  assert.equal(manufacture.expiry_date, '2027-05-09');
+  assert.equal(manufacture.narration, 'Second run');
+  const manufactureData = JSON.parse(manufacture.data);
+  assert.equal(manufactureData.outputQty, undefined);
+  assert.equal(manufactureData.outputBatchNo, undefined);
+  assert.deepEqual(manufactureData.components, [{ stockItemId: 'comp1', qty: 6 }]);
+  const challan = db.prepare('SELECT * FROM tax_challans WHERE id = ?').get('challan1');
+  assert.equal(challan.kind, 'TCS');
+  assert.equal(challan.date, '2026-05-11');
+  assert.equal(challan.amount, 2400);
+  assert.equal(challan.reference, 'CH-2');
+  assert.equal(challan.bsr_code, '0005678');
+  assert.equal(challan.section_id, 'tcs1');
+  assert.deepEqual(JSON.parse(challan.data), {});
   const stockItem = db.prepare('SELECT * FROM stock_items WHERE id = ?').get('item1');
   assert.equal(stockItem.name, 'Gadget');
   assert.equal(stockItem.hsn, '5678');

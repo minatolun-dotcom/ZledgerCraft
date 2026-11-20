@@ -15,11 +15,12 @@ tax and returns, TDS/TCS deduction and challans, payroll runs with payslips,
 and e-invoice/e-way bill plus tax-audit working papers are done. Stage 4 —
 Depth and scale is in progress (1 of 4 complete): inventory depth is complete
 with godowns, batches, stock transfers, orders, BOMs and manufacturing; the
-server workspace now uses a local SQLite database with normalized company,
-ledger, voucher and line tables; company headers, account groups, financial
-years, stock-item fields and common ledger fields are typed columns, with a row
-for every remaining company collection, server accounts, sign-in sessions, role enforcement, company-level
-access scoping, revision-checked saves and enforced voucher edit leases. Tally XML
+server workspace now uses a local SQLite database where every top-level company
+collection has its own table; company headers, account groups, financial years,
+stock-item fields and common ledger columns are typed, along with transfer,
+order, BOM, production and challan fields, plus server accounts, sign-in
+sessions, role enforcement, company-level access scoping, revision-checked
+saves and enforced voucher edit leases. Tally XML
 account groups, ledgers, stock masters, vouchers with matching stock lines and
 Excel `.xlsx` ledgers/vouchers can be imported through a hardened parser path.
 Conservative merge is implemented for independent changes. Neon Postgres now
@@ -49,10 +50,9 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 [KNOWN_LIMITS.md § Remaining limits and free paths](KNOWN_LIMITS.md#remaining-limits-and-free-paths):
 App-level encryption (passphrase-encrypted JSON downloads and optional
 AES-256-GCM encryption for server/R2 backups are complete; live-workspace
-encryption remains), incremental master-column promotion (company headers,
-account groups, financial years, cost masters, inventory masters,
-budgets/currencies, stock-item fields and ledger opening/tax/address/GST-role
-fields are now typed SQLite columns), APIs/webhooks
+encryption remains), nested-field promotion (every top-level company
+collection now has its own table and common columns are typed; nested settings
+and line detail remain JSON) and, in the larger-project group, APIs/webhooks
 and statutory integrations. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
 now complete.
@@ -84,8 +84,9 @@ Working now:
 - Optional local server workspace in `data/workspace.sqlite`, shared across
   browser profiles on the same machine, with browser storage as the fallback and
   local mirror. Companies, account groups, financial years, cost masters,
-  inventory masters, budgets, currencies, ledgers, vouchers and voucher lines
-  are relational rows; other company collections stay in a JSON column. Legacy `workspace.json` and
+  inventory masters, budgets, currencies, stock transfers, orders, BOMs,
+  production runs, tax challans, ledgers, vouchers and voucher lines are
+  relational rows; nested lines and settings stay in each row's JSON. Legacy `workspace.json` and
   the old whole-workspace blob are migrated automatically and removed. Saves
   carry a revision; a stale session gets a conflict banner and must reload
   instead of overwriting another session. The workspace database is excluded
@@ -282,7 +283,7 @@ Status: **Done**, **Partial**, **Missing**.
 | Login, users, roles and company-level permissions | Partial — LAN server accounts, passwords, sessions, TOTP MFA with recovery codes, a per-account 2FA requirement, per-company voucher approvals, session management, lockout, optional IP allowlisting, owner/accountant/viewer enforcement, company-level scoping and optional Resend forgot-password links are done; browser-only mode still has no login |
 | Encryption/vault protection | Missing |
 | Immutable audit/edit log | Done (Stage 1, local append-only; not cryptographic) |
-| Backend database instead of browser storage | Partial — local SQLite with normalized company/ledger/voucher/line tables, a row table for every remaining company collection, atomic revisioned saves and automatic legacy migration; no offsite persistence |
+| Backend database instead of browser storage | Partial — local SQLite with a dedicated table for every top-level company collection, atomic revisioned saves and automatic legacy migration; no offsite persistence |
 | Multi-user concurrency and cloud sync | Partial — LAN auth, revision checks, conservative merge (including scoped accounts), normalized collection rows and enforced voucher edit leases are done; no field-level conflict history or cloud sync |
 | Scheduled/offsite backups and retention | Partial — verified daily backups, retention, manual backup/download/restore, pre-restore snapshots, R2 upload, remote listing/download/restore and failure email are done; no client-side backup encryption |
 | Tally XML and Excel master/voucher import | Partial — Tally XML account groups, ledgers, stock groups, stock items with opening stock, balanced vouchers and matching voucher stock lines import; batch names/expiry attach to locally batch-tracked items; Excel `.xlsx` ledgers and vouchers load into the reviewed CSV path; custom Tally groups need a standard parent and units must pre-exist; skipped stock lines do not roll back the voucher; no batch masters, bill allocations, cost centres, GST/TDS detail, voucher numbers, APIs or webhooks |
@@ -338,6 +339,37 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
+
+Phase numbers below are a sequential work log, not a plan of 17+ items. The
+plan is the four stages in **Build order** above; phases record increments
+inside those stages.
+
+### 2026-11-20 — Phase 19: BOM, production and tax-challan normalization
+
+- Moved BOMs, production runs and TDS/TCS challans out of the generic collection
+  table into `boms`, `manufactures` and `tax_challans`.
+- BOM name, output item and output quantity; production run number, date, BOM
+  link, component/output godowns, output item/quantity, batch and expiry; and
+  challan kind, date, amount, reference, BSR code and section are typed
+  columns. Components and other nested detail stay JSON.
+- Raised the schema to version 11. A version-10 database migrates in place; an
+  empty `company_records` table remains only for older backups.
+- Verification: v10-to-v11 migration, nested component preservation, write-side
+  synchronization and full round-trip tests; 257 tests (256 pass, 1 skipped)
+  and an 880.5 kB build pass.
+
+### 2026-11-20 — Phase 18: stock-transfer and order normalization
+
+- Moved stock transfers and sales/purchase orders into dedicated
+  `stock_transfers` and `orders` tables. Transfer number, date, source and
+  destination godown and narration; order type, number, date, party, delivery
+  date, total, status and narration are typed columns.
+- Raised the schema to version 10. Version-9 databases migrate in place; the
+  transfer and order line JSON is preserved because lines are still read by the
+  stock and order registers as a single object.
+- Verification: v9-to-v10 migration, line preservation, typed column restoration
+  and full round-trip tests; 256 tests (255 pass, 1 skipped) and an 880.5 kB
+  build pass.
 
 ### 2026-11-20 — Phase 17: budget and currency normalization
 

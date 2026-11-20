@@ -540,18 +540,20 @@ disabled.
   build.
 - The optional server workspace persists to `data/workspace.sqlite` through
   Node's built-in SQLite module, or to Neon Postgres when `DATABASE_URL` is set.
-  In SQLite mode, companies, account groups, financial years, cost categories,
-  cost centres, units, stock groups, godowns, budgets, currencies, ledgers,
-  vouchers, voucher lines and stock items are relational tables; every other
-  top-level company collection (transfers, orders, BOMs, production and tax
-  challans) is stored one row per record in `company_records`. Company header
-  fields, account-group name/parent/nature, financial-year dates/closed flag,
-  cost-master name/category/creation time, unit name/symbol, stock-group and
-  godown name/primary flag, budget name/target/year/amount, currency
-  code/name/symbol, stock-item identity/opening/batch fields and ledger
-  opening/tax/address/GST-role fields are typed columns; the rest of each
-  record stays JSON, including currency rate history. Nested configuration stays JSON inside its row so the
-  current accounting engine keeps its shape. In Postgres mode the whole workspace is a JSONB
+  In SQLite mode, every top-level company collection is a relational table:
+  companies, account groups, financial years, cost categories, cost centres,
+  units, stock groups, godowns, budgets, currencies, stock transfers, orders,
+  BOMs, production runs, tax challans, ledgers, vouchers, voucher lines and
+  stock items. Company header fields, account-group name/parent/nature,
+  financial-year dates/closed flag, cost-master name/category/creation time,
+  unit name/symbol, stock-group and godown name/primary flag, budget
+  name/target/year/amount, currency code/name/symbol, transfer godowns/date,
+  order party/date/status/value, BOM output/item, production run inputs and
+  output, challan kind/date/amount/reference, stock-item identity/opening/batch
+  fields and ledger opening/tax/address/GST-role fields are typed columns; the
+  rest of each record stays JSON, including currency rate history and nested
+  transfer, order and production lines. Nested configuration stays JSON inside
+  its row so the current accounting engine keeps its shape. In Postgres mode the whole workspace is a JSONB
   document with revision history, leases and Postgres audit tables. An older
   whole-workspace blob is migrated once, then removed. On localhost the
   workspace is shared by browser profiles on the same machine without a login.

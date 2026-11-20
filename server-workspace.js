@@ -1,14 +1,14 @@
 // ZledgerCraft - relational workspace storage.
 // Companies, account groups, financial years, cost masters, inventory masters,
-// budgets, currencies, ledgers, vouchers and stock items are canonical rows.
-// Every other company collection is stored as one ordered record row with
-// searchable hints, while the complete record JSON preserves fields the engine
-// has not promoted to columns yet. Expiring leases provide advisory-but-enforced
-// record ownership.
+// budgets, currencies, stock transfers, orders, BOMs, production runs, tax
+// challans, ledgers, vouchers and stock items are canonical rows. Nested arrays
+// (transfer lines, order lines, BOM components and production components) stay
+// in the record JSON. Expiring leases provide advisory-but-enforced record
+// ownership.
 import { createHash, randomBytes } from 'node:crypto';
 import { deepEqual, mergeWorkspaceStates, repairVoucherNumbers } from './server-merge.js';
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 11;
 const HISTORY_LIMIT = 20;
 // Header fields that are useful as typed columns. The complete JSON is still
 // kept for compatibility, but these values are removed from it when present.
@@ -67,6 +67,54 @@ const PROMOTED_CURRENCY_FIELDS = [
   ['symbol', 'symbol'],
   ['created_at', 'createdAt'],
 ];
+const PROMOTED_STOCK_TRANSFER_FIELDS = [
+  ['no', 'no'],
+  ['date', 'date'],
+  ['from_godown_id', 'fromGodownId'],
+  ['to_godown_id', 'toGodownId'],
+  ['narration', 'narration'],
+  ['created_at', 'createdAt'],
+];
+const PROMOTED_ORDER_FIELDS = [
+  ['type', 'type'],
+  ['no', 'no'],
+  ['date', 'date'],
+  ['party_ledger_id', 'partyLedgerId'],
+  ['delivery_date', 'deliveryDate'],
+  ['total', 'total'],
+  ['status', 'status'],
+  ['narration', 'narration'],
+  ['created_at', 'createdAt'],
+];
+const PROMOTED_BOM_FIELDS = [
+  ['name', 'name'],
+  ['output_item_id', 'outputItemId'],
+  ['output_qty', 'outputQty'],
+  ['created_at', 'createdAt'],
+];
+const PROMOTED_MANUFACTURE_FIELDS = [
+  ['no', 'no'],
+  ['date', 'date'],
+  ['bom_id', 'bomId'],
+  ['bom_name', 'bomName'],
+  ['bom_output_qty', 'bomOutputQty'],
+  ['output_item_id', 'outputItemId'],
+  ['output_qty', 'outputQty'],
+  ['component_godown_id', 'componentGodownId'],
+  ['output_godown_id', 'outputGodownId'],
+  ['output_batch_no', 'outputBatchNo'],
+  ['expiry_date', 'expiryDate'],
+  ['narration', 'narration'],
+  ['created_at', 'createdAt'],
+];
+const PROMOTED_TAX_CHALLAN_FIELDS = [
+  ['kind', 'kind'],
+  ['date', 'date'],
+  ['amount', 'amount'],
+  ['reference', 'reference'],
+  ['bsr_code', 'bsrCode'],
+  ['section_id', 'sectionId'],
+];
 const PROMOTED_COMPANY_COLUMNS = [['created_at', 'TEXT']];
 const PROMOTED_STOCK_COLUMNS = [['created_at', 'TEXT']];
 const PROMOTED_LEDGER_COLUMNS = [
@@ -84,17 +132,9 @@ const PROMOTED_LEDGER_COLUMNS = [
 const DEFAULT_LEASE_MS = 2 * 60 * 1000;
 const MAX_LEASE_MS = 10 * 60 * 1000;
 
-// Top-level company arrays stored in company_records. Account groups, financial
-// years, cost masters, inventory masters, budgets, currencies and stock items
-// have their own tables because they are queried by parent, dates, category,
-// group, unit, target, year and HSN independently.
-const RECORD_COLLECTIONS = [
-  'stockTransfers',
-  'orders',
-  'boms',
-  'manufactures',
-  'taxChallans',
-];
+// Every top-level company collection now has its own table. The generic record
+// table remains for older workspaces and is drained during migration.
+const RECORD_COLLECTIONS = [];
 
 function text(value) {
   return value === undefined || value === null ? '' : String(value);
@@ -306,6 +346,147 @@ function currencyRows(rows) {
   return byCompany;
 }
 
+function stockTransferRows(rows) {
+  const byCompany = new Map();
+  for (const row of rows) {
+    if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
+    const data = JSON.parse(row.data);
+    const transfer = {
+      ...data,
+      id: row.id,
+      no: row.no === null || row.no === undefined ? number(data.no) : number(row.no),
+      date: row.date ?? data.date,
+      fromGodownId: row.from_godown_id ?? data.fromGodownId,
+      toGodownId: row.to_godown_id ?? data.toGodownId,
+    };
+    if (row.narration !== null && row.narration !== undefined) transfer.narration = row.narration;
+    if (row.created_at !== null && row.created_at !== undefined && row.created_at !== '') {
+      transfer.createdAt = row.created_at;
+    }
+    byCompany.get(row.company_id).push(transfer);
+  }
+  return byCompany;
+}
+
+function orderRows(rows) {
+  const byCompany = new Map();
+  for (const row of rows) {
+    if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
+    const data = JSON.parse(row.data);
+    const order = {
+      ...data,
+      id: row.id,
+      type: row.type ?? data.type,
+      no: row.no === null || row.no === undefined ? number(data.no) : number(row.no),
+      date: row.date ?? data.date,
+      partyLedgerId: row.party_ledger_id ?? data.partyLedgerId,
+      total: row.total === null || row.total === undefined ? number(data.total) : number(row.total),
+      status: row.status ?? data.status,
+    };
+    if (row.delivery_date !== null && row.delivery_date !== undefined && row.delivery_date !== '') {
+      order.deliveryDate = row.delivery_date;
+    }
+    if (row.narration !== null && row.narration !== undefined) order.narration = row.narration;
+    if (row.created_at !== null && row.created_at !== undefined && row.created_at !== '') {
+      order.createdAt = row.created_at;
+    }
+    byCompany.get(row.company_id).push(order);
+  }
+  return byCompany;
+}
+
+function bomRows(rows) {
+  const byCompany = new Map();
+  for (const row of rows) {
+    if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
+    const data = JSON.parse(row.data);
+    const bom = {
+      ...data,
+      id: row.id,
+      name: row.name ?? data.name,
+      outputItemId: row.output_item_id ?? data.outputItemId,
+      outputQty:
+        row.output_qty === null || row.output_qty === undefined
+          ? number(data.outputQty)
+          : number(row.output_qty),
+    };
+    if (row.created_at !== null && row.created_at !== undefined && row.created_at !== '') {
+      bom.createdAt = row.created_at;
+    }
+    byCompany.get(row.company_id).push(bom);
+  }
+  return byCompany;
+}
+
+function manufactureRows(rows) {
+  const byCompany = new Map();
+  for (const row of rows) {
+    if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
+    const data = JSON.parse(row.data);
+    const manufacture = {
+      ...data,
+      id: row.id,
+      no: row.no === null || row.no === undefined ? number(data.no) : number(row.no),
+      date: row.date ?? data.date,
+      bomId: row.bom_id ?? data.bomId,
+      bomName: row.bom_name ?? data.bomName,
+      bomOutputQty:
+        row.bom_output_qty === null || row.bom_output_qty === undefined
+          ? number(data.bomOutputQty)
+          : number(row.bom_output_qty),
+      outputItemId: row.output_item_id ?? data.outputItemId,
+      outputQty:
+        row.output_qty === null || row.output_qty === undefined
+          ? number(data.outputQty)
+          : number(row.output_qty),
+      componentGodownId: row.component_godown_id ?? data.componentGodownId,
+      outputGodownId: row.output_godown_id ?? data.outputGodownId,
+    };
+    for (const [column, field] of [
+      ['output_batch_no', 'outputBatchNo'],
+      ['expiry_date', 'expiryDate'],
+    ]) {
+      if (row[column] !== null && row[column] !== undefined && row[column] !== '') {
+        manufacture[field] = row[column];
+      }
+    }
+    if (row.narration !== null && row.narration !== undefined) {
+      manufacture.narration = row.narration;
+    }
+    if (row.created_at !== null && row.created_at !== undefined && row.created_at !== '') {
+      manufacture.createdAt = row.created_at;
+    }
+    byCompany.get(row.company_id).push(manufacture);
+  }
+  return byCompany;
+}
+
+function taxChallanRows(rows) {
+  const byCompany = new Map();
+  for (const row of rows) {
+    if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
+    const data = JSON.parse(row.data);
+    const challan = {
+      ...data,
+      id: row.id,
+      kind: row.kind ?? data.kind,
+      date: row.date ?? data.date,
+      amount: row.amount === null || row.amount === undefined ? number(data.amount) : number(row.amount),
+    };
+    for (const [column, field] of [
+      ['reference', 'reference'],
+      ['bsr_code', 'bsrCode'],
+    ]) {
+      if (row[column] !== null && row[column] !== undefined) challan[field] = row[column];
+    }
+    if (row.section_id !== null && row.section_id !== undefined && row.section_id !== '') {
+      challan.sectionId = row.section_id;
+    }
+    byCompany.get(row.company_id).push(challan);
+  }
+  return byCompany;
+}
+
 function stockRows(rows) {
   const byCompany = new Map();
   for (const row of rows) {
@@ -360,6 +541,11 @@ function stateFromRows({
   godowns = [],
   budgets = [],
   currencies = [],
+  stockTransfers = [],
+  orders = [],
+  boms = [],
+  manufactures = [],
+  taxChallans = [],
   records = [],
   stockItems = [],
 }) {
@@ -383,6 +569,11 @@ function stateFromRows({
   const godownsByCompany = godownRows(godowns);
   const budgetsByCompany = budgetRows(budgets);
   const currenciesByCompany = currencyRows(currencies);
+  const stockTransfersByCompany = stockTransferRows(stockTransfers);
+  const ordersByCompany = orderRows(orders);
+  const bomsByCompany = bomRows(boms);
+  const manufacturesByCompany = manufactureRows(manufactures);
+  const taxChallansByCompany = taxChallanRows(taxChallans);
   const recordsByCompany = collectionRows(records);
   const stockByCompany = stockRows(stockItems);
 
@@ -466,6 +657,16 @@ function stateFromRows({
     if (storedBudgets) company.budgets = storedBudgets;
     const storedCurrencies = currenciesByCompany.get(row.id);
     if (storedCurrencies) company.currencies = storedCurrencies;
+    const storedStockTransfers = stockTransfersByCompany.get(row.id);
+    if (storedStockTransfers) company.stockTransfers = storedStockTransfers;
+    const storedOrders = ordersByCompany.get(row.id);
+    if (storedOrders) company.orders = storedOrders;
+    const storedBoms = bomsByCompany.get(row.id);
+    if (storedBoms) company.boms = storedBoms;
+    const storedManufactures = manufacturesByCompany.get(row.id);
+    if (storedManufactures) company.manufactures = storedManufactures;
+    const storedTaxChallans = taxChallansByCompany.get(row.id);
+    if (storedTaxChallans) company.taxChallans = storedTaxChallans;
     const storedStockItems = stockByCompany.get(row.id);
     if (storedStockItems) company.stockItems = storedStockItems;
     company.ledgers = ledgersByCompany.get(row.id) ?? [];
@@ -513,6 +714,14 @@ export function readWorkspaceSnapshot(db) {
       godowns: optionalRows(db, 'SELECT * FROM godowns ORDER BY company_id, position'),
       budgets: optionalRows(db, 'SELECT * FROM budgets ORDER BY company_id, position'),
       currencies: optionalRows(db, 'SELECT * FROM currencies ORDER BY company_id, position'),
+      stockTransfers: optionalRows(
+        db,
+        'SELECT * FROM stock_transfers ORDER BY company_id, position',
+      ),
+      orders: optionalRows(db, 'SELECT * FROM orders ORDER BY company_id, position'),
+      boms: optionalRows(db, 'SELECT * FROM boms ORDER BY company_id, position'),
+      manufactures: optionalRows(db, 'SELECT * FROM manufactures ORDER BY company_id, position'),
+      taxChallans: optionalRows(db, 'SELECT * FROM tax_challans ORDER BY company_id, position'),
       ledgers: select('SELECT * FROM ledgers ORDER BY position'),
       vouchers: select('SELECT * FROM vouchers ORDER BY position'),
       lines: select('SELECT * FROM voucher_lines ORDER BY position'),
@@ -663,6 +872,79 @@ export class WorkspaceStore {
         data TEXT NOT NULL,
         PRIMARY KEY (company_id, id)
       );
+      CREATE TABLE IF NOT EXISTS stock_transfers (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        no INTEGER,
+        date TEXT,
+        from_godown_id TEXT,
+        to_godown_id TEXT,
+        narration TEXT,
+        created_at TEXT,
+        data TEXT NOT NULL,
+        PRIMARY KEY (company_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS orders (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        type TEXT,
+        no INTEGER,
+        date TEXT,
+        party_ledger_id TEXT,
+        delivery_date TEXT,
+        total REAL,
+        status TEXT,
+        narration TEXT,
+        created_at TEXT,
+        data TEXT NOT NULL,
+        PRIMARY KEY (company_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS boms (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        name TEXT,
+        output_item_id TEXT,
+        output_qty REAL,
+        created_at TEXT,
+        data TEXT NOT NULL,
+        PRIMARY KEY (company_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS manufactures (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        no INTEGER,
+        date TEXT,
+        bom_id TEXT,
+        bom_name TEXT,
+        bom_output_qty REAL,
+        output_item_id TEXT,
+        output_qty REAL,
+        component_godown_id TEXT,
+        output_godown_id TEXT,
+        output_batch_no TEXT,
+        expiry_date TEXT,
+        narration TEXT,
+        created_at TEXT,
+        data TEXT NOT NULL,
+        PRIMARY KEY (company_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS tax_challans (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        kind TEXT,
+        date TEXT,
+        amount REAL,
+        reference TEXT,
+        bsr_code TEXT,
+        section_id TEXT,
+        data TEXT NOT NULL,
+        PRIMARY KEY (company_id, id)
+      );
       CREATE TABLE IF NOT EXISTS ledgers (
         company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
         id TEXT NOT NULL,
@@ -753,6 +1035,19 @@ export class WorkspaceStore {
       CREATE INDEX IF NOT EXISTS budgets_target ON budgets(company_id, target_type, target_id, year_id);
       CREATE INDEX IF NOT EXISTS currencies_company ON currencies(company_id, position);
       CREATE INDEX IF NOT EXISTS currencies_code ON currencies(company_id, code);
+      CREATE INDEX IF NOT EXISTS stock_transfers_company ON stock_transfers(company_id, position);
+      CREATE INDEX IF NOT EXISTS stock_transfers_dates ON stock_transfers(company_id, date);
+      CREATE INDEX IF NOT EXISTS orders_company ON orders(company_id, position);
+      CREATE INDEX IF NOT EXISTS orders_party ON orders(company_id, party_ledger_id, date);
+      CREATE INDEX IF NOT EXISTS orders_status ON orders(company_id, type, status);
+      CREATE INDEX IF NOT EXISTS boms_company ON boms(company_id, position);
+      CREATE INDEX IF NOT EXISTS boms_output ON boms(company_id, output_item_id);
+      CREATE INDEX IF NOT EXISTS manufactures_company ON manufactures(company_id, position);
+      CREATE INDEX IF NOT EXISTS manufactures_bom ON manufactures(company_id, bom_id);
+      CREATE INDEX IF NOT EXISTS manufactures_dates ON manufactures(company_id, date);
+      CREATE INDEX IF NOT EXISTS tax_challans_company ON tax_challans(company_id, position);
+      CREATE INDEX IF NOT EXISTS tax_challans_dates ON tax_challans(company_id, date);
+      CREATE INDEX IF NOT EXISTS tax_challans_kind ON tax_challans(company_id, kind, date);
       CREATE INDEX IF NOT EXISTS ledgers_company ON ledgers(company_id, position);
       CREATE INDEX IF NOT EXISTS vouchers_company ON vouchers(company_id, position);
       CREATE INDEX IF NOT EXISTS voucher_lines_voucher ON voucher_lines(voucher_id, position);
@@ -790,6 +1085,13 @@ export class WorkspaceStore {
     this.godowns = this.db.prepare('SELECT * FROM godowns ORDER BY company_id, position');
     this.budgets = this.db.prepare('SELECT * FROM budgets ORDER BY company_id, position');
     this.currencies = this.db.prepare('SELECT * FROM currencies ORDER BY company_id, position');
+    this.stockTransfers = this.db.prepare(
+      'SELECT * FROM stock_transfers ORDER BY company_id, position',
+    );
+    this.orders = this.db.prepare('SELECT * FROM orders ORDER BY company_id, position');
+    this.boms = this.db.prepare('SELECT * FROM boms ORDER BY company_id, position');
+    this.manufactures = this.db.prepare('SELECT * FROM manufactures ORDER BY company_id, position');
+    this.taxChallans = this.db.prepare('SELECT * FROM tax_challans ORDER BY company_id, position');
     this.ledgers = this.db.prepare('SELECT * FROM ledgers ORDER BY position');
     this.vouchers = this.db.prepare('SELECT * FROM vouchers ORDER BY position');
     this.lines = this.db.prepare('SELECT * FROM voucher_lines ORDER BY position');
@@ -852,6 +1154,34 @@ export class WorkspaceStore {
       INSERT INTO currencies (company_id, id, position, code, name, symbol, created_at, data)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
+    this.insertStockTransfer = this.db.prepare(`
+      INSERT INTO stock_transfers
+        (company_id, id, position, no, date, from_godown_id, to_godown_id, narration, created_at, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.insertOrder = this.db.prepare(`
+      INSERT INTO orders
+        (company_id, id, position, type, no, date, party_ledger_id, delivery_date,
+         total, status, narration, created_at, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.insertBom = this.db.prepare(`
+      INSERT INTO boms
+        (company_id, id, position, name, output_item_id, output_qty, created_at, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.insertManufacture = this.db.prepare(`
+      INSERT INTO manufactures
+        (company_id, id, position, no, date, bom_id, bom_name, bom_output_qty,
+         output_item_id, output_qty, component_godown_id, output_godown_id,
+         output_batch_no, expiry_date, narration, created_at, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    this.insertTaxChallan = this.db.prepare(`
+      INSERT INTO tax_challans
+        (company_id, id, position, kind, date, amount, reference, bsr_code, section_id, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
     this.insertLedger = this.db.prepare(`
       INSERT INTO ledgers
         (company_id, id, position, name, group_id, opening, opening_type,
@@ -891,6 +1221,11 @@ export class WorkspaceStore {
     this.clearGodowns = this.db.prepare('DELETE FROM godowns');
     this.clearBudgets = this.db.prepare('DELETE FROM budgets');
     this.clearCurrencies = this.db.prepare('DELETE FROM currencies');
+    this.clearStockTransfers = this.db.prepare('DELETE FROM stock_transfers');
+    this.clearOrders = this.db.prepare('DELETE FROM orders');
+    this.clearBoms = this.db.prepare('DELETE FROM boms');
+    this.clearManufactures = this.db.prepare('DELETE FROM manufactures');
+    this.clearTaxChallans = this.db.prepare('DELETE FROM tax_challans');
     this.clearRecords = this.db.prepare('DELETE FROM company_records');
     this.clearStockItems = this.db.prepare('DELETE FROM stock_items');
     this.clearUsers = this.db.prepare('DELETE FROM workspace_users');
@@ -966,6 +1301,11 @@ export class WorkspaceStore {
       godowns: this.godowns.all(),
       budgets: this.budgets.all(),
       currencies: this.currencies.all(),
+      stockTransfers: this.stockTransfers.all(),
+      orders: this.orders.all(),
+      boms: this.boms.all(),
+      manufactures: this.manufactures.all(),
+      taxChallans: this.taxChallans.all(),
       ledgers: this.ledgers.all(),
       vouchers: this.vouchers.all(),
       lines: this.lines.all(),
@@ -1068,6 +1408,11 @@ export class WorkspaceStore {
       this.clearGodowns.run();
       this.clearBudgets.run();
       this.clearCurrencies.run();
+      this.clearStockTransfers.run();
+      this.clearOrders.run();
+      this.clearBoms.run();
+      this.clearManufactures.run();
+      this.clearTaxChallans.run();
       this.clearCompanies.run();
       this.clearUsers.run();
       this.clearLog.run();
@@ -1097,6 +1442,11 @@ export class WorkspaceStore {
       this.clearGodowns.run();
       this.clearBudgets.run();
       this.clearCurrencies.run();
+      this.clearStockTransfers.run();
+      this.clearOrders.run();
+      this.clearBoms.run();
+      this.clearManufactures.run();
+      this.clearTaxChallans.run();
       this.clearCompanies.run();
       this.clearUsers.run();
       this.clearLog.run();
@@ -1152,6 +1502,19 @@ export class WorkspaceStore {
         if (hasBudgets) delete companyData.budgets;
         const hasCurrencies = Array.isArray(company.currencies) && company.currencies.length > 0;
         if (hasCurrencies) delete companyData.currencies;
+        const hasStockTransfers =
+          Array.isArray(company.stockTransfers) && company.stockTransfers.length > 0;
+        if (hasStockTransfers) delete companyData.stockTransfers;
+        const hasOrders = Array.isArray(company.orders) && company.orders.length > 0;
+        if (hasOrders) delete companyData.orders;
+        const hasBoms = Array.isArray(company.boms) && company.boms.length > 0;
+        if (hasBoms) delete companyData.boms;
+        const hasManufactures =
+          Array.isArray(company.manufactures) && company.manufactures.length > 0;
+        if (hasManufactures) delete companyData.manufactures;
+        const hasTaxChallans =
+          Array.isArray(company.taxChallans) && company.taxChallans.length > 0;
+        if (hasTaxChallans) delete companyData.taxChallans;
         const hasStockItems = Array.isArray(company.stockItems) && company.stockItems.length > 0;
         if (hasStockItems) delete companyData.stockItems;
         this.insertCompany.run(
@@ -1309,6 +1672,109 @@ export class WorkspaceStore {
               text(currency.symbol) || null,
               optionalText(currency.createdAt),
               JSON.stringify(currencyData),
+            );
+          }
+        }
+        if (hasStockTransfers) {
+          for (const [position, transfer] of company.stockTransfers.entries()) {
+            const transferData = { ...transfer };
+            delete transferData.id;
+            for (const [, field] of PROMOTED_STOCK_TRANSFER_FIELDS) delete transferData[field];
+            this.insertStockTransfer.run(
+              text(company.id),
+              text(transfer.id) || `stockTransfers-${position}`,
+              position,
+              optionalNumber(transfer.no),
+              text(transfer.date) || null,
+              text(transfer.fromGodownId) || null,
+              text(transfer.toGodownId) || null,
+              transfer.narration === undefined ? null : text(transfer.narration),
+              optionalText(transfer.createdAt),
+              JSON.stringify(transferData),
+            );
+          }
+        }
+        if (hasOrders) {
+          for (const [position, order] of company.orders.entries()) {
+            const orderData = { ...order };
+            delete orderData.id;
+            for (const [, field] of PROMOTED_ORDER_FIELDS) delete orderData[field];
+            this.insertOrder.run(
+              text(company.id),
+              text(order.id) || `orders-${position}`,
+              position,
+              text(order.type) || null,
+              optionalNumber(order.no),
+              text(order.date) || null,
+              text(order.partyLedgerId) || null,
+              text(order.deliveryDate) || null,
+              optionalNumber(order.total),
+              text(order.status) || null,
+              order.narration === undefined ? null : text(order.narration),
+              optionalText(order.createdAt),
+              JSON.stringify(orderData),
+            );
+          }
+        }
+        if (hasBoms) {
+          for (const [position, bom] of company.boms.entries()) {
+            const bomData = { ...bom };
+            delete bomData.id;
+            for (const [, field] of PROMOTED_BOM_FIELDS) delete bomData[field];
+            this.insertBom.run(
+              text(company.id),
+              text(bom.id) || `boms-${position}`,
+              position,
+              text(bom.name) || null,
+              text(bom.outputItemId) || null,
+              optionalNumber(bom.outputQty),
+              optionalText(bom.createdAt),
+              JSON.stringify(bomData),
+            );
+          }
+        }
+        if (hasManufactures) {
+          for (const [position, manufacture] of company.manufactures.entries()) {
+            const manufactureData = { ...manufacture };
+            delete manufactureData.id;
+            for (const [, field] of PROMOTED_MANUFACTURE_FIELDS) delete manufactureData[field];
+            this.insertManufacture.run(
+              text(company.id),
+              text(manufacture.id) || `manufactures-${position}`,
+              position,
+              optionalNumber(manufacture.no),
+              text(manufacture.date) || null,
+              text(manufacture.bomId) || null,
+              text(manufacture.bomName) || null,
+              optionalNumber(manufacture.bomOutputQty),
+              text(manufacture.outputItemId) || null,
+              optionalNumber(manufacture.outputQty),
+              text(manufacture.componentGodownId) || null,
+              text(manufacture.outputGodownId) || null,
+              text(manufacture.outputBatchNo) || null,
+              text(manufacture.expiryDate) || null,
+              manufacture.narration === undefined ? null : text(manufacture.narration),
+              optionalText(manufacture.createdAt),
+              JSON.stringify(manufactureData),
+            );
+          }
+        }
+        if (hasTaxChallans) {
+          for (const [position, challan] of company.taxChallans.entries()) {
+            const challanData = { ...challan };
+            delete challanData.id;
+            for (const [, field] of PROMOTED_TAX_CHALLAN_FIELDS) delete challanData[field];
+            this.insertTaxChallan.run(
+              text(company.id),
+              text(challan.id) || `taxChallans-${position}`,
+              position,
+              text(challan.kind) || null,
+              text(challan.date) || null,
+              optionalNumber(challan.amount),
+              challan.reference === undefined ? null : text(challan.reference),
+              challan.bsrCode === undefined ? null : text(challan.bsrCode),
+              text(challan.sectionId) || null,
+              JSON.stringify(challanData),
             );
           }
         }

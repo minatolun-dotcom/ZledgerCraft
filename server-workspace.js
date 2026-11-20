@@ -6,10 +6,29 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { deepEqual, mergeWorkspaceStates, repairVoucherNumbers } from './server-merge.js';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const HISTORY_LIMIT = 20;
-// Ledger fields that are useful as typed columns. The complete ledger JSON is
-// still kept for compatibility, but these values are removed from it.
+// Header fields that are useful as typed columns. The complete JSON is still
+// kept for compatibility, but these values are removed from it when present.
+const PROMOTED_COMPANY_FIELDS = [
+  ['name', 'name'],
+  ['fy_start', 'fyStart'],
+  ['fy_end', 'fyEnd'],
+  ['year_id', 'yearId'],
+  ['created_at', 'createdAt'],
+];
+const PROMOTED_STOCK_FIELDS = [
+  ['name', 'name'],
+  ['stock_group_id', 'stockGroupId'],
+  ['unit_id', 'unitId'],
+  ['hsn', 'hsn'],
+  ['opening_qty', 'openingQty'],
+  ['opening_rate', 'openingRate'],
+  ['batch_tracking', 'batchTracking'],
+  ['created_at', 'createdAt'],
+];
+const PROMOTED_COMPANY_COLUMNS = [['created_at', 'TEXT']];
+const PROMOTED_STOCK_COLUMNS = [['created_at', 'TEXT']];
 const PROMOTED_LEDGER_COLUMNS = [
   ['opening', 'REAL'],
   ['opening_type', 'TEXT'],
@@ -59,6 +78,11 @@ function optionalNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function optionalText(value) {
+  const valueText = text(value);
+  return valueText || null;
+}
+
 function tokenHash(token) {
   return createHash('sha256').update(String(token ?? '')).digest('hex');
 }
@@ -104,7 +128,35 @@ function stockRows(rows) {
   const byCompany = new Map();
   for (const row of rows) {
     if (!byCompany.has(row.company_id)) byCompany.set(row.company_id, []);
-    byCompany.get(row.company_id).push(JSON.parse(row.data));
+    const data = JSON.parse(row.data);
+    const item = {
+      ...data,
+      id: row.id,
+      name: row.name ?? data.name,
+      stockGroupId: row.stock_group_id ?? data.stockGroupId,
+      unitId: row.unit_id ?? data.unitId,
+      openingQty:
+        row.opening_qty === null || row.opening_qty === undefined
+          ? number(data.openingQty)
+          : number(row.opening_qty),
+      openingRate:
+        row.opening_rate === null || row.opening_rate === undefined
+          ? number(data.openingRate)
+          : number(row.opening_rate),
+      batchTracking:
+        row.batch_tracking === null || row.batch_tracking === undefined
+          ? Boolean(data.batchTracking)
+          : Boolean(row.batch_tracking),
+    };
+    for (const [column, field] of [
+      ['hsn', 'hsn'],
+      ['created_at', 'createdAt'],
+    ]) {
+      if (row[column] !== null && row[column] !== undefined && row[column] !== '') {
+        item[field] = row[column];
+      }
+    }
+    byCompany.get(row.company_id).push(item);
   }
   return byCompany;
 }
@@ -183,12 +235,13 @@ function stateFromRows({
   }
 
   for (const row of companies) {
-    const company = JSON.parse(row.data);
-    company.id = row.id;
-    company.name = row.name;
-    company.fyStart = row.fy_start;
-    company.fyEnd = row.fy_end;
-    company.yearId = row.year_id;
+    const data = JSON.parse(row.data);
+    const company = { ...data, id: row.id };
+    for (const [column, field] of PROMOTED_COMPANY_FIELDS) {
+      if (row[column] !== null && row[column] !== undefined && row[column] !== '') {
+        company[field] = row[column];
+      }
+    }
     // Empty arrays stay in company.data so their presence survives a round trip.
     // Non-empty ones are reconstructed from their ordered rows.
     const storedCollections = recordsByCompany.get(row.id);
@@ -286,6 +339,7 @@ export class WorkspaceStore {
         fy_start TEXT,
         fy_end TEXT,
         year_id TEXT,
+        created_at TEXT,
         data TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS ledgers (
@@ -349,6 +403,7 @@ export class WorkspaceStore {
         opening_qty REAL,
         opening_rate REAL,
         batch_tracking INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT,
         data TEXT NOT NULL,
         PRIMARY KEY (company_id, id)
       );
@@ -372,11 +427,17 @@ export class WorkspaceStore {
       CREATE INDEX IF NOT EXISTS stock_items_name ON stock_items(company_id, name);
       CREATE INDEX IF NOT EXISTS workspace_leases_expiry ON workspace_leases(expires_at);
     `);
-    const ledgerColumns = new Set(
-      this.db.prepare('PRAGMA table_info(ledgers)').all().map((column) => column.name),
-    );
-    for (const [name, type] of PROMOTED_LEDGER_COLUMNS) {
-      if (!ledgerColumns.has(name)) this.db.exec(`ALTER TABLE ledgers ADD COLUMN ${name} ${type}`);
+    for (const [table, promoted] of [
+      ['companies', PROMOTED_COMPANY_COLUMNS],
+      ['ledgers', PROMOTED_LEDGER_COLUMNS],
+      ['stock_items', PROMOTED_STOCK_COLUMNS],
+    ]) {
+      const existing = new Set(
+        this.db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name),
+      );
+      for (const [name, type] of promoted) {
+        if (!existing.has(name)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+      }
     }
 
     this.meta = this.db.prepare('SELECT * FROM workspace_meta WHERE id = 1');
@@ -403,8 +464,8 @@ export class WorkspaceStore {
     this.insertUser = this.db.prepare('INSERT INTO workspace_users (position, data) VALUES (?, ?)');
     this.insertLog = this.db.prepare('INSERT INTO workspace_log (position, data) VALUES (?, ?)');
     this.insertCompany = this.db.prepare(`
-      INSERT INTO companies (id, position, name, fy_start, fy_end, year_id, data)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO companies (id, position, name, fy_start, fy_end, year_id, created_at, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     this.insertLedger = this.db.prepare(`
       INSERT INTO ledgers
@@ -428,8 +489,8 @@ export class WorkspaceStore {
     this.insertStockItem = this.db.prepare(`
       INSERT INTO stock_items
         (company_id, id, position, name, stock_group_id, unit_id, hsn, opening_qty,
-         opening_rate, batch_tracking, data)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         opening_rate, batch_tracking, created_at, data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     this.revision = this.db.prepare('SELECT state FROM workspace_revisions WHERE rev = ?');
     this.insertRevision = this.db.prepare('INSERT INTO workspace_revisions (rev, state) VALUES (?, ?)');
@@ -638,8 +699,10 @@ export class WorkspaceStore {
       }
       for (const [companyPosition, company] of (state.companies ?? []).entries()) {
         const companyData = { ...company };
+        delete companyData.id;
         delete companyData.ledgers;
         delete companyData.vouchers;
+        for (const [, field] of PROMOTED_COMPANY_FIELDS) delete companyData[field];
         // Empty arrays stay in companyData; non-empty arrays are reconstructed
         // from rows so there is only one canonical copy.
         for (const collection of RECORD_COLLECTIONS) {
@@ -656,6 +719,7 @@ export class WorkspaceStore {
           text(company.fyStart) || null,
           text(company.fyEnd) || null,
           text(company.yearId) || null,
+          optionalText(company.createdAt),
           JSON.stringify(companyData),
         );
         for (const collection of RECORD_COLLECTIONS) {
@@ -678,6 +742,9 @@ export class WorkspaceStore {
         }
         if (hasStockItems) {
           for (const [position, item] of company.stockItems.entries()) {
+            const itemData = { ...item };
+            delete itemData.id;
+            for (const [, field] of PROMOTED_STOCK_FIELDS) delete itemData[field];
             this.insertStockItem.run(
               text(company.id),
               text(item.id) || `stockItems-${position}`,
@@ -689,7 +756,8 @@ export class WorkspaceStore {
               optionalNumber(item.openingQty),
               optionalNumber(item.openingRate),
               item.batchTracking ? 1 : 0,
-              JSON.stringify(item),
+              optionalText(item.createdAt),
+              JSON.stringify(itemData),
             );
           }
         }
@@ -712,7 +780,6 @@ export class WorkspaceStore {
           ]) {
             delete ledgerData[field];
           }
-          const optional = (value) => (text(value) ? text(value) : null);
           this.insertLedger.run(
             text(company.id),
             text(ledger.id),
@@ -721,14 +788,14 @@ export class WorkspaceStore {
             text(ledger.groupId) || null,
             number(ledger.opening),
             ledger.openingType === 'Cr' ? 'Cr' : 'Dr',
-            optional(ledger.gstin),
-            optional(ledger.stateCode),
-            optional(ledger.pan),
-            optional(ledger.address),
-            optional(ledger.city),
-            optional(ledger.pin),
-            optional(ledger.gstRole),
-            optional(ledger.createdAt),
+            optionalText(ledger.gstin),
+            optionalText(ledger.stateCode),
+            optionalText(ledger.pan),
+            optionalText(ledger.address),
+            optionalText(ledger.city),
+            optionalText(ledger.pin),
+            optionalText(ledger.gstRole),
+            optionalText(ledger.createdAt),
             JSON.stringify(ledgerData),
           );
         }

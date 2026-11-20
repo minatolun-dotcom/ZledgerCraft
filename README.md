@@ -544,9 +544,10 @@ disabled.
   tables; every remaining top-level company collection (groups, stock, GST, TDS,
   payroll, banking, budgets, currencies and settings) is stored one row per
   record in `company_records`, with stock items also indexed in `stock_items`.
-  Ledger opening, tax/address and GST-role fields are typed columns, while the
-  rest of each ledger stays JSON. Nested configuration stays JSON inside its row
-  so the current accounting engine keeps its shape. In Postgres mode the whole workspace is a JSONB
+  Company header fields, stock-item identity/opening/batch fields and ledger
+  opening/tax/address/GST-role fields are typed columns; the rest of each record
+  stays JSON. Nested configuration stays JSON inside its row so the current
+  accounting engine keeps its shape. In Postgres mode the whole workspace is a JSONB
   document with revision history, leases and Postgres audit tables. An older
   whole-workspace blob is migrated once, then removed. On localhost the
   workspace is shared by browser profiles on the same machine without a login.

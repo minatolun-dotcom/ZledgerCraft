@@ -16,7 +16,8 @@ and e-invoice/e-way bill plus tax-audit working papers are done. Stage 4 —
 Depth and scale is in progress (1 of 4 complete): inventory depth is complete
 with godowns, batches, stock transfers, orders, BOMs and manufacturing; the
 server workspace now uses a local SQLite database with normalized company,
-ledger, voucher and line tables plus a row for every remaining company
+ledger, voucher and line tables; company headers, stock-item fields and common
+ledger fields are typed columns, with a row for every remaining company
 collection, server accounts, sign-in sessions, role enforcement, company-level
 access scoping, revision-checked saves and enforced voucher edit leases. Tally XML
 account groups, ledgers, stock masters, vouchers with matching stock lines and
@@ -48,9 +49,9 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 [KNOWN_LIMITS.md § Remaining limits and free paths](KNOWN_LIMITS.md#remaining-limits-and-free-paths):
 App-level encryption (passphrase-encrypted JSON downloads and optional
 AES-256-GCM encryption for server/R2 backups are complete; live-workspace
-encryption remains), incremental master-column promotion (ledger opening,
-party tax/address and GST-role fields are now typed SQLite columns), APIs/
-webhooks and statutory integrations. Voucher
+encryption remains), incremental master-column promotion (company headers,
+stock-item fields and ledger opening/tax/address/GST-role fields are now typed
+SQLite columns), APIs/webhooks and statutory integrations. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
 now complete.
 
@@ -334,6 +335,24 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
 
 ## Progress log
+
+### 2026-11-20 — Phase 12: company and stock-item column promotion
+
+- Made the existing company-header and stock-item columns authoritative instead
+  of leaving duplicate values in JSON. Company name, financial-year dates,
+  current year and creation time, plus each stock item's identity, group, unit,
+  HSN, opening quantity/rate, batch flag and creation time, now come from typed
+  SQLite columns.
+- Raised the normalized SQLite schema to version 4. Rows written by versions 2
+  and 3 are re-written during migration, while reads fall back to JSON when a
+  column is empty so old rows and old backups remain readable.
+- The stock-item read path now actually uses `stock_items` columns; previously
+  it reconstructed items from JSON even though the columns were populated.
+- Postgres still stores the whole workspace as one JSONB document; this phase
+  changes the normalized SQLite layout only.
+- Verification: v3 migration with null stock-item columns and company creation
+  time, JSON fallback, write-side synchronization and full round-trip tests;
+  250/250 engine tests and an 880.5 kB single-file build pass.
 
 ### 2026-11-20 — Phase 11: ledger master-column promotion
 

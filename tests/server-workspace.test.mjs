@@ -14,6 +14,7 @@ function fixture() {
         fyStart: '2026-04-01',
         fyEnd: '2027-03-31',
         yearId: 'year1',
+        createdAt: '2026-03-01T00:00:00.000Z',
         years: [{ id: 'year1', start: '2026-04-01', end: '2027-03-31', closed: false }],
         groups: [{ id: 'grp1', name: 'Sundry Debtors', parentId: 'assets' }],
         ledgers: [
@@ -61,6 +62,7 @@ function fixture() {
             openingRate: 10,
             batchTracking: true,
             hsn: '1234',
+            createdAt: '2026-04-02T00:00:00.000Z',
           },
         ],
         godowns: [{ id: 'gd1', name: 'Main Location', primary: true }],
@@ -73,6 +75,7 @@ function fixture() {
         fyStart: '2026-04-01',
         fyEnd: '2027-03-31',
         yearId: 'year2',
+        createdAt: '2026-03-02T00:00:00.000Z',
         years: [{ id: 'year2', start: '2026-04-01', end: '2027-03-31', closed: false }],
         groups: [],
         ledgers: [],
@@ -126,6 +129,12 @@ test('normalized storage migrates the legacy workspace and round-trips every cor
   for (const field of ['opening', 'openingType', 'gstin', 'stateCode', 'pan', 'address', 'city', 'pin', 'gstRole', 'createdAt']) {
     assert.equal(ledgerJson[field], undefined, `${field} should not remain in ledger JSON`);
   }
+  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get('co1');
+  assert.equal(company.created_at, '2026-03-01T00:00:00.000Z');
+  const companyJson = JSON.parse(company.data);
+  for (const field of ['id', 'name', 'fyStart', 'fyEnd', 'yearId', 'createdAt']) {
+    assert.equal(companyJson[field], undefined, `${field} should not remain in company JSON`);
+  }
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM vouchers').get().count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM voucher_lines').get().count, 2);
   assert.equal(
@@ -133,10 +142,19 @@ test('normalized storage migrates the legacy workspace and round-trips every cor
     1,
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stock_items').get().count, 1);
-  assert.equal(
-    db.prepare("SELECT name FROM stock_items WHERE id = 'item1'").get().name,
-    'Widget',
-  );
+  const stockItem = db.prepare('SELECT * FROM stock_items WHERE id = ?').get('item1');
+  assert.equal(stockItem.name, 'Widget');
+  assert.equal(stockItem.stock_group_id, 'sg1');
+  assert.equal(stockItem.unit_id, 'unit1');
+  assert.equal(stockItem.hsn, '1234');
+  assert.equal(stockItem.opening_qty, 5);
+  assert.equal(stockItem.opening_rate, 10);
+  assert.equal(stockItem.batch_tracking, 1);
+  assert.equal(stockItem.created_at, '2026-04-02T00:00:00.000Z');
+  const stockJson = JSON.parse(stockItem.data);
+  for (const field of ['id', 'name', 'stockGroupId', 'unitId', 'hsn', 'openingQty', 'openingRate', 'batchTracking', 'createdAt']) {
+    assert.equal(stockJson[field], undefined, `${field} should not remain in stock item JSON`);
+  }
 
   const loaded = store.read();
   assert.equal(loaded.rev, 7);
@@ -281,7 +299,7 @@ test('schema version 1 workspaces migrate their JSON collections into rows', () 
   const upgraded = new WorkspaceStore(db);
   assert.equal(
     db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version,
-    3,
+    4,
   );
   assert.equal(
     db.prepare("SELECT COUNT(*) AS count FROM company_records WHERE collection = 'groups'").get().count,
@@ -308,7 +326,7 @@ test('schema version 2 promotes ledger JSON fields into typed columns', () => {
   db.prepare('UPDATE workspace_meta SET schema_version = 2').run();
 
   const upgraded = new WorkspaceStore(db);
-  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 3);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 4);
   const row = db.prepare('SELECT * FROM ledgers WHERE id = ?').get('led1');
   assert.equal(row.opening, 0);
   assert.equal(row.opening_type, 'Dr');
@@ -318,11 +336,59 @@ test('schema version 2 promotes ledger JSON fields into typed columns', () => {
   assert.deepEqual(upgraded.read().state, expected);
 });
 
-test('normalized writes keep promoted ledger columns in sync', () => {
+test('schema version 3 promotes company and stock item JSON fields into typed columns', () => {
+  const original = fixture();
+  const { db, store } = legacyStore(original);
+  store.migrateLegacy();
+  const expected = store.read().state;
+  db.prepare('UPDATE companies SET data = ?, created_at = NULL WHERE id = ?').run(
+    JSON.stringify(original.companies[0]),
+    'co1',
+  );
+  db.prepare(
+    `UPDATE stock_items SET data = ?, stock_group_id = NULL, unit_id = NULL, hsn = NULL,
+       opening_qty = NULL, opening_rate = NULL, created_at = NULL
+     WHERE id = ?`,
+  ).run(JSON.stringify(original.companies[0].stockItems[0]), 'item1');
+  db.prepare('UPDATE workspace_meta SET schema_version = 3').run();
+
+  const upgraded = new WorkspaceStore(db);
+  assert.equal(db.prepare('SELECT schema_version FROM workspace_meta').get().schema_version, 4);
+  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get('co1');
+  assert.equal(company.created_at, '2026-03-01T00:00:00.000Z');
+  assert.equal(JSON.parse(company.data).name, undefined);
+  const stockItem = db.prepare('SELECT * FROM stock_items WHERE id = ?').get('item1');
+  assert.equal(stockItem.stock_group_id, 'sg1');
+  assert.equal(stockItem.unit_id, 'unit1');
+  assert.equal(stockItem.hsn, '1234');
+  assert.equal(stockItem.opening_qty, 5);
+  assert.equal(stockItem.opening_rate, 10);
+  assert.equal(stockItem.batch_tracking, 1);
+  assert.equal(stockItem.created_at, '2026-04-02T00:00:00.000Z');
+  const stockJson = JSON.parse(stockItem.data);
+  for (const field of ['name', 'stockGroupId', 'unitId', 'hsn', 'openingQty', 'openingRate', 'batchTracking', 'createdAt']) {
+    assert.equal(stockJson[field], undefined, `${field} should not remain in stock item JSON`);
+  }
+  assert.deepEqual(upgraded.read().state, expected);
+});
+
+test('normalized writes keep promoted company, stock item and ledger columns in sync', () => {
   const { db, store } = legacyStore(fixture());
   store.migrateLegacy();
   const before = store.read();
   const next = structuredClone(before.state);
+  Object.assign(next.companies[0], {
+    name: 'Alpha Traders Updated',
+    createdAt: '2026-05-01T00:00:00.000Z',
+  });
+  Object.assign(next.companies[0].stockItems[0], {
+    name: 'Gadget',
+    hsn: '5678',
+    openingQty: 7.5,
+    openingRate: 12,
+    batchTracking: false,
+    createdAt: '2026-05-02T00:00:00.000Z',
+  });
   Object.assign(next.companies[0].ledgers[0], {
     opening: 500.25,
     openingType: 'Cr',
@@ -334,6 +400,21 @@ test('normalized writes keep promoted ledger columns in sync', () => {
     gstRole: 'sgst',
   });
   assert.equal(store.write(next, before.rev, { updatedAt: '2026-06-01T00:00:00.000Z' }).conflict, false);
+  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get('co1');
+  assert.equal(company.name, 'Alpha Traders Updated');
+  assert.equal(company.created_at, '2026-05-01T00:00:00.000Z');
+  const companyJson = JSON.parse(company.data);
+  for (const field of ['id', 'name', 'fyStart', 'fyEnd', 'yearId', 'createdAt']) {
+    assert.equal(companyJson[field], undefined, `${field} should not remain in company JSON`);
+  }
+  const stockItem = db.prepare('SELECT * FROM stock_items WHERE id = ?').get('item1');
+  assert.equal(stockItem.name, 'Gadget');
+  assert.equal(stockItem.hsn, '5678');
+  assert.equal(stockItem.opening_qty, 7.5);
+  assert.equal(stockItem.opening_rate, 12);
+  assert.equal(stockItem.batch_tracking, 0);
+  assert.equal(stockItem.created_at, '2026-05-02T00:00:00.000Z');
+  assert.equal(JSON.parse(stockItem.data).name, undefined);
   const row = db.prepare('SELECT * FROM ledgers WHERE id = ?').get('led1');
   assert.equal(row.opening, 500.25);
   assert.equal(row.opening_type, 'Cr');
@@ -344,7 +425,7 @@ test('normalized writes keep promoted ledger columns in sync', () => {
   assert.equal(row.pin, '560001');
   assert.equal(row.gst_role, 'sgst');
   assert.equal(JSON.parse(row.data).pan, undefined);
-  assert.deepEqual(store.read().state.companies[0].ledgers[0], next.companies[0].ledgers[0]);
+  assert.deepEqual(store.read().state.companies[0], next.companies[0]);
 });
 
 test('record leases block other sessions, renew with the same token and expire', () => {

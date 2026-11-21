@@ -773,6 +773,27 @@ export function costCentreMastersPanel(active) {
       </tr>`;
     })
     .join('');
+  const yearNames = new Map((active.years ?? []).map((year) => [year.id, `${dateLabel(year.start)} – ${dateLabel(year.end)}`]));
+  const openingRows = centres
+    .flatMap((centre) =>
+      Object.entries(centre.openings ?? {}).map(([yearId, amount]) => ({
+        centreId: centre.id,
+        centre: centre.name,
+        yearId,
+        year: yearNames.get(yearId) ?? 'Missing year',
+        amount,
+      })),
+    )
+    .sort((a, b) => a.centre.localeCompare(b.centre) || a.year.localeCompare(b.year))
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.centre)}</strong></td>
+        <td class="muted">${esc(row.year)}</td>
+        <td class="num">${money(row.amount)}</td>
+        <td class="row-actions"><button class="btn small danger" type="button" data-action="delete-cost-opening" data-id="${esc(row.centreId)}" data-year="${esc(row.yearId)}">Remove</button></td>
+      </tr>`,
+    )
+    .join('');
 
   return panel(
     `Cost centres <span class="count">${centres.length}</span>`,
@@ -818,6 +839,23 @@ export function costCentreMastersPanel(active) {
               <tbody>${centreRows}</tbody>
             </table>`
           : '<p class="muted">No cost centres yet. Create one above and assign it to voucher lines.</p>'}
+        <h3 class="column-title">Opening balances</h3>
+        <p class="muted small">A positive opening is a net debit; use a negative amount for a net credit. The selected financial year's opening appears in cost-centre reports and can be included in budget actuals.</p>
+        ${centres.length && (active.years ?? []).length
+          ? `<form id="cost-centre-opening-form" class="inline-form" novalidate>
+              <select name="centreId" aria-label="Cost centre for opening">${centres.map((centre) => `<option value="${esc(centre.id)}">${esc(centre.name)}</option>`).join('')}</select>
+              <select name="yearId" aria-label="Financial year for opening">${(active.years ?? []).map((year) => `<option value="${esc(year.id)}"${year.id === active.yearId ? ' selected' : ''}>${esc(dateLabel(year.start))} – ${esc(dateLabel(year.end))}</option>`).join('')}</select>
+              <input name="amount" inputmode="decimal" placeholder="Opening amount" aria-label="Cost-centre opening amount">
+              <button class="btn small" type="submit">Save opening</button>
+            </form>
+            <p id="cost-centre-opening-error" class="form-error" role="alert"></p>
+            ${openingRows
+              ? `<table class="data-table compact">
+                  <thead><tr><th>Cost centre</th><th>Financial year</th><th class="num">Opening</th><th></th></tr></thead>
+                  <tbody>${openingRows}</tbody>
+                </table>`
+              : '<p class="muted small">No opening balances recorded.</p>'}`
+          : '<p class="muted small">Add a cost centre and financial year first.</p>'}
         ${centres.length > 1
           ? `<form id="merge-cost-centre-form" class="inline-form">
               <select name="source" aria-label="Centre to merge">${centres.map((centre) => `<option value="${esc(centre.id)}">${esc(centre.name)}</option>`).join('')}</select>

@@ -66,9 +66,11 @@ export function costCentresScreen() {
         <td><strong>${esc(row.centre)}</strong></td>
         <td class="muted">${esc(row.category)}</td>
         <td class="num">${row.voucherCount}</td>
+        <td class="num">${money(row.opening)}</td>
         <td class="num">${money(row.debit)}</td>
         <td class="num">${money(row.credit)}</td>
         <td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td>
+        <td class="num ${row.netWithOpening < 0 ? 'neg' : ''}">${money(row.netWithOpening)}</td>
       </tr>`,
     )
     .join('');
@@ -88,9 +90,11 @@ export function costCentresScreen() {
         <td><strong>${esc(row.category)}</strong></td>
         <td class="num">${row.centreCount}</td>
         <td class="num">${row.voucherCount}</td>
+        <td class="num">${money(row.opening)}</td>
         <td class="num">${money(row.debit)}</td>
         <td class="num">${money(row.credit)}</td>
         <td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td>
+        <td class="num ${row.netWithOpening < 0 ? 'neg' : ''}">${money(row.netWithOpening)}</td>
       </tr>`,
     )
     .join('');
@@ -102,11 +106,12 @@ export function costCentresScreen() {
       <div class="ratio-card"><span class="ratio-label">Debit allocations</span><strong>${money(report.totalDebit)}</strong><span class="muted small">${report.voucherCount} voucher${report.voucherCount === 1 ? '' : 's'}</span></div>
       <div class="ratio-card"><span class="ratio-label">Credit allocations</span><strong>${money(report.totalCredit)}</strong><span class="muted small">${report.centreRows.length} centres</span></div>
       <div class="ratio-card"><span class="ratio-label">Net allocation</span><strong>${money(report.totalNet)}</strong><span class="muted small">Debit less credit</span></div>
+      <div class="ratio-card"><span class="ratio-label">Openings</span><strong>${money(report.openingTotal)}</strong><span class="muted small">Net debit at year start</span></div>
       <div class="ratio-card"><span class="ratio-label">Unallocated net</span><strong class="${Math.abs(report.unallocatedNet) > 0.005 ? 'neg' : ''}">${money(report.unallocatedNet)}</strong><span class="muted small">${report.unallocatedVoucherCount} voucher${report.unallocatedVoucherCount === 1 ? '' : 's'} · ${money(report.unallocatedDebit)} Dr / ${money(report.unallocatedCredit)} Cr</span></div>
     </div>
     <h3 class="column-title">By category</h3>
     <div class="table-scroll" tabindex="0"><table class="data-table compact">
-      <thead><tr><th>Category</th><th class="num">Centres</th><th class="num">Vouchers</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
+      <thead><tr><th>Category</th><th class="num">Centres</th><th class="num">Vouchers</th><th class="num">Opening</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th><th class="num">Net + opening</th></tr></thead>
       <tbody>${categoryRows}</tbody>
     </table></div>
     <h3 class="column-title">Profit &amp; loss by category</h3>
@@ -119,7 +124,7 @@ export function costCentresScreen() {
     <h3 class="column-title">By cost centre</h3>
     ${report.centreRows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact cost-centre-table">
-          <thead><tr><th>Cost centre</th><th>Category</th><th class="num">Vouchers</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
+          <thead><tr><th>Cost centre</th><th>Category</th><th class="num">Vouchers</th><th class="num">Opening</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th><th class="num">Net + opening</th></tr></thead>
           <tbody>${centreRows}</tbody>
         </table></div>`
       : '<p class="muted">No cost centres yet. Create them in Masters, then choose one on a voucher line.</p>'}
@@ -130,7 +135,7 @@ export function costCentresScreen() {
           <tbody>${unallocatedRows}</tbody>
         </table></div>`
       : '<p class="muted">Every voucher line in this period has a cost centre.</p>'}`,
-    'Allocated columns include only lines with a cost centre. The unallocated table reconciles the remaining lines in the same period. Profit & loss by category counts only tagged income and expense lines, so untagged income or expense is excluded. Click a centre to see its vouchers.',
+    'Allocated columns include only lines with a cost centre. Openings come from the selected financial year and are added only in the net-plus-opening column. The unallocated table reconciles the remaining lines in the same period. Profit & loss by category counts only tagged income and expense lines, so untagged income or expense is excluded. Click a centre to see its vouchers.',
   );
 }
 
@@ -171,7 +176,9 @@ export function costCentreDetailScreen() {
       <div class="ratio-card"><span class="ratio-label">Category</span><strong>${esc(report.category)}</strong><span class="muted small">${report.count} allocated lines</span></div>
       <div class="ratio-card"><span class="ratio-label">Debit</span><strong>${money(report.debit)}</strong><span class="muted small">Total debits</span></div>
       <div class="ratio-card"><span class="ratio-label">Credit</span><strong>${money(report.credit)}</strong><span class="muted small">Total credits</span></div>
+      <div class="ratio-card"><span class="ratio-label">Opening</span><strong>${money(report.opening)}</strong><span class="muted small">${esc(report.yearId === active.yearId ? 'Selected financial year' : 'Report financial year')}</span></div>
       <div class="ratio-card"><span class="ratio-label">Net</span><strong>${money(report.net)}</strong><span class="muted small">Debit less credit</span></div>
+      <div class="ratio-card"><span class="ratio-label">Net + opening</span><strong>${money(report.netWithOpening)}</strong><span class="muted small">Including opening</span></div>
     </div>
     <h3 class="column-title">Ledger movement</h3>
     ${report.ledgerRows.length
@@ -180,7 +187,7 @@ export function costCentreDetailScreen() {
           <tbody>${ledgerRows}</tbody>
         </table></div>`
       : '<p class="muted">No lines are allocated to this centre in the period.</p>'}
-    <p class="muted small">Ledger movement covers this period only; cost-centre opening balances are not modelled.</p>
+    <p class="muted small">Ledger movement covers this period only. The opening is the selected financial year's net debit and is not repeated on each ledger row.</p>
     <h3 class="column-title">Voucher lines</h3>
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">

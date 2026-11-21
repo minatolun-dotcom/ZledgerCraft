@@ -1057,14 +1057,25 @@ export function normalizeCostMasters(company) {
 
   const seenCentres = new Set();
   const seenCentreNames = new Set();
+  const yearIds = new Set((company.years ?? []).map((year) => year.id));
   company.costCentres = (Array.isArray(company.costCentres) ? company.costCentres : [])
     .filter((centre) => centre && typeof centre === 'object')
-    .map((centre) => ({
-      id: String(centre.id || uid('cc')).slice(0, 80),
-      name: String(centre.name || '').trim().slice(0, 80),
-      categoryId: String(centre.categoryId || ''),
-      createdAt: centre.createdAt ? String(centre.createdAt) : new Date().toISOString(),
-    }))
+    .map((centre) => {
+      const openings = {};
+      if (centre.openings && typeof centre.openings === 'object') {
+        for (const [yearId, value] of Object.entries(centre.openings)) {
+          const amount = parseAmount(value);
+          if (yearIds.has(yearId) && amount !== null) openings[yearId] = amount;
+        }
+      }
+      return {
+        id: String(centre.id || uid('cc')).slice(0, 80),
+        name: String(centre.name || '').trim().slice(0, 80),
+        categoryId: String(centre.categoryId || ''),
+        ...(Object.keys(openings).length ? { openings } : {}),
+        createdAt: centre.createdAt ? String(centre.createdAt) : new Date().toISOString(),
+      };
+    })
     .filter((centre) => {
       const key = centre.name.toLowerCase();
       if (
@@ -1087,6 +1098,33 @@ export function normalizeCostMasters(company) {
     }
   }
   return company;
+}
+
+export function setCostCentreOpening(company, centreId, yearId, amountInput) {
+  const centre = (company.costCentres ?? []).find((item) => item.id === centreId);
+  if (!centre) return { ok: false, error: 'Cost centre not found.' };
+  if (!(company.years ?? []).some((year) => year.id === yearId)) {
+    return { ok: false, error: 'Choose a financial year for the opening balance.' };
+  }
+  const amount = parseAmount(amountInput);
+  if (amount === null) return { ok: false, error: 'Cost-centre opening must be a number.' };
+  const openings = { ...(centre.openings ?? {}) };
+  if (Math.abs(amount) < 0.005) delete openings[yearId];
+  else openings[yearId] = round2(amount);
+  if (Object.keys(openings).length) centre.openings = openings;
+  else delete centre.openings;
+  return { ok: true, centre, yearId, amount: openings[yearId] ?? 0 };
+}
+
+export function deleteCostCentreOpening(company, centreId, yearId) {
+  const centre = (company.costCentres ?? []).find((item) => item.id === centreId);
+  if (!centre) return { ok: false, error: 'Cost centre not found.' };
+  if (!centre.openings?.[yearId]) return { ok: false, error: 'That cost-centre opening does not exist.' };
+  const openings = { ...centre.openings };
+  delete openings[yearId];
+  if (Object.keys(openings).length) centre.openings = openings;
+  else delete centre.openings;
+  return { ok: true, centre };
 }
 
 export const BASE_CURRENCY = Object.freeze({
@@ -7522,6 +7560,19 @@ function validateImportedCompany(company) {
       }
       costCentreIds.add(centre.id);
       costCentreNames.add(key);
+      if (centre.openings !== undefined) {
+        if (!centre.openings || typeof centre.openings !== 'object' || Array.isArray(centre.openings)) {
+          return `Company "${name}": cost centre "${centreName}" has invalid openings.`;
+        }
+        for (const [yearId, value] of Object.entries(centre.openings)) {
+          if (!(company.years ?? []).some((year) => year.id === yearId)) {
+            return `Company "${name}": cost centre "${centreName}" has an opening for a missing financial year.`;
+          }
+          if (parseAmount(value) === null) {
+            return `Company "${name}": cost centre "${centreName}" has an invalid opening amount.`;
+          }
+        }
+      }
     }
   }
   for (const field of ['groups', 'ledgers', 'vouchers']) {
@@ -7835,7 +7886,7 @@ function validateImportedCompany(company) {
     for (const budget of company.budgets) {
       const budgetName = String(budget?.name ?? '').trim();
       const targetType = budget?.targetType;
-      if (!budget?.id || !budgetName || !['ledger', 'group'].includes(targetType)) {
+      if (!budget?.id || !budgetName || !['ledger', 'group', 'costCentre', 'costCategory'].includes(targetType)) {
         return `Company "${name}" has an invalid budget.`;
       }
       if (targetType === 'group' && !groupIds.has(budget.targetId)) {
@@ -7843,6 +7894,12 @@ function validateImportedCompany(company) {
       }
       if (targetType === 'ledger' && !ledgerIds.has(budget.targetId)) {
         return `Company "${name}": budget "${budgetName}" points at a missing ledger.`;
+      }
+      if (targetType === 'costCentre' && !costCentreIds.has(budget.targetId)) {
+        return `Company "${name}": budget "${budgetName}" points at a missing cost centre.`;
+      }
+      if (targetType === 'costCategory' && !costCategoryIds.has(budget.targetId)) {
+        return `Company "${name}": budget "${budgetName}" points at a missing cost category.`;
       }
       if (!yearIds.has(budget.yearId)) {
         return `Company "${name}": budget "${budgetName}" points at a missing financial year.`;

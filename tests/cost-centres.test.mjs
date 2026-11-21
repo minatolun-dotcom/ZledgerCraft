@@ -10,16 +10,18 @@ import {
   createCompany,
   deleteCostCategory,
   deleteCostCentre,
+  deleteCostCentreOpening,
   exportState,
   findLedgerByName,
   importState,
   mergeCostCategory,
   mergeCostCentre,
   normalizeCostMasters,
+  setCostCentreOpening,
   updateCostCategory,
   updateCostCentre,
 } from '../src/store.js';
-import { costCentreBreakup, costCentreSummary, costCategoryPnl } from '../src/accounting.js';
+import { budgetVsActual, costCentreBreakup, costCentreSummary, costCategoryPnl } from '../src/accounting.js';
 
 function costFixture() {
   const company = createCompany('Cost Co', '2026-04-01').company;
@@ -378,4 +380,67 @@ test('normalization drops orphaned centres and line references', () => {
   assert.equal(company.costCentres.some((centre) => centre.id === admin.id), false);
   assert.equal(company.costCentres.some((centre) => centre.categoryId === category.id), true);
   assert.equal(company.vouchers[0].lines[0].costCentreId, undefined);
+});
+
+
+test('cost-centre openings are year-scoped, reportable and budget-aware', () => {
+  const { company, bank, rent, admin, category } = costFixture();
+  const set = setCostCentreOpening(company, admin.id, company.yearId, 750);
+  assert.equal(set.ok, true, set.error);
+  assert.equal(admin.openings[company.yearId], 750);
+  assert.equal(setCostCentreOpening(company, admin.id, 'missing-year', 10).ok, false);
+  assert.equal(setCostCentreOpening(company, 'missing', company.yearId, 10).ok, false);
+  assert.equal(setCostCentreOpening(company, admin.id, company.yearId, 'abc').ok, false);
+
+  const summary = costCentreSummary(company, {
+    from: '2026-04-01',
+    to: '2026-04-30',
+    yearId: company.yearId,
+  });
+  const row = summary.centreRows.find((entry) => entry.centreId === admin.id);
+  assert.equal(row.opening, 750);
+  assert.equal(row.net, 0);
+  assert.equal(row.netWithOpening, 750);
+  assert.equal(summary.categoryRows.find((entry) => entry.categoryId === category.id).opening, 750);
+  assert.equal(summary.openingTotal, 750);
+  const detail = costCentreBreakup(company, admin.id, {
+    from: '2026-04-01',
+    to: '2026-04-30',
+    yearId: company.yearId,
+  });
+  assert.equal(detail.opening, 750);
+  assert.equal(detail.netWithOpening, 750);
+
+  const payment = addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: rent.id, side: 'Dr', amount: 200, costCentreId: admin.id },
+      { ledgerId: bank.id, side: 'Cr', amount: 200 },
+    ],
+  });
+  assert.equal(payment.ok, true, payment.error);
+  addBudget(company, {
+    name: 'Admin plan',
+    targetType: 'costCentre',
+    targetId: admin.id,
+    yearId: company.yearId,
+    amount: 1000,
+  });
+  const withoutOpening = budgetVsActual(company, { yearId: company.yearId, asOn: '2026-04-30' });
+  assert.equal(withoutOpening.rows[0].actual, 200);
+  const withOpening = budgetVsActual(company, {
+    yearId: company.yearId,
+    asOn: '2026-04-30',
+    includeOpening: true,
+  });
+  assert.equal(withOpening.rows[0].actual, 950);
+
+  const restored = importState(exportState({ version: 1, activeCompanyId: company.id, companies: [company] }));
+  assert.equal(restored.ok, true, restored.error);
+  assert.equal(restored.state.companies[0].costCentres.find((entry) => entry.id === admin.id).openings[company.yearId], 750);
+
+  assert.equal(deleteCostCentreOpening(company, admin.id, company.yearId).ok, true);
+  assert.equal(admin.openings, undefined);
+  assert.equal(deleteCostCentreOpening(company, admin.id, company.yearId).ok, false);
 });

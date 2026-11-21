@@ -903,11 +903,12 @@ export function postDatedRegister(company, filters = {}) {
 /** Cost-centre totals for the period, grouped by category. */
 export function costCentreSummary(company, filters = {}) {
   const { from, to } = dateRange(company, filters);
+  const yearId = filters.yearId || company.yearId;
   const categories = company.costCategories ?? [];
   const byCategory = new Map(
     categories.map((category) => [
       category.id,
-      { categoryId: category.id, category: category.name, debit: 0, credit: 0, centreCount: 0, vouchers: new Set() },
+      { categoryId: category.id, category: category.name, debit: 0, credit: 0, opening: 0, centreCount: 0, vouchers: new Set() },
     ]),
   );
   const byCentre = new Map(
@@ -920,10 +921,15 @@ export function costCentreSummary(company, filters = {}) {
         category: categories.find((category) => category.id === centre.categoryId)?.name ?? 'Unknown category',
         debit: 0,
         credit: 0,
+        opening: round2(Number(centre.openings?.[yearId]) || 0),
         vouchers: new Set(),
       },
     ]),
   );
+  for (const centre of byCentre.values()) {
+    const category = byCategory.get(centre.categoryId);
+    if (category) category.opening = round2(category.opening + centre.opening);
+  }
 
   const unallocated = new Map();
   const unallocatedVouchers = new Set();
@@ -966,7 +972,9 @@ export function costCentreSummary(company, filters = {}) {
       category: centre.category,
       debit: centre.debit,
       credit: centre.credit,
+      opening: centre.opening,
       net: round2(centre.debit - centre.credit),
+      netWithOpening: round2(centre.opening + centre.debit - centre.credit),
       voucherCount: centre.vouchers.size,
     }))
     .sort((a, b) => a.category.localeCompare(b.category) || a.centre.localeCompare(b.centre));
@@ -976,7 +984,9 @@ export function costCentreSummary(company, filters = {}) {
       category: category.category,
       debit: category.debit,
       credit: category.credit,
+      opening: category.opening,
       net: round2(category.debit - category.credit),
+      netWithOpening: round2(category.opening + category.debit - category.credit),
       centreCount: category.centreCount,
       voucherCount: category.vouchers.size,
     }))
@@ -994,8 +1004,10 @@ export function costCentreSummary(company, filters = {}) {
   return {
     from,
     to,
+    yearId,
     centreRows,
     categoryRows,
+    openingTotal: round2(centreRows.reduce((sum, row) => sum + row.opening, 0)),
     unallocatedRows,
     unallocatedDebit: round2(unallocatedRows.reduce((sum, row) => sum + row.debit, 0)),
     unallocatedCredit: round2(unallocatedRows.reduce((sum, row) => sum + row.credit, 0)),
@@ -1004,6 +1016,7 @@ export function costCentreSummary(company, filters = {}) {
     totalDebit: round2(centreRows.reduce((sum, row) => sum + row.debit, 0)),
     totalCredit: round2(centreRows.reduce((sum, row) => sum + row.credit, 0)),
     totalNet: round2(centreRows.reduce((sum, row) => sum + row.net, 0)),
+    totalNetWithOpening: round2(centreRows.reduce((sum, row) => sum + row.netWithOpening, 0)),
     voucherCount: new Set(
       [...byCentre.values()].flatMap((centre) => [...centre.vouchers]),
     ).size,
@@ -1103,6 +1116,8 @@ export function costCentreBreakup(company, centreId, filters = {}) {
   if (!centre) return null;
   const category = (company.costCategories ?? []).find((item) => item.id === centre.categoryId);
   const { from, to } = dateRange(company, filters);
+  const yearId = filters.yearId || company.yearId;
+  const opening = round2(Number(centre.openings?.[yearId]) || 0);
   const ledgerById = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
   const byLedger = new Map();
   const rows = [];
@@ -1146,13 +1161,16 @@ export function costCentreBreakup(company, centreId, filters = {}) {
     category: category?.name ?? 'Unknown category',
     from,
     to,
+    yearId,
     rows,
     ledgerRows,
     ledgerCount: ledgerRows.length,
     count: rows.length,
+    opening,
     debit,
     credit,
     net: round2(debit - credit),
+    netWithOpening: round2(opening + debit - credit),
   };
 }
 
@@ -1674,7 +1692,15 @@ export function budgetVsActual(company, filters = {}) {
             ? groupNature(company, target.id)
             : groupNature(company, target.groupId);
       let opening = 0;
-      if (openingTotals && !costCentre && !costCategory) {
+      if (includeOpening && costCentre) {
+        opening = round2(Number(target.openings?.[budget.yearId]) || 0);
+      } else if (includeOpening && costCategory) {
+        opening = round2(
+          (company.costCentres ?? [])
+            .filter((centre) => centre.categoryId === target.id)
+            .reduce((sum, centre) => sum + (Number(centre.openings?.[budget.yearId]) || 0), 0),
+        );
+      } else if (openingTotals && !costCentre && !costCategory) {
         for (const ledgerId of ledgerIds) {
           const entry = openingTotals.get(ledgerId);
           if (!entry) continue;

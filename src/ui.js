@@ -66,6 +66,7 @@ import {
   deleteCurrencyRate,
   deleteCostCategory,
   deleteCostCentre,
+  deleteCostCentreOpening,
   deleteEmployee,
   deleteGodown,
   deleteGstFiling,
@@ -136,6 +137,7 @@ import {
   setBankMatch,
   setCurrentUser,
   setComplianceTaskStatus,
+  setCostCentreOpening,
   setEwayPartB,
   setNextVoucherNumber,
   setInstrumentStatus,
@@ -4066,6 +4068,34 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'cost-centre-opening-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = setCostCentreOpening(
+      active,
+      data.get('centreId'),
+      data.get('yearId'),
+      data.get('amount'),
+    );
+    if (!result.ok) {
+      showFormError(result.error, 'cost-centre-opening-error');
+      return;
+    }
+    logAudit(
+      'costCentre.opening',
+      `Set cost-centre opening for "${result.centre.name}" to ${result.amount}.`,
+      active,
+      result.centre.name,
+    );
+    persist();
+    setFlash(`Cost-centre opening for "${result.centre.name}" saved.`);
+    render();
+    return;
+  }
+
   if (form.id === 'merge-cost-category-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -5152,6 +5182,21 @@ async function handleClick(event) {
       if (result.ok) logAudit('costCentre.delete', `Deleted cost centre "${result.centre.name}".`, active, result.centre.name);
       persist();
       setFlash(result.ok ? `Cost centre "${result.centre.name}" deleted.` : result.error, result.ok ? 'ok' : 'warn');
+      render();
+      break;
+    }
+    case 'delete-cost-opening': {
+      if (!can('master.delete')) {
+        requirePermission('master.delete');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      if (!window.confirm('Remove this cost-centre opening?')) break;
+      const result = deleteCostCentreOpening(active, trigger.dataset.id, trigger.dataset.year);
+      if (result.ok) logAudit('costCentre.opening.delete', `Removed a cost-centre opening for "${result.centre.name}".`, active, result.centre.name);
+      persist();
+      setFlash(result.ok ? 'Cost-centre opening removed.' : result.error, result.ok ? 'ok' : 'warn');
       render();
       break;
     }

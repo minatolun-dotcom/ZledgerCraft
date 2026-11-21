@@ -368,6 +368,16 @@ inside those stages.
 - Corrected stale register entries: per-line GST is resolved; GST filing
   history and local statutory gaps are stated separately.
 
+### 2026-11-21 — Phase 69: cost-centre openings
+
+- A cost centre can store a net debit or credit opening for each financial
+  year, with backup validation and an opening editor in Masters.
+- Cost-centre summary and detail show the opening and net-plus-opening columns;
+  budget actuals include centre and category openings when requested.
+- Backup validation now accepts cost-centre and cost-category budgets, which it
+  had been rejecting despite the app supporting them.
+- Verification: 384 tests (383 pass, 1 skipped); 1,395.3 kB build.
+
 ### 2026-11-21 — Phase 68: monthly budget phasing
 
 - A budget can now carry either four quarterly amounts or twelve monthly

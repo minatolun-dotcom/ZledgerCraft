@@ -2769,6 +2769,33 @@ export function payrollBankTransferRows(company, runId) {
   return { ok: true, run, rows, missing };
 }
 
+export function reversePayrollRun(company, runId, input = {}) {
+  const run = (company.payroll?.runs ?? []).find((entry) => entry.id === runId);
+  if (!run) return { ok: false, error: 'Payroll run not found.' };
+  if (run.reversedAt) return { ok: false, error: 'This payroll run is already reversed.' };
+  const voucher = (company.vouchers ?? []).find((entry) => entry.id === run.voucherId);
+  if (!voucher) return { ok: false, error: 'The payroll journal no longer exists.' };
+  const date = String(input.date ?? run.date);
+  if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid reversal date.' };
+  const lines = (voucher.lines ?? []).map((line) => ({
+    ledgerId: line.ledgerId,
+    side: line.side === 'Dr' ? 'Cr' : 'Dr',
+    amount: line.amount,
+  }));
+  const posted = addVoucher(company, {
+    type: 'Journal',
+    date,
+    narration: `Reversal of payroll for ${run.month}`,
+    lines,
+  });
+  if (!posted.ok) return posted;
+  run.reversedAt = new Date().toISOString();
+  run.reversalVoucherId = posted.voucher.id;
+  run.reversalDate = date;
+  posted.voucher.payrollReversalRunId = run.id;
+  return { ok: true, run, voucher: posted.voucher };
+}
+
 export function deletePayrollRun(company, runId) {
   const run = (company.payroll?.runs ?? []).find((entry) => entry.id === runId);
   if (!run) return { ok: false, error: 'Payroll run not found.' };
@@ -2778,6 +2805,15 @@ export function deletePayrollRun(company, runId) {
       return { ok: false, error: 'The payroll voucher cannot be deleted. Check whether its financial year is closed.' };
     }
     company.vouchers = company.vouchers.filter((entry) => entry.payrollRunId !== runId && entry.id !== run.voucherId);
+  }
+  if (run.reversalVoucherId) {
+    const reversal = (company.vouchers ?? []).find((entry) => entry.id === run.reversalVoucherId);
+    if (reversal && !deleteVoucher(company, reversal.id)) {
+      return { ok: false, error: 'The payroll reversal voucher cannot be deleted.' };
+    }
+    company.vouchers = company.vouchers.filter(
+      (entry) => entry.id !== run.reversalVoucherId && entry.payrollReversalRunId !== runId,
+    );
   }
   company.vouchers = (company.vouchers ?? []).filter((entry) => entry.payrollRunId !== runId);
   company.payroll.runs = company.payroll.runs.filter((entry) => entry.id !== runId);

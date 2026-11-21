@@ -305,8 +305,8 @@ export function payrollScreen() {
 
   const runRows = report.runs
     .map(
-      (item) => `<tr>
-        <td><strong>${esc(payrollMonthLabel(item.month))}</strong></td>
+      (item) => `<tr class="${item.reversed ? 'muted' : ''}">
+        <td><strong>${esc(payrollMonthLabel(item.month))}</strong>${item.reversed ? ' <span class="badge">reversed</span>' : ''}</td>
         <td>${esc(dateLabel(item.date))}</td>
         <td class="num">${item.employees}</td>
         <td class="num">${money(item.gross)}</td>
@@ -315,6 +315,9 @@ export function payrollScreen() {
         <td>${item.voucherId ? `<button class="link-button" type="button" data-action="open-voucher" data-id="${esc(item.voucherId)}">Journal ${item.voucherNo}</button>` : '<span class="muted small">no voucher</span>'}</td>
         <td class="row-actions">
           <button class="btn small ghost" type="button" data-action="open-payroll-run" data-id="${esc(item.id)}">Payslips</button>
+          ${item.reversed
+            ? ''
+            : `<button class="btn small ghost" type="button" data-action="reverse-payroll-run" data-id="${esc(item.id)}">Reverse</button>`}
           <button class="btn small danger" type="button" data-action="delete-payroll-run" data-id="${esc(item.id)}">Delete</button>
         </td>
       </tr>`,
@@ -544,6 +547,9 @@ export function payrollRunScreen() {
       <button class="btn" type="button" data-screen="payroll">Back to payroll</button>
       ${voucher ? `<button class="btn ghost" type="button" data-action="open-voucher" data-id="${esc(voucher.id)}">Open journal ${voucher.no}</button>` : ''}
       <button class="btn ghost" type="button" data-action="download-payroll-bank" data-id="${esc(run.id)}">Bank transfer CSV</button>
+      ${run.reversedAt
+        ? '<span class="badge">Reversed</span>'
+        : `<button class="btn ghost" type="button" data-action="reverse-payroll-run" data-id="${esc(run.id)}">Reverse run</button>`}
       <button class="btn danger" type="button" data-action="delete-payroll-run" data-id="${esc(run.id)}">Delete this run</button>
     </div>
     ${bank.missing.length

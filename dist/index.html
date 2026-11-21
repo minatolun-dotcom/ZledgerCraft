@@ -5195,6 +5195,33 @@ function payrollBankTransferRows(company, runId) {
   return { ok: true, run, rows, missing };
 }
 
+function reversePayrollRun(company, runId, input = {}) {
+  const run = (company.payroll?.runs ?? []).find((entry) => entry.id === runId);
+  if (!run) return { ok: false, error: 'Payroll run not found.' };
+  if (run.reversedAt) return { ok: false, error: 'This payroll run is already reversed.' };
+  const voucher = (company.vouchers ?? []).find((entry) => entry.id === run.voucherId);
+  if (!voucher) return { ok: false, error: 'The payroll journal no longer exists.' };
+  const date = String(input.date ?? run.date);
+  if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid reversal date.' };
+  const lines = (voucher.lines ?? []).map((line) => ({
+    ledgerId: line.ledgerId,
+    side: line.side === 'Dr' ? 'Cr' : 'Dr',
+    amount: line.amount,
+  }));
+  const posted = addVoucher(company, {
+    type: 'Journal',
+    date,
+    narration: `Reversal of payroll for ${run.month}`,
+    lines,
+  });
+  if (!posted.ok) return posted;
+  run.reversedAt = new Date().toISOString();
+  run.reversalVoucherId = posted.voucher.id;
+  run.reversalDate = date;
+  posted.voucher.payrollReversalRunId = run.id;
+  return { ok: true, run, voucher: posted.voucher };
+}
+
 function deletePayrollRun(company, runId) {
   const run = (company.payroll?.runs ?? []).find((entry) => entry.id === runId);
   if (!run) return { ok: false, error: 'Payroll run not found.' };
@@ -5204,6 +5231,15 @@ function deletePayrollRun(company, runId) {
       return { ok: false, error: 'The payroll voucher cannot be deleted. Check whether its financial year is closed.' };
     }
     company.vouchers = company.vouchers.filter((entry) => entry.payrollRunId !== runId && entry.id !== run.voucherId);
+  }
+  if (run.reversalVoucherId) {
+    const reversal = (company.vouchers ?? []).find((entry) => entry.id === run.reversalVoucherId);
+    if (reversal && !deleteVoucher(company, reversal.id)) {
+      return { ok: false, error: 'The payroll reversal voucher cannot be deleted.' };
+    }
+    company.vouchers = company.vouchers.filter(
+      (entry) => entry.id !== run.reversalVoucherId && entry.payrollReversalRunId !== runId,
+    );
   }
   company.vouchers = (company.vouchers ?? []).filter((entry) => entry.payrollRunId !== runId);
   company.payroll.runs = company.payroll.runs.filter((entry) => entry.id !== runId);
@@ -13503,6 +13539,7 @@ function payrollSummary(company, { from, to } = {}) {
   const rows = [];
 
   for (const run of runs) {
+    if (run.reversedAt) continue;
     for (const row of run.rows) {
       rows.push({
         runId: run.id,
@@ -13581,6 +13618,9 @@ function payrollSummary(company, { from, to } = {}) {
         net: run.totals.net,
         voucherId: run.voucherId ?? '',
         voucherNo: voucher?.no ?? '',
+        reversed: Boolean(run.reversedAt),
+        reversedAt: run.reversedAt ?? '',
+        reversalVoucherId: run.reversalVoucherId ?? '',
       };
     }),
     payHeads: [...headMap.values()].sort(
@@ -22051,8 +22091,8 @@ function payrollScreen() {
 
   const runRows = report.runs
     .map(
-      (item) => `<tr>
-        <td><strong>${esc(payrollMonthLabel(item.month))}</strong></td>
+      (item) => `<tr class="${item.reversed ? 'muted' : ''}">
+        <td><strong>${esc(payrollMonthLabel(item.month))}</strong>${item.reversed ? ' <span class="badge">reversed</span>' : ''}</td>
         <td>${esc(dateLabel(item.date))}</td>
         <td class="num">${item.employees}</td>
         <td class="num">${money(item.gross)}</td>
@@ -22061,6 +22101,9 @@ function payrollScreen() {
         <td>${item.voucherId ? `<button class="link-button" type="button" data-action="open-voucher" data-id="${esc(item.voucherId)}">Journal ${item.voucherNo}</button>` : '<span class="muted small">no voucher</span>'}</td>
         <td class="row-actions">
           <button class="btn small ghost" type="button" data-action="open-payroll-run" data-id="${esc(item.id)}">Payslips</button>
+          ${item.reversed
+            ? ''
+            : `<button class="btn small ghost" type="button" data-action="reverse-payroll-run" data-id="${esc(item.id)}">Reverse</button>`}
           <button class="btn small danger" type="button" data-action="delete-payroll-run" data-id="${esc(item.id)}">Delete</button>
         </td>
       </tr>`,
@@ -22290,6 +22333,9 @@ function payrollRunScreen() {
       <button class="btn" type="button" data-screen="payroll">Back to payroll</button>
       ${voucher ? `<button class="btn ghost" type="button" data-action="open-voucher" data-id="${esc(voucher.id)}">Open journal ${voucher.no}</button>` : ''}
       <button class="btn ghost" type="button" data-action="download-payroll-bank" data-id="${esc(run.id)}">Bank transfer CSV</button>
+      ${run.reversedAt
+        ? '<span class="badge">Reversed</span>'
+        : `<button class="btn ghost" type="button" data-action="reverse-payroll-run" data-id="${esc(run.id)}">Reverse run</button>`}
       <button class="btn danger" type="button" data-action="delete-payroll-run" data-id="${esc(run.id)}">Delete this run</button>
     </div>
     ${bank.missing.length
@@ -27258,6 +27304,31 @@ async function handleClick(event) {
           : `Bank transfer file for ${result.run.month} exported.`,
         result.missing.length ? 'warn' : 'ok',
       );
+      break;
+    }
+    case 'reverse-payroll-run': {
+      if (!can('voucher.delete')) {
+        requirePermission('voucher.delete');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      if (!window.confirm('Reverse this payroll run and post the opposite journal?')) break;
+      const result = reversePayrollRun(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'payroll.run.reverse',
+          `Reversed payroll for ${result.run.month} with journal ${result.voucher.no}.`,
+          active,
+          result.run.month,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok ? `Payroll for ${result.run.month} reversed.` : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
       break;
     }
     case 'delete-payroll-run': {

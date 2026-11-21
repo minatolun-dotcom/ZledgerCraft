@@ -414,7 +414,9 @@ disabled.
 - Run payroll for a month: the run debits each earning ledger, credits each
   deduction ledger, credits Salary Payable with net pay and posts one Journal
   voucher. One run is allowed per month and the run stores the amounts and
-  voucher lines as a snapshot.
+  voucher lines as a snapshot. A run can be reversed: the app posts the opposite
+  Journal, marks the run as reversed and excludes it from payroll summaries.
+  Deleting the run removes the original and reversal journals.
 - A bank-transfer CSV for a payroll run with net pay and employee bank details,
   flagged when an employee is missing an account or IFSC. It is a working file,
   not a bank-validated payment instruction.

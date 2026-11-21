@@ -18,6 +18,7 @@ import {
   payrollBankTransferRows,
   payrollLedgers,
   payrollStatutoryRows,
+  reversePayrollRun,
   runPayroll,
   savePayrollSettings,
   updateEmployee,
@@ -561,4 +562,31 @@ test('backup validation rejects a payroll run with inconsistent totals', () => {
   const restored = importState(exportState(state));
   assert.equal(restored.ok, false);
   assert.match(restored.error, /inconsistent totals/);
+});
+
+test('payroll reversal posts an opposite journal and excludes the run from summaries', () => {
+  const { company } = fixture();
+  employee(company, 'Reversal Employee', { 'Basic Salary': 10000 });
+  const run = runPayroll(company, { month: '2026-04' });
+  assert.equal(run.ok, true, run.error);
+  const original = company.vouchers.find((voucher) => voucher.id === run.run.voucherId);
+  const reversed = reversePayrollRun(company, run.run.id);
+  assert.equal(reversed.ok, true, reversed.error);
+  assert.ok(run.run.reversedAt);
+  assert.equal(run.run.reversalVoucherId, reversed.voucher.id);
+  assert.equal(reversed.voucher.lines.length, original.lines.length);
+  for (const line of original.lines) {
+    const opposite = reversed.voucher.lines.find(
+      (entry) => entry.ledgerId === line.ledgerId && entry.amount === line.amount,
+    );
+    assert.ok(opposite);
+    assert.notEqual(opposite.side, line.side);
+  }
+  const summary = payrollSummary(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(summary.totals.gross, 0);
+  assert.equal(summary.rows.length, 0);
+  assert.equal(summary.runs[0].reversed, true);
+  assert.equal(reversePayrollRun(company, run.run.id).ok, false);
+  assert.equal(deletePayrollRun(company, run.run.id).ok, true);
+  assert.equal(company.vouchers.some((voucher) => voucher.id === reversed.voucher.id), false);
 });

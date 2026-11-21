@@ -73,6 +73,7 @@ import {
   deleteGroup,
   deletePayHead,
   deletePayrollRun,
+  reversePayrollRun,
   deleteTaxChallan,
   deleteLedger,
   deleteLeaveRecord,
@@ -4603,6 +4604,31 @@ async function handleClick(event) {
           : `Bank transfer file for ${result.run.month} exported.`,
         result.missing.length ? 'warn' : 'ok',
       );
+      break;
+    }
+    case 'reverse-payroll-run': {
+      if (!can('voucher.delete')) {
+        requirePermission('voucher.delete');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      if (!window.confirm('Reverse this payroll run and post the opposite journal?')) break;
+      const result = reversePayrollRun(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'payroll.run.reverse',
+          `Reversed payroll for ${result.run.month} with journal ${result.voucher.no}.`,
+          active,
+          result.run.month,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok ? `Payroll for ${result.run.month} reversed.` : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
       break;
     }
     case 'delete-payroll-run': {

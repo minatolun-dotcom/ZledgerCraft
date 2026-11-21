@@ -3410,6 +3410,7 @@ export function payrollSummary(company, { from, to } = {}) {
   const rows = [];
 
   for (const run of runs) {
+    if (run.reversedAt) continue;
     for (const row of run.rows) {
       rows.push({
         runId: run.id,
@@ -3488,6 +3489,9 @@ export function payrollSummary(company, { from, to } = {}) {
         net: run.totals.net,
         voucherId: run.voucherId ?? '',
         voucherNo: voucher?.no ?? '',
+        reversed: Boolean(run.reversedAt),
+        reversedAt: run.reversedAt ?? '',
+        reversalVoucherId: run.reversalVoucherId ?? '',
       };
     }),
     payHeads: [...headMap.values()].sort(

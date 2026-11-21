@@ -344,6 +344,14 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-21 — Phase 55: payroll reversal
+
+- A payroll run can be reversed with an opposite Journal, a reversal date and a
+  link to the original run. A second reversal is refused, payroll summaries
+  exclude reversed runs, and deleting the run removes both journals.
+- Verification: payroll reversal test, full suite 342 tests (341 pass, 1 skipped),
+  1,227.3 kB build.
+
 ### 2026-11-21 — Phase 54: architectural backlog pass
 
 - BOMs now explode nested sub-assemblies into raw components, merge repeated

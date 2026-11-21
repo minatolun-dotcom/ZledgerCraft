@@ -1684,3 +1684,37 @@ test('BOMs and production survive backup validation and protect their links', ()
   assert.equal(brokenResult.ok, false);
   assert.match(brokenResult.error, /does not match its BOM/);
 });
+
+test('alternate units convert line quantities to base stock and preserve amount', () => {
+  const { company, unit, group, cash, purchases } = inventoryFixture();
+  const box = addUnit(company, { name: 'Box', symbol: 'Box' }).unit;
+  assert.ok(box);
+  const item = addStockItem(company, {
+    name: 'Bulk Shirt',
+    stockGroupId: group.id,
+    unitId: unit.id,
+    altUnitId: box.id,
+    altUnitFactor: 12,
+    openingQty: 0,
+    openingRate: 0,
+  }).item;
+  assert.equal(item.altUnitFactor, 12);
+  const created = addVoucher(company, {
+    type: 'Purchase',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: purchases.id, side: 'Dr', amount: 240 },
+      { ledgerId: cash.id, side: 'Cr', amount: 240 },
+    ],
+    items: [{ stockItemId: item.id, qty: 2, unitId: box.id, rate: 120 }],
+  });
+  assert.equal(created.ok, true, created.error);
+  assert.equal(created.voucher.items[0].qty, 24);
+  assert.equal(created.voucher.items[0].amount, 240);
+  assert.equal(created.voucher.items[0].enteredQty, 2);
+  assert.equal(created.voucher.items[0].unitId, box.id);
+  assert.equal(stockOnHand(company, item.id, '2026-04-10'), 24);
+  const row = stockSummary(company).rows.find((entry) => entry.itemId === item.id);
+  assert.equal(row.closingQty, 24);
+  assert.equal(row.closingValue, 240);
+});

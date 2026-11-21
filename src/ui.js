@@ -1630,6 +1630,7 @@ export function captureDraft() {
       batchNo: row.querySelector('input.batch')?.value ?? '',
       expiryDate: row.querySelector('input.expiry')?.value ?? '',
       qty: row.querySelector('input.qty').value,
+      unitId: row.querySelector('select.item-unit')?.value ?? '',
       rate: row.querySelector('input.rate').value,
     }));
   }
@@ -1657,6 +1658,7 @@ export function readVoucherForm() {
           batchNo: row.querySelector('input.batch')?.value ?? '',
           expiryDate: row.querySelector('input.expiry')?.value ?? '',
           qty: row.querySelector('input.qty').value,
+          unitId: row.querySelector('select.item-unit')?.value ?? '',
           rate: row.querySelector('input.rate').value,
         }))
       : [],
@@ -1683,6 +1685,7 @@ export function godownSelectOptions(active, selectedId) {
 }
 
 export function itemLineAmount(line) {
+  if (line.amount !== undefined) return round2(parseAmount(line.amount) ?? 0);
   const qty = parseQty(line.qty) ?? 0;
   const rate = parseAmount(line.rate) ?? 0;
   return round2(qty * rate);
@@ -2864,6 +2867,8 @@ export async function handleSubmit(event) {
       name: data.get('name'),
       stockGroupId: data.get('stockGroupId'),
       unitId: data.get('unitId'),
+      altUnitId: data.get('altUnitId') || '',
+      altUnitFactor: data.get('altUnitFactor') || '',
       openingQty: data.get('openingQty') || 0,
       openingRate: data.get('openingRate') || 0,
       hsn: data.get('hsn') || '',
@@ -6172,7 +6177,7 @@ async function handleClick(event) {
     case 'add-item': {
       captureDraft();
       draft.items = draft.items ?? [];
-      draft.items.push({ stockItemId: '', qty: '', rate: '' });
+      draft.items.push({ stockItemId: '', qty: '', unitId: '', rate: '' });
       render();
       const selects = document.querySelectorAll('#stock-items select.item');
       selects[selects.length - 1]?.focus();
@@ -6810,6 +6815,15 @@ export function handleChange(event) {
   if (target.matches('#stock-items select.item')) {
     const row = target.closest('tr.item-line');
     const item = (company()?.stockItems ?? []).find((entry) => entry.id === target.value);
+    const unitSelect = row?.querySelector('select.item-unit');
+    if (unitSelect && item) {
+      const unitMap = new Map((company()?.units ?? []).map((unit) => [unit.id, unit]));
+      unitSelect.innerHTML = `<option value="${esc(item.unitId)}">${esc(unitMap.get(item.unitId)?.symbol ?? 'base')}</option>${
+        item.altUnitId
+          ? `<option value="${esc(item.altUnitId)}">${esc(unitMap.get(item.altUnitId)?.symbol ?? 'alt')}</option>`
+          : ''
+      }`;
+    }
     const batch = row?.querySelector('input.batch');
     const expiry = row?.querySelector('input.expiry');
     if (batch) {

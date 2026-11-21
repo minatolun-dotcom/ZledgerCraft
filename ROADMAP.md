@@ -344,6 +344,16 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-21 — Phase 56: alternate units
+
+- Stock items can carry one alternate unit and a six-decimal conversion factor.
+- Voucher item lines select the base or alternate unit; quantities convert to
+  base stock while entered quantity/rate are retained.
+- Line amounts are stored exactly and stock valuation uses them, avoiding
+  conversion rounding drift.
+- Verification: alternate-unit purchase conversion, base stock quantity and
+  value; full suite 343 tests (342 pass, 1 skipped); 1,233.2 kB build.
+
 ### 2026-11-21 — Phase 55: payroll reversal
 
 - A payroll run can be reversed with an opposite Journal, a reversal date and a

@@ -429,11 +429,14 @@ disabled.
 **Inventory**
 - Units of measure, stock groups, stock items (opening quantity, rate, optional
   HSN/SAC code and reorder level), a primary godown and additional godowns.
-  Opening stock is held in the primary godown.
+  An item can have one alternate unit and a conversion factor; opening stock is
+  held in the primary godown.
 - Optional item lines on Sales, Purchase, Credit Note and Debit Note vouchers,
-  each with a godown and, for batch-tracked items, a batch number and expiry
-  date. Quantities use up to three decimal places and the item total must equal
-  the voucher amount (or the GST taxable value when tax applies).
+  each with a godown, a base or alternate unit and, for batch-tracked items, a
+  batch number and expiry date. Quantities use up to three decimal places and
+  the item total must equal the voucher amount (or the GST taxable value when
+  tax applies). Entered alternate quantities and rates are kept for display;
+  stock and valuation use converted base quantities and the exact line amount.
 - Sales and debit notes cannot take more stock than is on hand in the selected
   godown and batch on the voucher date; returns, purchases, transfers and edits
   are checked the same way. Negative closing balances are flagged.

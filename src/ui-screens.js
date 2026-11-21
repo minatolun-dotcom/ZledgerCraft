@@ -1456,6 +1456,17 @@ export function voucherNewScreen() {
   const foreign = draft.currencyCode && draft.currencyCode !== 'INR';
   const inventoryType = INVENTORY_TYPES.includes(draft.type) && !foreign;
   const stockItems = active.stockItems ?? [];
+  const unitMap = new Map((active.units ?? []).map((unit) => [unit.id, unit]));
+  const itemUnitOptions = (item, selected) => {
+    const base = unitMap.get(item?.unitId);
+    const alt = item?.altUnitId ? unitMap.get(item.altUnitId) : null;
+    return [
+      `<option value="${esc(item?.unitId ?? '')}"${(!selected || selected === item?.unitId) ? ' selected' : ''}>${esc(base?.symbol ?? 'base')}</option>`,
+      ...(alt
+        ? [`<option value="${esc(alt.id)}"${selected === alt.id ? ' selected' : ''}>${esc(alt.symbol)}</option>`]
+        : []),
+    ].join('');
+  };
   const itemRows = (draft.items ?? [])
     .map(
       (line, index) => `
@@ -1466,8 +1477,8 @@ export function voucherNewScreen() {
           aria-label="Item ${index + 1} batch"${stockItems.find((item) => item.id === line.stockItemId)?.batchTracking ? '' : ' disabled'}>
           <input class="expiry" type="date" value="${esc(line.expiryDate ?? '')}"
             aria-label="Item ${index + 1} expiry"${stockItems.find((item) => item.id === line.stockItemId)?.batchTracking ? '' : ' disabled'}></td>
-        <td class="num" data-label="Quantity"><input class="qty" inputmode="decimal" placeholder="0" value="${esc(line.qty)}"
-          aria-label="Item ${index + 1} quantity"></td>
+        <td class="num" data-label="Quantity"><div class="inline-form"><input class="qty" inputmode="decimal" placeholder="0" value="${esc(line.qty)}"
+          aria-label="Item ${index + 1} quantity"><select class="item-unit" aria-label="Item ${index + 1} unit">${itemUnitOptions(stockItems.find((item) => item.id === line.stockItemId), line.unitId)}</select></div></td>
         <td class="num" data-label="Rate"><input class="rate" inputmode="decimal" placeholder="0.00" value="${esc(line.rate)}"
           aria-label="Item ${index + 1} rate"></td>
         <td class="num item-amount" data-label="Amount">${money(itemLineAmount(line))}</td>
@@ -1653,14 +1664,17 @@ export function voucherViewScreen() {
   const stockRows = (voucher.items ?? [])
     .map((line) => {
       const item = (active.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
-      const unit = (active.units ?? []).find((entry) => entry.id === item?.unitId)?.symbol ?? '';
+      const unit = (active.units ?? []).find(
+        (entry) => entry.id === (line.unitId || item?.unitId),
+      )?.symbol ?? '';
+      const displayQty = line.enteredQty ?? line.qty;
       const godown = (active.godowns ?? []).find((entry) => entry.id === (line.godownId || defaultGodownId(active)));
       const batch = line.batchNo ? ` · batch ${line.batchNo}` : '';
       const expiry = line.expiryDate ? ` · exp ${dateLabel(line.expiryDate)}` : '';
       return `<tr>
         <td>${esc(item?.name ?? 'Unknown item')}<div class="muted small">${esc(godown?.name ?? 'Main Location')}${esc(batch)}${esc(expiry)}</div></td>
-        <td class="num">${fmtQty(line.qty)}${unit ? ` ${esc(unit)}` : ''}</td>
-        <td class="num">${money(line.rate)}</td>
+        <td class="num">${fmtQty(displayQty)}${unit ? ` ${esc(unit)}` : ''}${line.enteredQty !== undefined ? `<div class="muted small">${fmtQty(line.qty)} base</div>` : ''}</td>
+        <td class="num">${money(line.enteredRate ?? line.rate)}</td>
         <td class="num">${money(line.amount ?? round2(line.qty * line.rate))}</td>
       </tr>`;
     })

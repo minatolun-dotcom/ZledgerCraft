@@ -2173,7 +2173,10 @@ function applyStockLine(state, voucher, itemId) {
     const qty = round3(line.qty);
     if (isIn) {
       // Purchases enter at their bill rate; a sales return re-enters at cost.
-      const rate = voucher.type === 'Purchase' ? round2(line.rate) : state.lastCost;
+      const rate =
+        voucher.type === 'Purchase'
+          ? round2(line.amount !== undefined ? line.amount / qty : line.rate)
+          : state.lastCost;
       state.qty = round3(state.qty + qty);
       state.value = round2(state.value + qty * rate);
       if (state.qty > 0) state.lastCost = round2(state.value / state.qty);
@@ -2606,8 +2609,9 @@ export function batchStockSummary(company, filters = {}) {
           const key = keyFor(line.batchNo);
           const qty = round3(line.qty);
           if (line.expiryDate) expiry.set(key, line.expiryDate);
-          const unitCost = direction > 0 && event.voucher.type === 'Purchase' && Number(line.rate) > 0
-            ? Number(line.rate)
+          const receivedCost = line.amount !== undefined ? line.amount / qty : Number(line.rate);
+          const unitCost = direction > 0 && event.voucher.type === 'Purchase' && receivedCost > 0
+            ? receivedCost
             : batchCost(key);
           moveBatch(key, direction * qty, unitCost);
           if (event.date < from) quantityMapAdd(opening, key, direction * qty);

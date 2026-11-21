@@ -159,6 +159,20 @@ export function round3(value) {
   return Math.round((Number(value) + Number.EPSILON) * 1000) / 1000;
 }
 
+export function round6(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 1000000) / 1000000;
+}
+
+export function parseRate(raw) {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? round6(raw) : null;
+  const cleaned = String(raw ?? '')
+    .replace(/[\s,]/g, '')
+    .trim();
+  if (cleaned === '' || !/^-?\d+(\.\d{1,6})?$/.test(cleaned)) return null;
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? round6(value) : null;
+}
+
 export function parseQty(raw) {
   if (typeof raw === 'number') return Number.isFinite(raw) ? round3(raw) : null;
   const cleaned = String(raw ?? '')
@@ -4018,14 +4032,25 @@ export function validateVoucherInput(company, type, input, options = {}) {
     for (const [index, line] of rawItems.entries()) {
       const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
       if (!item) return { ok: false, error: `Item line ${index + 1}: choose a stock item.` };
-      const qty = parseQty(line.qty);
-      if (qty === null || qty <= 0) {
+      const enteredQty = parseQty(line.qty);
+      if (enteredQty === null || enteredQty <= 0) {
         return { ok: false, error: `Item line ${index + 1}: enter a quantity greater than zero.` };
       }
-      const rate = parseAmount(line.rate);
-      if (rate === null || rate < 0) {
+      const enteredRate = parseAmount(line.rate);
+      if (enteredRate === null || enteredRate < 0) {
         return { ok: false, error: `Item line ${index + 1}: enter a rate of zero or more.` };
       }
+      const unitId = String(line.unitId ?? '').trim() || item.unitId;
+      let factor = 1;
+      if (unitId === item.altUnitId) factor = parseRate(item.altUnitFactor) ?? 0;
+      else if (unitId !== item.unitId) {
+        return { ok: false, error: `Item line ${index + 1}: choose the item's base or alternate unit.` };
+      }
+      const qty = round3(enteredQty * factor);
+      if (qty <= 0) return { ok: false, error: `Item line ${index + 1}: converted quantity rounds to zero.` };
+      const amount = round2(enteredQty * enteredRate);
+      const rate = factor === 1 ? enteredRate : round6(amount / qty);
+      if (amount <= 0) return { ok: false, error: `Item line ${index + 1}: amount must be greater than zero.` };
       const godownId = String(line.godownId ?? '').trim() || defaultGodownId(company);
       if (!(company.godowns ?? []).some((godown) => godown.id === godownId)) {
         return { ok: false, error: `Item line ${index + 1}: choose a godown.` };
@@ -4042,7 +4067,8 @@ export function validateVoucherInput(company, type, input, options = {}) {
         stockItemId: item.id,
         qty,
         rate,
-        amount: round2(qty * rate),
+        amount,
+        ...(factor !== 1 ? { unitId, enteredQty, enteredRate } : {}),
         godownId,
         ...(batchNo ? { batchNo } : {}),
         ...(expiryDate ? { expiryDate } : {}),
@@ -4841,6 +4867,19 @@ function validateStockItemInput(company, input, ignoreId) {
   if (!group) return { ok: false, error: 'Choose a stock group for the item.' };
   const unit = (company.units ?? []).find((item) => item.id === input.unitId);
   if (!unit) return { ok: false, error: 'Choose a unit for the item.' };
+  const altUnitId = String(input.altUnitId ?? '').trim();
+  let altUnit = null;
+  let altUnitFactor = 0;
+  if (altUnitId) {
+    altUnit = (company.units ?? []).find((item) => item.id === altUnitId);
+    if (!altUnit) return { ok: false, error: 'Choose a valid alternate unit.' };
+    if (altUnit.id === unit.id) return { ok: false, error: 'Alternate unit must differ from the base unit.' };
+    const factor = parseRate(input.altUnitFactor);
+    if (factor === null || factor <= 0) {
+      return { ok: false, error: 'Alternate-unit conversion must be greater than zero.' };
+    }
+    altUnitFactor = factor;
+  }
   const batches = normaliseOpeningBatches(input.openingBatches);
   if (!batches.ok) return batches;
   const batchTracking = Boolean(input.batchTracking) || batches.batches.length > 0;
@@ -4884,6 +4923,8 @@ function validateStockItemInput(company, input, ignoreId) {
     name,
     group,
     unit,
+    altUnit,
+    altUnitFactor,
     openingQty,
     openingRate,
     hsn,
@@ -4903,6 +4944,9 @@ export function addStockItem(company, input) {
     name: checked.name,
     stockGroupId: checked.group.id,
     unitId: checked.unit.id,
+    ...(checked.altUnit
+      ? { altUnitId: checked.altUnit.id, altUnitFactor: checked.altUnitFactor }
+      : {}),
     openingQty: checked.openingQty,
     openingRate: checked.openingRate,
     batchTracking: checked.batchTracking,
@@ -4932,6 +4976,8 @@ export function updateStockItem(company, itemId, input) {
     name: input.name ?? item.name,
     stockGroupId: input.stockGroupId ?? item.stockGroupId,
     unitId: input.unitId ?? item.unitId,
+    altUnitId: input.altUnitId !== undefined ? input.altUnitId : item.altUnitId,
+    altUnitFactor: input.altUnitFactor !== undefined ? input.altUnitFactor : item.altUnitFactor,
     openingQty: input.openingQty ?? item.openingQty,
     openingRate: input.openingRate ?? item.openingRate,
     hsn: input.hsn ?? item.hsn,
@@ -4945,6 +4991,13 @@ export function updateStockItem(company, itemId, input) {
   item.name = checked.name;
   item.stockGroupId = checked.group.id;
   item.unitId = checked.unit.id;
+  if (checked.altUnit) {
+    item.altUnitId = checked.altUnit.id;
+    item.altUnitFactor = checked.altUnitFactor;
+  } else {
+    delete item.altUnitId;
+    delete item.altUnitFactor;
+  }
   item.openingQty = checked.openingQty;
   item.openingRate = checked.openingRate;
   item.batchTracking = checked.batchTracking;
@@ -6885,6 +6938,15 @@ function validateImportedCompany(company) {
     if (!unitIds.has(item.unitId)) {
       return `Company "${name}": stock item "${item.name}" points at a missing unit.`;
     }
+    if (item.altUnitId !== undefined) {
+      if (!unitIds.has(item.altUnitId) || item.altUnitId === item.unitId) {
+        return `Company "${name}": stock item "${item.name}" has an invalid alternate unit.`;
+      }
+      const factor = parseRate(item.altUnitFactor);
+      if (factor === null || factor <= 0) {
+        return `Company "${name}": stock item "${item.name}" has an invalid alternate-unit factor.`;
+      }
+    }
     if (!stockGroupIds.has(item.stockGroupId)) {
       return `Company "${name}": stock item "${item.name}" points at a missing stock group.`;
     }
@@ -7172,11 +7234,21 @@ function validateImportedCompany(company) {
           return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid batch expiry date.`;
         }
         const qty = parseQty(line.qty);
-        const rate = parseAmount(line.rate);
+        const rate = parseRate(line.rate);
+        const amount = line.amount === undefined ? null : parseAmount(line.amount);
         if (qty === null || qty <= 0 || rate === null || rate < 0) {
           return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid stock quantity or rate.`;
         }
-        itemTotal = round2(itemTotal + qty * rate);
+        if (amount === null && line.amount !== undefined) {
+          return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid stock amount.`;
+        }
+        if (amount !== null && Math.abs(round2(qty * rate) - amount) >= 0.01) {
+          return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} does not reconcile its stock amount with its quantity and rate.`;
+        }
+        if (line.unitId && !unitIds.has(line.unitId)) {
+          return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} uses a missing stock unit.`;
+        }
+        itemTotal = round2(itemTotal + (amount ?? round2(qty * rate)));
       }
       const taxableBase = voucher.gst
         ? parseAmount(voucher.gst.taxable) ?? debit

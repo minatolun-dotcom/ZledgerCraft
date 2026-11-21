@@ -911,6 +911,17 @@ export function inventoryScreen() {
           </select>
         </label>
         <label class="field">
+          <span>Alternate unit</span>
+          <select name="altUnitId">
+            <option value="">None</option>
+            ${units.map((unit) => `<option value="${esc(unit.id)}"${editing?.altUnitId === unit.id ? ' selected' : ''}>${esc(unit.name)} (${esc(unit.symbol)})</option>`).join('')}
+          </select>
+        </label>
+        <label class="field">
+          <span>Base units per alternate</span>
+          <input name="altUnitFactor" inputmode="decimal" placeholder="e.g. 12" value="${esc(editing?.altUnitFactor ?? '')}">
+        </label>
+        <label class="field">
           <span>Opening quantity</span>
           <input name="openingQty" inputmode="decimal" placeholder="0" value="${esc(editing ? fmtQty(editing.openingQty) : '')}">
         </label>

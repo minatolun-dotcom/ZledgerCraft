@@ -17,7 +17,7 @@ SQLite/Postgres workspace mirror and node:test regression suites.
 
 | # | Project | Status | Implemented | Remaining |
 | --- | --- | --- | --- | --- |
-| 1 | Alternate units | Open | Nothing beyond base units. | Conversion master, line unit selection, fractional precision, stock/valuation/report integration. |
+| 1 | Alternate units | Complete | One alternate unit per stock item with a six-decimal factor; voucher lines select base/alternate unit; quantities convert to base, entered values are retained and exact line amounts drive valuation. | Compound/multiple alternate units and unit-specific pricing remain out of scope. |
 | 2 | Per-line GST/TDS | Open | Voucher-level GST and TDS/TCS only. | Line-level bases/rates, exemptions, CGST/SGST/IGST aggregation, per-line returns. |
 | 3 | Multiple instruments per voucher | Open | One cheque/DD plus cheque-book ranges. | Instrument arrays, amount allocation, multiple status histories, register flattening. |
 | 4 | Stock/WIP posting | Open | Operational stock valuation and production cost only. | WIP/stock ledgers, production journals, reversals, stock-to-ledger reconciliation. |
@@ -33,6 +33,7 @@ SQLite/Postgres workspace mirror and node:test regression suites.
   recorded-instrument deletion protection.
 - Single-company restore while preserving the rest of the workspace.
 - Optional quarterly budget phasing with elapsed-quarter budget-to-date.
+- Alternate-unit master, line conversion and amount-preserving valuation.
 - Full test suite and release verification recorded below.
 
 ## Database migrations
@@ -43,13 +44,13 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 ## Verification
 
-- Full suite: 342 tests (341 pass, 1 skipped), 0 failures.
-- Build: 1,227.3 kB.
+- Full suite: 343 tests (342 pass, 1 skipped), 0 failures.
+- Build: 1,233.2 kB.
 - Targeted suites: inventory, bank, budgets, payroll.
 
 ## Exact next action
 
-Implement alternate units first, then per-line GST/TDS, because both are
-prerequisites for correct stock/WIP and statutory aggregation. Statutory filing
+Implement per-line GST/TDS next, because it is the prerequisite for correct
+stock/WIP and statutory aggregation. Statutory filing
 cannot be completed without GSTN/IRP/TRACES credentials and authorization; do not
 simulate submission.

@@ -22,6 +22,7 @@ import {
 import {
   eInvoiceRegister,
   ewayBillRegister,
+  ewayConsolidatedDraft,
   gstAnnualSummary,
   gstReturns,
   taxAuditSummary,
@@ -343,6 +344,19 @@ test('e-way bill register uses the 50,000 threshold and saves Part B details', (
   assert.equal(fullPayload.transporterId, '27AABCF1234F1Z9');
   assert.equal(fullPayload.vehicleNo, 'MH12AB1234');
   assert.equal(fullPayload.transDistance, '42');
+
+  const single = ewayConsolidatedDraft(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(single.ok, true, single.error);
+  assert.equal(single.count, 1);
+  assert.equal(single.payload.BillLists.length, 1);
+
+  const second = sale(company, { customer, item, qty: 600, rate: 100, date: '2026-04-10' });
+  const consolidated = ewayConsolidatedDraft(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(consolidated.ok, true, consolidated.error);
+  assert.equal(consolidated.count, 2);
+  assert.equal(consolidated.payload.BillLists.length, 2);
+  assert.equal(consolidated.payload.BillLists[1].docNo, `Sales ${second.no}`);
+  assert.match(consolidated.note, /Nothing is submitted/);
 
   const state = emptyState();
   state.companies = [company];

@@ -16644,6 +16644,31 @@ function ewayBillRegister(company, filters = {}) {
   };
 }
 
+/** Consolidated e-way draft for the selected period, optionally limited to invoice ids. */
+function ewayConsolidatedDraft(company, filters = {}) {
+  const report = ewayBillRegister(company, filters);
+  const ids = Array.isArray(filters.ids) && filters.ids.length ? new Set(filters.ids) : null;
+  const rows = report.rows.filter(
+    (row) => row.payload && (!ids || ids.has(row.id)),
+  );
+  if (!rows.length) {
+    return { ok: false, error: 'No e-way bill drafts match that period and threshold.' };
+  }
+  return {
+    ok: true,
+    from: report.from,
+    to: report.to,
+    threshold: report.threshold,
+    count: rows.length,
+    value: round2(rows.reduce((sum, row) => sum + row.total, 0)),
+    payload: {
+      Version: '1.0.0620',
+      BillLists: rows.flatMap((row) => row.payload.BillLists),
+    },
+    note: 'Consolidated e-way bill working draft. Nothing is submitted, signed or acknowledged by the portal.',
+  };
+}
+
 const TAX_AUDIT_CLAUSES = [
   ['9', 'Nature of business', 'Describe the business and principal products or services.'],
   ['11', 'Books of account', 'Presumptive taxation, books maintained and audit trail.'],
@@ -24114,6 +24139,7 @@ function ewayBillScreen() {
       <label class="field inline-field"><span>To</span><input name="to" type="date" value="${esc(to)}" data-period></label>
       <label class="field inline-field"><span>Minimum invoice value</span><input name="threshold" inputmode="decimal" value="${esc(threshold)}"></label>
       <button class="btn small" type="submit">Apply</button>
+      <button class="btn small ghost" type="button" data-action="download-eway-consolidated">Consolidated JSON</button>
     </form>
     <div class="ratio-grid">
       <div class="ratio-card"><span class="ratio-label">Consignments</span><strong>${report.count}</strong><span class="muted small">At or above ${money(report.threshold)}</span></div>
@@ -32070,6 +32096,24 @@ async function handleClick(event) {
         row.partBReady
           ? `Downloaded e-way bill draft for ${row.ref} with saved Part B details. Submit it in the portal.`
           : `Downloaded e-way bill Part A draft for ${row.ref}. Add Part B before portal submission.`,
+      );
+      break;
+    }
+    case 'download-eway-consolidated': {
+      const active = company();
+      if (!active) break;
+      const result = ewayConsolidatedDraft(active, {
+        from: filters.ewaybill.from || active.fyStart,
+        to: filters.ewaybill.to || active.fyEnd,
+        threshold: Number(filters.ewaybill.threshold) || 50000,
+      });
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      downloadJsonFile('e-way-bill-consolidated.json', result.payload);
+      setFlash(
+        `Downloaded a consolidated e-way draft for ${result.count} invoice${result.count === 1 ? '' : 's'}. Nothing was submitted.`,
       );
       break;
     }

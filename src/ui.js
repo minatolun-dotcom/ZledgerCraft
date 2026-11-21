@@ -182,6 +182,7 @@ import {
   epfEcr,
   esiReturn,
   ewayBillRegister,
+  ewayConsolidatedDraft,
   forexRevaluation,
   forexSettlementMatching,
   godownStockSummary,
@@ -6483,6 +6484,24 @@ async function handleClick(event) {
         row.partBReady
           ? `Downloaded e-way bill draft for ${row.ref} with saved Part B details. Submit it in the portal.`
           : `Downloaded e-way bill Part A draft for ${row.ref}. Add Part B before portal submission.`,
+      );
+      break;
+    }
+    case 'download-eway-consolidated': {
+      const active = company();
+      if (!active) break;
+      const result = ewayConsolidatedDraft(active, {
+        from: filters.ewaybill.from || active.fyStart,
+        to: filters.ewaybill.to || active.fyEnd,
+        threshold: Number(filters.ewaybill.threshold) || 50000,
+      });
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      downloadJsonFile('e-way-bill-consolidated.json', result.payload);
+      setFlash(
+        `Downloaded a consolidated e-way draft for ${result.count} invoice${result.count === 1 ? '' : 's'}. Nothing was submitted.`,
       );
       break;
     }

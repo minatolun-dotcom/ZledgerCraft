@@ -672,6 +672,7 @@ export function ewayBillScreen() {
       <label class="field inline-field"><span>To</span><input name="to" type="date" value="${esc(to)}" data-period></label>
       <label class="field inline-field"><span>Minimum invoice value</span><input name="threshold" inputmode="decimal" value="${esc(threshold)}"></label>
       <button class="btn small" type="submit">Apply</button>
+      <button class="btn small ghost" type="button" data-action="download-eway-consolidated">Consolidated JSON</button>
     </form>
     <div class="ratio-grid">
       <div class="ratio-card"><span class="ratio-label">Consignments</span><strong>${report.count}</strong><span class="muted small">At or above ${money(report.threshold)}</span></div>

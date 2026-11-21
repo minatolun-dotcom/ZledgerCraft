@@ -5456,6 +5456,31 @@ export function ewayBillRegister(company, filters = {}) {
   };
 }
 
+/** Consolidated e-way draft for the selected period, optionally limited to invoice ids. */
+export function ewayConsolidatedDraft(company, filters = {}) {
+  const report = ewayBillRegister(company, filters);
+  const ids = Array.isArray(filters.ids) && filters.ids.length ? new Set(filters.ids) : null;
+  const rows = report.rows.filter(
+    (row) => row.payload && (!ids || ids.has(row.id)),
+  );
+  if (!rows.length) {
+    return { ok: false, error: 'No e-way bill drafts match that period and threshold.' };
+  }
+  return {
+    ok: true,
+    from: report.from,
+    to: report.to,
+    threshold: report.threshold,
+    count: rows.length,
+    value: round2(rows.reduce((sum, row) => sum + row.total, 0)),
+    payload: {
+      Version: '1.0.0620',
+      BillLists: rows.flatMap((row) => row.payload.BillLists),
+    },
+    note: 'Consolidated e-way bill working draft. Nothing is submitted, signed or acknowledged by the portal.',
+  };
+}
+
 const TAX_AUDIT_CLAUSES = [
   ['9', 'Nature of business', 'Describe the business and principal products or services.'],
   ['11', 'Books of account', 'Presumptive taxation, books maintained and audit trail.'],

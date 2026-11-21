@@ -23,7 +23,7 @@ import {
   savePayrollSettings,
   updateEmployee,
 } from '../src/store.js';
-import { payrollSummary, trialBalance } from '../src/accounting.js';
+import { epfEcr, esiReturn, payrollForm16, payrollSummary, payrollTdsReturn, trialBalance } from '../src/accounting.js';
 import { parseAttendanceCsv } from '../src/ui-payroll.js';
 
 function fixture() {
@@ -702,4 +702,123 @@ test('a negative adjustment reverses pay and remains valid in backups', () => {
   const restored = importState(exportState(state));
   assert.equal(restored.ok, true, restored.error);
   assert.equal(restored.state.companies[0].payroll.runs.some((run) => run.kind === 'Adjustment'), true);
+});
+
+test('employee UAN and ESIC numbers validate, update and survive backup validation', () => {
+  const { company } = fixture();
+  const basic = [{ payHeadId: head(company, 'Basic Salary').id, amount: 10000 }];
+  assert.equal(addEmployee(company, { name: 'Bad UAN', uan: '12345', pay: basic }).ok, false);
+  assert.equal(addEmployee(company, { name: 'Bad ESIC', esic: 'ABC123', pay: basic }).ok, false);
+  assert.match(
+    addEmployee(company, { name: 'Bad UAN', uan: '12345', pay: basic }).error,
+    /UAN must be 12 digits/,
+  );
+
+  const asha = standardEmployee(company, 'Asha Menon', {
+    uan: '100200300400',
+    esic: '3100123456',
+    pan: 'ABCDE1234F',
+  });
+  assert.equal(asha.uan, '100200300400');
+  assert.equal(asha.esic, '3100123456');
+
+  const pay = asha.pay.map(({ payHeadId, amount }) => ({ payHeadId, amount }));
+  const updated = updateEmployee(company, asha.id, {
+    name: asha.name,
+    pay,
+    uan: '100200300401',
+    esic: '',
+  });
+  assert.equal(updated.ok, true, updated.error);
+  assert.equal(updated.employee.uan, '100200300401');
+  assert.equal(updated.employee.esic, undefined);
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  assert.equal(importState(exportState(state)).ok, true);
+  company.payroll.employees[0].uan = '123';
+  const rejected = importState(exportState(state));
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /invalid UAN/);
+});
+
+test('EPF ECR and ESI working papers use stored payroll snapshots and statutory identifiers', () => {
+  const { company } = fixture();
+  standardEmployee(company, 'Asha Menon', {
+    uan: '100200300400',
+    esic: '3100123456',
+    pan: 'ABCDE1234F',
+  });
+  employee(
+    company,
+    'Ravi Kumar',
+    { 'Basic Salary': 10000, 'House Rent Allowance': 5000, 'ESI (Employee)': 150 },
+    { uan: '100200300401', esic: '3100123457' },
+  );
+  const run = runPayroll(company, { month: '2026-04' });
+  assert.equal(run.ok, true, run.error);
+
+  const ecr = epfEcr(company, { month: '2026-04' });
+  assert.equal(ecr.ok, true, ecr.error);
+  assert.equal(ecr.rows.length, 2);
+  const asha = ecr.rows.find((row) => row.name === 'Asha Menon');
+  assert.equal(asha.uan, '100200300400');
+  assert.equal(asha.grossWages, 40000);
+  assert.equal(asha.pfWages, 15000);
+  assert.equal(asha.employeePf, 4200);
+  const ravi = ecr.rows.find((row) => row.name === 'Ravi Kumar');
+  assert.equal(ravi.pfWages, 10000);
+  assert.equal(ecr.totals.pfWages, 25000);
+  assert.deepEqual(ecr.warnings, []);
+  assert.match(ecr.note, /not an uploaded ECR/);
+
+  const esi = esiReturn(company, { month: '2026-04' });
+  assert.equal(esi.ok, true, esi.error);
+  assert.equal(esi.rows.length, 2);
+  const raviEsi = esi.rows.find((row) => row.name === 'Ravi Kumar');
+  assert.equal(raviEsi.esic, '3100123457');
+  assert.equal(raviEsi.grossWages, 15000);
+  assert.equal(raviEsi.employeeEsi, 150);
+  assert.equal(raviEsi.contributionPeriod, 'Apr–Sep');
+  assert.equal(esi.rows.find((row) => row.name === 'Asha Menon').grossWages, 0);
+  assert.equal(epfEcr(company, { month: 'April' }).ok, false);
+});
+
+test('Form 24Q and Form 16 working papers aggregate payroll gross and TDS', () => {
+  const { company } = fixture();
+  const asha = standardEmployee(company, 'Asha Menon', { pan: 'ABCDE1234F' });
+  const salaries = payrollLedgers(company).salaries;
+  const added = addPayHead(company, {
+    name: 'Income Tax',
+    kind: 'Deduction',
+    ledgerId: salaries.id,
+    statutory: 'TDS',
+  });
+  assert.equal(added.ok, true, added.error);
+  const pay = [...asha.pay, { payHeadId: added.payHead.id, amount: 5000 }];
+  assert.equal(updateEmployee(company, asha.id, { name: asha.name, pan: 'ABCDE1234F', pay }).ok, true);
+  assert.equal(runPayroll(company, { month: '2026-04' }).ok, true);
+
+  const quarterly = payrollTdsReturn(company, { quarter: 'Q1', to: '2026-04-30' });
+  assert.equal(quarterly.ok, true, quarterly.error);
+  assert.equal(quarterly.quarter, 'Q1');
+  assert.equal(quarterly.from, '2026-04-01');
+  assert.equal(quarterly.to, '2026-06-30');
+  assert.equal(quarterly.rows.length, 1);
+  assert.equal(quarterly.rows[0].pan, 'ABCDE1234F');
+  assert.equal(quarterly.rows[0].gross, 40000);
+  assert.equal(quarterly.rows[0].tds, 5000);
+  assert.equal(quarterly.totals.tds, 5000);
+  assert.match(quarterly.note, /not an uploaded return/);
+
+  const form16 = payrollForm16(company, { employeeId: asha.id, from: '2026-04-01', to: '2027-03-31' });
+  assert.equal(form16.ok, true, form16.error);
+  assert.equal(form16.employee.pan, 'ABCDE1234F');
+  assert.equal(form16.rows.length, 1);
+  assert.equal(form16.rows[0].month, '2026-04');
+  assert.equal(form16.totals.gross, 40000);
+  assert.equal(form16.totals.tds, 5000);
+  assert.match(form16.note, /not a signed certificate/);
+  assert.equal(payrollForm16(company, { employeeId: 'missing' }).ok, false);
 });

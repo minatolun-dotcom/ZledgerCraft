@@ -44,10 +44,10 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 ## Verification
 
-- Full suite: 378 tests (377 pass, 1 skipped), 0 failures.
-- Build: 1,361.4 kB.
+- Full suite: 381 tests (380 pass, 1 skipped), 0 failures.
+- Build: 1,378.8 kB.
 - Targeted suites: GST, GSTR-2B, GSTR-9, late fee, TDS returns, inventory, bank, budgets, currency, bulk vouchers, payroll.
-- Latest deployment: https://23b5bb90.zledgercraft.pages.dev (HTTP 200); custom domain https://zledgercraft.pages.dev/ also HTTP 200.
+- Latest deployment: https://a7cd2878.zledgercraft.pages.dev (HTTP 200); custom domain https://zledgercraft.pages.dev/ also HTTP 200.
 - Projects 1–7 are complete. Project 8’s local work is complete; its parked
   external dependencies are excluded from the active backlog.
 
@@ -55,6 +55,7 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 Project 8 remains parked at the external dependency boundary. The app keeps
 local returns, GSTR-2B reconciliation, GSTR-9 and GSTR-1 exports, the late-fee
-estimator, 26Q/27Q/27EQ working papers, e-invoice/e-way drafts, challans, the
-compliance calendar and the filing/ARN register. Remaining local statutory work
-is payroll ECR/ESI/24Q/16 and additional return formats.
+estimator, 26Q/27Q/27EQ working papers, payroll EPF ECR/ESI/24Q/16 working
+papers, e-invoice/e-way drafts, challans, the compliance calendar and the
+filing/ARN register. Additional local return formats remain tracked by lane in
+`KNOWN_LIMITS.md`.

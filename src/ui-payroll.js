@@ -15,8 +15,12 @@ import {
 } from './store.js';
 import {
   amountInWords,
+  epfEcr,
+  esiReturn,
   ledgerTotals,
+  payrollForm16,
   payrollSummary,
+  payrollTdsReturn,
 } from './accounting.js';
 import {
   view,
@@ -230,6 +234,8 @@ export function payrollScreen() {
         <label class="field"><span>Code</span><input name="code" maxlength="20" value="${esc(editing?.code ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Designation</span><input name="designation" maxlength="60" value="${esc(editing?.designation ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>PAN</span><input name="pan" maxlength="10" value="${esc(editing?.pan ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>UAN</span><input name="uan" maxlength="12" inputmode="numeric" value="${esc(editing?.uan ?? '')}" placeholder="12 digits"></label>
+        <label class="field"><span>ESIC number</span><input name="esic" maxlength="17" inputmode="numeric" value="${esc(editing?.esic ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Bank name</span><input name="bankName" maxlength="60" value="${esc(editing?.bankName ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Bank account</span><input name="bankAccount" maxlength="20" inputmode="numeric" value="${esc(editing?.bankAccount ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>IFSC</span><input name="ifsc" maxlength="11" value="${esc(editing?.ifsc ?? '')}" placeholder="Optional"></label>
@@ -262,7 +268,7 @@ export function payrollScreen() {
         <td><strong>${esc(employee.name)}</strong>${employee.active === false ? ' <span class="badge">inactive</span>' : ''}</td>
         <td class="muted small">${esc(employee.code || '—')}</td>
         <td class="muted small">${esc(employee.designation || '—')}</td>
-        <td class="muted small">${employee.pan ? esc(employee.pan) : '—'}</td>
+        <td class="muted small">${employee.pan ? esc(employee.pan) : '—'}${employee.uan ? `<div>UAN ${esc(employee.uan)}</div>` : ''}${employee.esic ? `<div>ESIC ${esc(employee.esic)}</div>` : ''}</td>
         <td class="num">${money(totals.gross)}</td>
         <td class="num">${money(totals.deductions)}</td>
         <td class="num">${money(totals.net)}</td>
@@ -296,7 +302,7 @@ export function payrollScreen() {
     ${employees.length
       ? `<h3 class="column-title">Monthly pay structure</h3>
         <div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
-          <thead><tr><th>Employee</th><th>Code</th><th>Designation</th><th>PAN</th><th class="num">Earnings</th><th class="num">Deductions</th><th class="num">Net</th><th></th></tr></thead>
+          <thead><tr><th>Employee</th><th>Code</th><th>Designation</th><th>PAN / statutory IDs</th><th class="num">Earnings</th><th class="num">Deductions</th><th class="num">Net</th><th></th></tr></thead>
           <tbody>${employeeRows}</tbody>
         </table></div>`
       : '<p class="muted">No employees yet.</p>'}`,
@@ -346,6 +352,36 @@ export function payrollScreen() {
         <div class="form-actions"><button class="btn small" type="button" data-action="apply-statutory">Apply to pay structures</button></div>`
       : '<p class="muted">Add active employees with earnings to compute PF, ESI and PT.</p>'}`,
     'PF uses Basic up to the wage ceiling, ESI applies to gross within its ceiling, and PT uses the fixed amount. Employer PF/ESI rates are optional; when set, a payroll run debits Salaries and credits the PF/ESI payable ledgers for the employer share. Applying updates employee deduction amounts; a payroll run still posts explicitly.',
+  );
+
+  const statutoryMonth = Number(month.slice(5, 7));
+  const defaultQuarter = statutoryMonth >= 4 && statutoryMonth <= 6
+    ? 'Q1'
+    : statutoryMonth >= 7 && statutoryMonth <= 9
+      ? 'Q2'
+      : statutoryMonth >= 10
+        ? 'Q3'
+        : 'Q4';
+  const statutoryExportPanel = panel(
+    'Statutory working papers',
+    `<form id="payroll-statutory-form" class="form-grid" novalidate>
+      <label class="field"><span>Return</span><select name="kind">
+        <option value="ECR">EPF ECR (monthly)</option>
+        <option value="ESI">ESI return (monthly)</option>
+        <option value="24Q">Form 24Q (quarterly)</option>
+        <option value="16">Form 16 (annual employee paper)</option>
+      </select></label>
+      <label class="field"><span>Month</span><input name="month" type="month" value="${esc(month)}"></label>
+      <label class="field"><span>Quarter</span><select name="quarter">${['Q1', 'Q2', 'Q3', 'Q4'].map((value) => `<option value="${value}"${value === defaultQuarter ? ' selected' : ''}>${value}</option>`).join('')}</select></label>
+      <label class="field"><span>Employee (Form 16)</span><select name="employeeId"><option value="">Choose employee</option>${employees.map((employee) => `<option value="${esc(employee.id)}">${esc(employee.name)}${employee.code ? ` · ${esc(employee.code)}` : ''}</option>`).join('')}</select></label>
+      <div class="field form-actions">
+        <button class="btn small primary" type="submit" name="format" value="csv">Download CSV</button>
+        <button class="btn small ghost" type="submit" name="format" value="json">Download JSON</button>
+      </div>
+      <p id="payroll-statutory-error" class="form-error" role="alert"></p>
+    </form>
+    <p class="muted small">These are local working papers built from stored payroll snapshots. Nothing is uploaded, filed or acknowledged by a government portal, and Form 16 is not a signed certificate.</p>`,
+    'ECR uses UAN and PF wages; ESI uses the ESIC number and gross within the ESI ceiling; 24Q uses payroll deductions tagged TDS; Form 16 shows the annual monthly summary for the chosen employee.',
   );
 
   const runsPanel = panel(
@@ -463,7 +499,7 @@ export function payrollScreen() {
   );
 
   if (!payroll.enabled) return setupPanel;
-  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${statutoryPanel}${runsPanel}${supplementaryPanel}${report.count ? summaryPanel : ''}`;
+  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${statutoryPanel}${statutoryExportPanel}${runsPanel}${supplementaryPanel}${report.count ? summaryPanel : ''}`;
 }
 
 export function salaryRegisterPanel(report, from, to, standalone = false) {

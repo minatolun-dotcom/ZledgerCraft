@@ -179,6 +179,8 @@ import {
   dashboard,
   dayBook,
   eInvoiceRegister,
+  epfEcr,
+  esiReturn,
   ewayBillRegister,
   forexRevaluation,
   forexSettlementMatching,
@@ -196,7 +198,9 @@ import {
   ledgerTotals,
   outstanding,
   partyStatement,
+  payrollForm16,
   payrollSummary,
+  payrollTdsReturn,
   postDatedRegister,
   primaryKeyOf,
   profitAndLoss,
@@ -3755,6 +3759,8 @@ export async function handleSubmit(event) {
       code: data.get('code'),
       designation: data.get('designation'),
       pan: data.get('pan'),
+      uan: data.get('uan'),
+      esic: data.get('esic'),
       bankName: data.get('bankName'),
       bankAccount: data.get('bankAccount'),
       ifsc: data.get('ifsc'),
@@ -3784,6 +3790,70 @@ export async function handleSubmit(event) {
     persist();
     setFlash(`Employee "${result.employee.name}" ${editingId ? 'updated' : 'added'}.`);
     navigate('payroll');
+    return;
+  }
+
+  if (form.id === 'payroll-statutory-form') {
+    const data = new FormData(form);
+    const kind = String(data.get('kind') ?? 'ECR');
+    const format = String(data.get('format') ?? 'csv');
+    const month = String(data.get('month') ?? '');
+    const result = kind === 'ECR'
+      ? epfEcr(active, { month })
+      : kind === 'ESI'
+        ? esiReturn(active, { month })
+        : kind === '24Q'
+          ? payrollTdsReturn(active, { quarter: data.get('quarter') })
+          : payrollForm16(active, { employeeId: data.get('employeeId') });
+    if (!result.ok) {
+      showFormError(result.error, 'payroll-statutory-error');
+      return;
+    }
+    if (!result.rows.length) {
+      showFormError('No payroll runs match that period, so there is nothing to export.', 'payroll-statutory-error');
+      return;
+    }
+    const label = kind === 'ECR'
+      ? 'EPF ECR'
+      : kind === 'ESI'
+        ? 'ESI return'
+        : kind === '24Q'
+          ? 'Form 24Q'
+          : 'Form 16 working paper';
+    const headers = kind === 'ECR'
+      ? ['UAN', 'Employee', 'Gross wages', 'PF wages', 'Employee PF', 'Employer PF', 'NCP days']
+      : kind === 'ESI'
+        ? ['ESIC number', 'Employee', 'ESI wages', 'Paid days', 'Employee ESI', 'Employer ESI', 'Contribution period']
+        : kind === '24Q'
+          ? ['PAN', 'Employee', 'Gross salary', 'TDS', 'Months']
+          : ['Month', 'Gross salary', 'TDS', 'Net pay'];
+    const csvRows = kind === 'ECR'
+      ? result.rows.map((row) => [row.uan, row.name, row.grossWages, row.pfWages, row.employeePf, row.employerPf, row.ncpDays])
+      : kind === 'ESI'
+        ? result.rows.map((row) => [row.esic, row.name, row.grossWages, row.paidDays, row.employeeEsi, row.employerEsi, row.contributionPeriod])
+        : kind === '24Q'
+          ? result.rows.map((row) => [row.pan, row.name, row.gross, row.tds, row.months])
+          : result.rows.map((row) => [row.month, row.gross, row.tds, row.net]);
+    const period = kind === 'ECR' || kind === 'ESI' ? month : kind === '24Q' ? result.quarter : result.from;
+    const filename = `ZledgerCraft-${kind === '16' ? 'Form16' : kind}-${period}${format === 'json' ? '.json' : '.csv'}`;
+    const content = format === 'json'
+      ? JSON.stringify(result, null, 2)
+      : [headers, ...csvRows].map((row) => row.map(csvCell).join(',')).join('\r\n');
+    const blob = new Blob([format === 'csv' ? '\ufeff' : '', content], {
+      type: format === 'json' ? 'application/json;charset=utf-8' : 'text/csv;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setFlash(
+      `${label} working paper downloaded as ${format.toUpperCase()}${result.warnings?.length ? `; ${result.warnings.join(' ')}` : ''}.`,
+      result.warnings?.length ? 'warn' : 'ok',
+    );
     return;
   }
 

@@ -4575,6 +4575,254 @@ export function payrollSummary(company, { from, to } = {}) {
   };
 }
 
+function payrollStatutoryMonthRows(company, month) {
+  const employees = new Map((company.payroll?.employees ?? []).map((employee) => [employee.id, employee]));
+  const settings = company.payroll?.statutory ?? {};
+  const pfCeiling = Number(settings.pfCeiling ?? 15000) || 0;
+  const esiCeiling = Number(settings.esiCeiling ?? 21000) || 0;
+  const byEmployee = new Map();
+  for (const run of company.payroll?.runs ?? []) {
+    if (run.month !== month || run.reversedAt) continue;
+    for (const row of run.rows ?? []) {
+      const employee = employees.get(row.employeeId);
+      let entry = byEmployee.get(row.employeeId);
+      if (!entry) {
+        entry = {
+          employeeId: row.employeeId,
+          name: row.name || employee?.name || 'Unassigned',
+          code: row.code || employee?.code || '',
+          pan: row.pan || employee?.pan || '',
+          uan: row.uan || employee?.uan || '',
+          esic: row.esic || employee?.esic || '',
+          gross: 0,
+          pfWages: 0,
+          esiWages: 0,
+          employeePf: 0,
+          employeeEsi: 0,
+          employerPf: 0,
+          employerEsi: 0,
+          tds: 0,
+          paidDays: 0,
+          monthDays: 0,
+          ncpDays: 0,
+        };
+        byEmployee.set(row.employeeId, entry);
+      }
+      const basic = (row.earnings ?? [])
+        .filter((line) => /basic/i.test(String(line.name ?? '')))
+        .reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
+      const pfWages = row.pfWages !== undefined ? Number(row.pfWages) || 0 : Math.min(basic, pfCeiling);
+      const esiWages = row.esiWages !== undefined
+        ? Number(row.esiWages) || 0
+        : esiCeiling > 0 && row.gross > 0 && row.gross <= esiCeiling
+          ? row.gross
+          : 0;
+      entry.gross = round2(entry.gross + row.gross);
+      entry.pfWages = round2(entry.pfWages + pfWages);
+      entry.esiWages = round2(entry.esiWages + esiWages);
+      entry.employerPf = round2(entry.employerPf + (Number(row.employerPf) || 0));
+      entry.employerEsi = round2(entry.employerEsi + (Number(row.employerEsi) || 0));
+      for (const line of row.deductions ?? []) {
+        if (line.statutory === 'PF') entry.employeePf = round2(entry.employeePf + line.amount);
+        else if (line.statutory === 'ESI') entry.employeeEsi = round2(entry.employeeEsi + line.amount);
+        else if (line.statutory === 'TDS') entry.tds = round2(entry.tds + line.amount);
+      }
+      if (run.kind !== 'Adjustment') {
+        entry.paidDays = round2(entry.paidDays + (Number(row.paidDays) || 0));
+        entry.monthDays = Math.max(entry.monthDays, Number(row.monthDays) || 0);
+      }
+      if (run.kind === 'Regular' || run.kind === undefined) {
+        entry.ncpDays = Math.max(
+          0,
+          round2((Number(row.monthDays) || 0) - (Number(row.paidDays) || 0)),
+        );
+      }
+    }
+  }
+  return [...byEmployee.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Monthly EPF ECR working paper, one row per employee. */
+export function epfEcr(company, filters = {}) {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before exporting the ECR.' };
+  const month = String(filters.month ?? '');
+  if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return { ok: false, error: 'Choose the payroll month as YYYY-MM.' };
+  }
+  const rows = payrollStatutoryMonthRows(company, month).map((row) => ({
+    uan: row.uan,
+    name: row.name,
+    grossWages: row.gross,
+    pfWages: row.pfWages,
+    employeePf: row.employeePf,
+    employerPf: row.employerPf,
+    ncpDays: row.ncpDays,
+  }));
+  const warnings = rows.some((row) => !row.uan) ? ['One or more employees have no 12-digit UAN.'] : [];
+  return {
+    ok: true,
+    kind: 'ECR',
+    month,
+    rows,
+    totals: {
+      employees: rows.length,
+      grossWages: round2(rows.reduce((sum, row) => sum + row.grossWages, 0)),
+      pfWages: round2(rows.reduce((sum, row) => sum + row.pfWages, 0)),
+      employeePf: round2(rows.reduce((sum, row) => sum + row.employeePf, 0)),
+      employerPf: round2(rows.reduce((sum, row) => sum + row.employerPf, 0)),
+      ncpDays: round2(rows.reduce((sum, row) => sum + row.ncpDays, 0)),
+    },
+    warnings,
+    note: 'EPF ECR working paper from payroll snapshots. It is not an uploaded ECR or a PF acknowledgement.',
+  };
+}
+
+/** Monthly ESI contribution working paper, one row per employee. */
+export function esiReturn(company, filters = {}) {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before exporting the ESI return.' };
+  const month = String(filters.month ?? '');
+  if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return { ok: false, error: 'Choose the payroll month as YYYY-MM.' };
+  }
+  const period = Number(month.slice(5, 7)) >= 4 && Number(month.slice(5, 7)) <= 9 ? 'Apr–Sep' : 'Oct–Mar';
+  const rows = payrollStatutoryMonthRows(company, month).map((row) => ({
+    esic: row.esic,
+    name: row.name,
+    grossWages: row.esiWages,
+    paidDays: row.paidDays,
+    employeeEsi: row.employeeEsi,
+    employerEsi: row.employerEsi,
+    contributionPeriod: period,
+  }));
+  const warnings = rows.some((row) => !row.esic) ? ['One or more employees have no ESIC number.'] : [];
+  return {
+    ok: true,
+    kind: 'ESI',
+    month,
+    contributionPeriod: period,
+    rows,
+    totals: {
+      employees: rows.length,
+      grossWages: round2(rows.reduce((sum, row) => sum + row.grossWages, 0)),
+      employeeEsi: round2(rows.reduce((sum, row) => sum + row.employeeEsi, 0)),
+      employerEsi: round2(rows.reduce((sum, row) => sum + row.employerEsi, 0)),
+      paidDays: round2(rows.reduce((sum, row) => sum + row.paidDays, 0)),
+    },
+    warnings,
+    note: 'ESI contribution working paper from payroll snapshots. It is not an uploaded return or an ESIC acknowledgement.',
+  };
+}
+
+/** Quarterly Form 24Q working paper from payroll TDS deductions. */
+export function payrollTdsReturn(company, filters = {}) {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before exporting Form 24Q.' };
+  const quarter = ['Q1', 'Q2', 'Q3', 'Q4'].includes(filters.quarter) ? filters.quarter : 'Q1';
+  const reference = filters.to || company.fyEnd;
+  const range = withholdingQuarterRange(quarter, reference);
+  const employees = new Map((company.payroll?.employees ?? []).map((employee) => [employee.id, employee]));
+  const byEmployee = new Map();
+  for (const run of company.payroll?.runs ?? []) {
+    if (run.reversedAt || run.date < range.from || run.date > range.to) continue;
+    for (const row of run.rows ?? []) {
+      const employee = employees.get(row.employeeId);
+      let entry = byEmployee.get(row.employeeId);
+      if (!entry) {
+        entry = {
+          employeeId: row.employeeId,
+          name: row.name || employee?.name || 'Unassigned',
+          pan: row.pan || employee?.pan || '',
+          gross: 0,
+          tds: 0,
+          months: new Set(),
+        };
+        byEmployee.set(row.employeeId, entry);
+      }
+      entry.months.add(run.month);
+      entry.gross = round2(entry.gross + row.gross);
+      entry.tds = round2(
+        entry.tds +
+          (row.deductions ?? [])
+            .filter((line) => line.statutory === 'TDS')
+            .reduce((sum, line) => sum + line.amount, 0),
+      );
+    }
+  }
+  const rows = [...byEmployee.values()]
+    .map((entry) => ({ ...entry, months: entry.months.size }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    ok: true,
+    kind: '24Q',
+    form: '24Q',
+    quarter,
+    from: range.from,
+    to: range.to,
+    tan: company.tds?.tan ?? '',
+    rows,
+    totals: {
+      employees: rows.length,
+      gross: round2(rows.reduce((sum, row) => sum + row.gross, 0)),
+      tds: round2(rows.reduce((sum, row) => sum + row.tds, 0)),
+    },
+    warnings: rows.some((row) => !row.pan) ? ['One or more employees have no PAN.'] : [],
+    note: 'Form 24Q working paper from payroll TDS deductions. It is not an uploaded return, TRACES filing or acknowledgement.',
+  };
+}
+
+/** Annual Form 16 working paper for one employee; no certificate is signed. */
+export function payrollForm16(company, filters = {}) {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before preparing Form 16.' };
+  const employee = (company.payroll?.employees ?? []).find((entry) => entry.id === filters.employeeId);
+  if (!employee) return { ok: false, error: 'Choose an employee for Form 16.' };
+  const from = filters.from || company.fyStart;
+  const to = filters.to || company.fyEnd;
+  const byMonth = new Map();
+  for (const run of company.payroll?.runs ?? []) {
+    if (run.reversedAt || run.date < from || run.date > to) continue;
+    const row = (run.rows ?? []).find((entry) => entry.employeeId === employee.id);
+    if (!row) continue;
+    let month = byMonth.get(run.month);
+    if (!month) {
+      month = { month: run.month, gross: 0, tds: 0, net: 0 };
+      byMonth.set(run.month, month);
+    }
+    month.gross = round2(month.gross + row.gross);
+    month.net = round2(month.net + row.net);
+    month.tds = round2(
+      month.tds +
+        (row.deductions ?? [])
+          .filter((line) => line.statutory === 'TDS')
+          .reduce((sum, line) => sum + line.amount, 0),
+    );
+  }
+  const rows = [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
+  return {
+    ok: true,
+    kind: '16',
+    form: '16',
+    from,
+    to,
+    employee: {
+      name: employee.name,
+      code: employee.code ?? '',
+      pan: employee.pan ?? '',
+      uan: employee.uan ?? '',
+    },
+    employer: {
+      name: company.gst?.legalName || company.name,
+      tan: company.tds?.tan ?? '',
+    },
+    rows,
+    totals: {
+      gross: round2(rows.reduce((sum, row) => sum + row.gross, 0)),
+      tds: round2(rows.reduce((sum, row) => sum + row.tds, 0)),
+      net: round2(rows.reduce((sum, row) => sum + row.net, 0)),
+    },
+    warnings: employee.pan ? [] : ['The employee has no PAN.'],
+    note: 'Form 16 working paper. It is not a signed certificate, Part A/B, TRACES download or tax computation.',
+  };
+}
+
 function financialYearMonths(start, end) {
   const months = [];
   let year = Number(String(start).slice(0, 4));

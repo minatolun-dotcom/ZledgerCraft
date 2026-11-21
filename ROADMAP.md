@@ -50,10 +50,9 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 
 **Recommended next work:** choose from the
 [active local backlog](KNOWN_LIMITS.md#active-local-backlog). The highest-leverage
-lanes are payroll statutory working papers (ECR, ESI, 24Q and 16), GST model
-depth (exports/SEZ, composition, RCM, openings and split balancing),
-e-invoice line depth, forex/cost-centre depth and inventory batch/FIFO
-manufacturing. Live-workspace encryption, nested-field querying, write
+lanes are GST model depth (exports/SEZ, composition, RCM, openings and split
+balancing), e-invoice line depth, forex/cost-centre depth and inventory
+batch/FIFO manufacturing. Live-workspace encryption, nested-field querying, write
 APIs/webhooks and offline mode remain larger platform projects. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
 complete.
@@ -368,6 +367,17 @@ inside those stages.
   related limit IDs and rough size.
 - Corrected stale register entries: per-line GST is resolved; GST filing
   history and local statutory gaps are stated separately.
+
+### 2026-11-21 — Phase 66: payroll statutory working papers
+
+- Employees now store optional 12-digit UAN and 10–17-digit ESIC numbers with
+  the same validation on add, edit and backup restore.
+- Payroll run rows snapshot PAN, UAN, ESIC, PF wages and ESI wages, so later
+  employee changes do not rewrite the ECR or ESI history.
+- The payroll screen downloads monthly EPF ECR and ESI, quarterly Form 24Q and
+  annual employee Form 16 CSV/JSON working papers. Each carries a local-paper
+  note; nothing is uploaded or acknowledged.
+- Verification: 381 tests (380 pass, 1 skipped); 1,378.8 kB build.
 
 ### 2026-11-21 — Phase 65: manual GST filing acknowledgements
 

@@ -2340,6 +2340,8 @@ export function normalizePayroll(company) {
         ...(employee.code ? { code: String(employee.code).trim().slice(0, 20) } : {}),
         ...(employee.designation ? { designation: String(employee.designation).trim().slice(0, 60) } : {}),
         ...(isValidPan(employee.pan) ? { pan: String(employee.pan).trim().toUpperCase() } : {}),
+        ...(/^\d{12}$/.test(String(employee.uan ?? '').trim()) ? { uan: String(employee.uan).trim() } : {}),
+        ...(/^\d{10,17}$/.test(String(employee.esic ?? '').trim()) ? { esic: String(employee.esic).trim() } : {}),
         ...(isValidIsoDate(String(employee.dateOfJoining ?? '')) ? { dateOfJoining: String(employee.dateOfJoining) } : {}),
         ...(isValidIsoDate(String(employee.dateOfExit ?? '')) ? { dateOfExit: String(employee.dateOfExit) } : {}),
         ...(employee.bankName ? { bankName: String(employee.bankName).trim().slice(0, 60) } : {}),
@@ -2394,6 +2396,11 @@ export function normalizePayroll(company) {
             employeeId: String(row.employeeId).slice(0, 80),
             name: String(row.name ?? '').trim().slice(0, 80),
             ...(row.code ? { code: String(row.code).slice(0, 20) } : {}),
+            ...(isValidPan(row.pan) ? { pan: String(row.pan).trim().toUpperCase() } : {}),
+            ...(/^\d{12}$/.test(String(row.uan ?? '')) ? { uan: String(row.uan) } : {}),
+            ...(/^\d{10,17}$/.test(String(row.esic ?? '')) ? { esic: String(row.esic) } : {}),
+            ...(row.pfWages !== undefined ? { pfWages: round2(parseAmount(row.pfWages) ?? 0) } : {}),
+            ...(row.esiWages !== undefined ? { esiWages: round2(parseAmount(row.esiWages) ?? 0) } : {}),
             ...(row.workedDays !== undefined ? { workedDays: round2(parseAmount(row.workedDays) ?? 0) } : {}),
             paidDays: round2(parseAmount(row.paidDays) ?? 0),
             monthDays: round2(parseAmount(row.monthDays) ?? 0),
@@ -2745,6 +2752,10 @@ export function addEmployee(company, input = {}) {
   }
   const pan = String(input.pan ?? '').trim().toUpperCase();
   if (pan && !isValidPan(pan)) return { ok: false, error: 'Employee PAN must be 10 characters: five letters, four digits and one letter.' };
+  const uan = String(input.uan ?? '').trim();
+  if (uan && !/^\d{12}$/.test(uan)) return { ok: false, error: 'Employee UAN must be 12 digits.' };
+  const esic = String(input.esic ?? '').trim();
+  if (esic && !/^\d{10,17}$/.test(esic)) return { ok: false, error: 'Employee ESIC number must be 10 to 17 digits.' };
   const dateOfJoining = String(input.dateOfJoining ?? '').trim();
   if (dateOfJoining && !isValidIsoDate(dateOfJoining)) {
     return { ok: false, error: 'Enter a valid date of joining.' };
@@ -2773,6 +2784,8 @@ export function addEmployee(company, input = {}) {
   if (code) employee.code = code;
   if (designation) employee.designation = designation;
   if (pan) employee.pan = pan;
+  if (uan) employee.uan = uan;
+  if (esic) employee.esic = esic;
   if (bank.bankName) employee.bankName = bank.bankName;
   if (bank.accountNumber) employee.bankAccount = bank.accountNumber;
   if (bank.ifsc) employee.ifsc = bank.ifsc;
@@ -2796,6 +2809,10 @@ export function updateEmployee(company, employeeId, input = {}) {
   }
   const pan = String(input.pan ?? '').trim().toUpperCase();
   if (pan && !isValidPan(pan)) return { ok: false, error: 'Employee PAN must be 10 characters: five letters, four digits and one letter.' };
+  const uan = String(input.uan ?? '').trim();
+  if (uan && !/^\d{12}$/.test(uan)) return { ok: false, error: 'Employee UAN must be 12 digits.' };
+  const esic = String(input.esic ?? '').trim();
+  if (esic && !/^\d{10,17}$/.test(esic)) return { ok: false, error: 'Employee ESIC number must be 10 to 17 digits.' };
   const dateOfJoining = String(input.dateOfJoining ?? '').trim();
   if (dateOfJoining && !isValidIsoDate(dateOfJoining)) {
     return { ok: false, error: 'Enter a valid date of joining.' };
@@ -2829,6 +2846,10 @@ export function updateEmployee(company, employeeId, input = {}) {
   }
   if (pan) employee.pan = pan;
   else delete employee.pan;
+  if (uan) employee.uan = uan;
+  else delete employee.uan;
+  if (esic) employee.esic = esic;
+  else delete employee.esic;
   if (bank.bankName) employee.bankName = bank.bankName;
   else delete employee.bankName;
   if (bank.accountNumber) employee.bankAccount = bank.accountNumber;
@@ -3020,12 +3041,17 @@ export function runPayroll(company, input = {}) {
       employeeId: employee.id,
       name: employee.name,
       ...(employee.code ? { code: employee.code } : {}),
+      ...(employee.pan ? { pan: employee.pan } : {}),
+      ...(employee.uan ? { uan: employee.uan } : {}),
+      ...(employee.esic ? { esic: employee.esic } : {}),
       ...(workedDays !== monthDays ? { workedDays } : {}),
       paidDays,
       monthDays,
       earnings,
       deductions,
       gross,
+      pfWages: round2(pfWage),
+      ...(gross > 0 && gross <= settings.esiCeiling ? { esiWages: round2(gross) } : {}),
       deductionTotal,
       net: round2(gross - deductionTotal),
       ...(employerPf ? { employerPf } : {}),
@@ -7681,6 +7707,12 @@ function validateImportedCompany(company) {
       seenEmployeeNames.add(employeeName.toUpperCase());
       if (employee.pan && !isValidPan(employee.pan)) {
         return `Company "${name}": employee "${employeeName}" has an invalid PAN.`;
+      }
+      if (employee.uan && !/^\d{12}$/.test(String(employee.uan))) {
+        return `Company "${name}": employee "${employeeName}" has an invalid UAN.`;
+      }
+      if (employee.esic && !/^\d{10,17}$/.test(String(employee.esic))) {
+        return `Company "${name}": employee "${employeeName}" has an invalid ESIC number.`;
       }
       if (employee.dateOfJoining && !isValidIsoDate(employee.dateOfJoining)) {
         return `Company "${name}": employee "${employeeName}" has an invalid date of joining.`;

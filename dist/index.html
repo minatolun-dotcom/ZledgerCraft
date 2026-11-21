@@ -4788,6 +4788,8 @@ function normalizePayroll(company) {
         ...(employee.code ? { code: String(employee.code).trim().slice(0, 20) } : {}),
         ...(employee.designation ? { designation: String(employee.designation).trim().slice(0, 60) } : {}),
         ...(isValidPan(employee.pan) ? { pan: String(employee.pan).trim().toUpperCase() } : {}),
+        ...(/^\d{12}$/.test(String(employee.uan ?? '').trim()) ? { uan: String(employee.uan).trim() } : {}),
+        ...(/^\d{10,17}$/.test(String(employee.esic ?? '').trim()) ? { esic: String(employee.esic).trim() } : {}),
         ...(isValidIsoDate(String(employee.dateOfJoining ?? '')) ? { dateOfJoining: String(employee.dateOfJoining) } : {}),
         ...(isValidIsoDate(String(employee.dateOfExit ?? '')) ? { dateOfExit: String(employee.dateOfExit) } : {}),
         ...(employee.bankName ? { bankName: String(employee.bankName).trim().slice(0, 60) } : {}),
@@ -4842,6 +4844,11 @@ function normalizePayroll(company) {
             employeeId: String(row.employeeId).slice(0, 80),
             name: String(row.name ?? '').trim().slice(0, 80),
             ...(row.code ? { code: String(row.code).slice(0, 20) } : {}),
+            ...(isValidPan(row.pan) ? { pan: String(row.pan).trim().toUpperCase() } : {}),
+            ...(/^\d{12}$/.test(String(row.uan ?? '')) ? { uan: String(row.uan) } : {}),
+            ...(/^\d{10,17}$/.test(String(row.esic ?? '')) ? { esic: String(row.esic) } : {}),
+            ...(row.pfWages !== undefined ? { pfWages: round2(parseAmount(row.pfWages) ?? 0) } : {}),
+            ...(row.esiWages !== undefined ? { esiWages: round2(parseAmount(row.esiWages) ?? 0) } : {}),
             ...(row.workedDays !== undefined ? { workedDays: round2(parseAmount(row.workedDays) ?? 0) } : {}),
             paidDays: round2(parseAmount(row.paidDays) ?? 0),
             monthDays: round2(parseAmount(row.monthDays) ?? 0),
@@ -5193,6 +5200,10 @@ function addEmployee(company, input = {}) {
   }
   const pan = String(input.pan ?? '').trim().toUpperCase();
   if (pan && !isValidPan(pan)) return { ok: false, error: 'Employee PAN must be 10 characters: five letters, four digits and one letter.' };
+  const uan = String(input.uan ?? '').trim();
+  if (uan && !/^\d{12}$/.test(uan)) return { ok: false, error: 'Employee UAN must be 12 digits.' };
+  const esic = String(input.esic ?? '').trim();
+  if (esic && !/^\d{10,17}$/.test(esic)) return { ok: false, error: 'Employee ESIC number must be 10 to 17 digits.' };
   const dateOfJoining = String(input.dateOfJoining ?? '').trim();
   if (dateOfJoining && !isValidIsoDate(dateOfJoining)) {
     return { ok: false, error: 'Enter a valid date of joining.' };
@@ -5221,6 +5232,8 @@ function addEmployee(company, input = {}) {
   if (code) employee.code = code;
   if (designation) employee.designation = designation;
   if (pan) employee.pan = pan;
+  if (uan) employee.uan = uan;
+  if (esic) employee.esic = esic;
   if (bank.bankName) employee.bankName = bank.bankName;
   if (bank.accountNumber) employee.bankAccount = bank.accountNumber;
   if (bank.ifsc) employee.ifsc = bank.ifsc;
@@ -5244,6 +5257,10 @@ function updateEmployee(company, employeeId, input = {}) {
   }
   const pan = String(input.pan ?? '').trim().toUpperCase();
   if (pan && !isValidPan(pan)) return { ok: false, error: 'Employee PAN must be 10 characters: five letters, four digits and one letter.' };
+  const uan = String(input.uan ?? '').trim();
+  if (uan && !/^\d{12}$/.test(uan)) return { ok: false, error: 'Employee UAN must be 12 digits.' };
+  const esic = String(input.esic ?? '').trim();
+  if (esic && !/^\d{10,17}$/.test(esic)) return { ok: false, error: 'Employee ESIC number must be 10 to 17 digits.' };
   const dateOfJoining = String(input.dateOfJoining ?? '').trim();
   if (dateOfJoining && !isValidIsoDate(dateOfJoining)) {
     return { ok: false, error: 'Enter a valid date of joining.' };
@@ -5277,6 +5294,10 @@ function updateEmployee(company, employeeId, input = {}) {
   }
   if (pan) employee.pan = pan;
   else delete employee.pan;
+  if (uan) employee.uan = uan;
+  else delete employee.uan;
+  if (esic) employee.esic = esic;
+  else delete employee.esic;
   if (bank.bankName) employee.bankName = bank.bankName;
   else delete employee.bankName;
   if (bank.accountNumber) employee.bankAccount = bank.accountNumber;
@@ -5468,12 +5489,17 @@ function runPayroll(company, input = {}) {
       employeeId: employee.id,
       name: employee.name,
       ...(employee.code ? { code: employee.code } : {}),
+      ...(employee.pan ? { pan: employee.pan } : {}),
+      ...(employee.uan ? { uan: employee.uan } : {}),
+      ...(employee.esic ? { esic: employee.esic } : {}),
       ...(workedDays !== monthDays ? { workedDays } : {}),
       paidDays,
       monthDays,
       earnings,
       deductions,
       gross,
+      pfWages: round2(pfWage),
+      ...(gross > 0 && gross <= settings.esiCeiling ? { esiWages: round2(gross) } : {}),
       deductionTotal,
       net: round2(gross - deductionTotal),
       ...(employerPf ? { employerPf } : {}),
@@ -10129,6 +10155,12 @@ function validateImportedCompany(company) {
       seenEmployeeNames.add(employeeName.toUpperCase());
       if (employee.pan && !isValidPan(employee.pan)) {
         return `Company "${name}": employee "${employeeName}" has an invalid PAN.`;
+      }
+      if (employee.uan && !/^\d{12}$/.test(String(employee.uan))) {
+        return `Company "${name}": employee "${employeeName}" has an invalid UAN.`;
+      }
+      if (employee.esic && !/^\d{10,17}$/.test(String(employee.esic))) {
+        return `Company "${name}": employee "${employeeName}" has an invalid ESIC number.`;
       }
       if (employee.dateOfJoining && !isValidIsoDate(employee.dateOfJoining)) {
         return `Company "${name}": employee "${employeeName}" has an invalid date of joining.`;
@@ -15728,6 +15760,254 @@ function payrollSummary(company, { from, to } = {}) {
       .sort((a, b) => a.tag.localeCompare(b.tag)),
     rows,
     totals,
+  };
+}
+
+function payrollStatutoryMonthRows(company, month) {
+  const employees = new Map((company.payroll?.employees ?? []).map((employee) => [employee.id, employee]));
+  const settings = company.payroll?.statutory ?? {};
+  const pfCeiling = Number(settings.pfCeiling ?? 15000) || 0;
+  const esiCeiling = Number(settings.esiCeiling ?? 21000) || 0;
+  const byEmployee = new Map();
+  for (const run of company.payroll?.runs ?? []) {
+    if (run.month !== month || run.reversedAt) continue;
+    for (const row of run.rows ?? []) {
+      const employee = employees.get(row.employeeId);
+      let entry = byEmployee.get(row.employeeId);
+      if (!entry) {
+        entry = {
+          employeeId: row.employeeId,
+          name: row.name || employee?.name || 'Unassigned',
+          code: row.code || employee?.code || '',
+          pan: row.pan || employee?.pan || '',
+          uan: row.uan || employee?.uan || '',
+          esic: row.esic || employee?.esic || '',
+          gross: 0,
+          pfWages: 0,
+          esiWages: 0,
+          employeePf: 0,
+          employeeEsi: 0,
+          employerPf: 0,
+          employerEsi: 0,
+          tds: 0,
+          paidDays: 0,
+          monthDays: 0,
+          ncpDays: 0,
+        };
+        byEmployee.set(row.employeeId, entry);
+      }
+      const basic = (row.earnings ?? [])
+        .filter((line) => /basic/i.test(String(line.name ?? '')))
+        .reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
+      const pfWages = row.pfWages !== undefined ? Number(row.pfWages) || 0 : Math.min(basic, pfCeiling);
+      const esiWages = row.esiWages !== undefined
+        ? Number(row.esiWages) || 0
+        : esiCeiling > 0 && row.gross > 0 && row.gross <= esiCeiling
+          ? row.gross
+          : 0;
+      entry.gross = round2(entry.gross + row.gross);
+      entry.pfWages = round2(entry.pfWages + pfWages);
+      entry.esiWages = round2(entry.esiWages + esiWages);
+      entry.employerPf = round2(entry.employerPf + (Number(row.employerPf) || 0));
+      entry.employerEsi = round2(entry.employerEsi + (Number(row.employerEsi) || 0));
+      for (const line of row.deductions ?? []) {
+        if (line.statutory === 'PF') entry.employeePf = round2(entry.employeePf + line.amount);
+        else if (line.statutory === 'ESI') entry.employeeEsi = round2(entry.employeeEsi + line.amount);
+        else if (line.statutory === 'TDS') entry.tds = round2(entry.tds + line.amount);
+      }
+      if (run.kind !== 'Adjustment') {
+        entry.paidDays = round2(entry.paidDays + (Number(row.paidDays) || 0));
+        entry.monthDays = Math.max(entry.monthDays, Number(row.monthDays) || 0);
+      }
+      if (run.kind === 'Regular' || run.kind === undefined) {
+        entry.ncpDays = Math.max(
+          0,
+          round2((Number(row.monthDays) || 0) - (Number(row.paidDays) || 0)),
+        );
+      }
+    }
+  }
+  return [...byEmployee.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Monthly EPF ECR working paper, one row per employee. */
+function epfEcr(company, filters = {}) {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before exporting the ECR.' };
+  const month = String(filters.month ?? '');
+  if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return { ok: false, error: 'Choose the payroll month as YYYY-MM.' };
+  }
+  const rows = payrollStatutoryMonthRows(company, month).map((row) => ({
+    uan: row.uan,
+    name: row.name,
+    grossWages: row.gross,
+    pfWages: row.pfWages,
+    employeePf: row.employeePf,
+    employerPf: row.employerPf,
+    ncpDays: row.ncpDays,
+  }));
+  const warnings = rows.some((row) => !row.uan) ? ['One or more employees have no 12-digit UAN.'] : [];
+  return {
+    ok: true,
+    kind: 'ECR',
+    month,
+    rows,
+    totals: {
+      employees: rows.length,
+      grossWages: round2(rows.reduce((sum, row) => sum + row.grossWages, 0)),
+      pfWages: round2(rows.reduce((sum, row) => sum + row.pfWages, 0)),
+      employeePf: round2(rows.reduce((sum, row) => sum + row.employeePf, 0)),
+      employerPf: round2(rows.reduce((sum, row) => sum + row.employerPf, 0)),
+      ncpDays: round2(rows.reduce((sum, row) => sum + row.ncpDays, 0)),
+    },
+    warnings,
+    note: 'EPF ECR working paper from payroll snapshots. It is not an uploaded ECR or a PF acknowledgement.',
+  };
+}
+
+/** Monthly ESI contribution working paper, one row per employee. */
+function esiReturn(company, filters = {}) {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before exporting the ESI return.' };
+  const month = String(filters.month ?? '');
+  if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return { ok: false, error: 'Choose the payroll month as YYYY-MM.' };
+  }
+  const period = Number(month.slice(5, 7)) >= 4 && Number(month.slice(5, 7)) <= 9 ? 'Apr–Sep' : 'Oct–Mar';
+  const rows = payrollStatutoryMonthRows(company, month).map((row) => ({
+    esic: row.esic,
+    name: row.name,
+    grossWages: row.esiWages,
+    paidDays: row.paidDays,
+    employeeEsi: row.employeeEsi,
+    employerEsi: row.employerEsi,
+    contributionPeriod: period,
+  }));
+  const warnings = rows.some((row) => !row.esic) ? ['One or more employees have no ESIC number.'] : [];
+  return {
+    ok: true,
+    kind: 'ESI',
+    month,
+    contributionPeriod: period,
+    rows,
+    totals: {
+      employees: rows.length,
+      grossWages: round2(rows.reduce((sum, row) => sum + row.grossWages, 0)),
+      employeeEsi: round2(rows.reduce((sum, row) => sum + row.employeeEsi, 0)),
+      employerEsi: round2(rows.reduce((sum, row) => sum + row.employerEsi, 0)),
+      paidDays: round2(rows.reduce((sum, row) => sum + row.paidDays, 0)),
+    },
+    warnings,
+    note: 'ESI contribution working paper from payroll snapshots. It is not an uploaded return or an ESIC acknowledgement.',
+  };
+}
+
+/** Quarterly Form 24Q working paper from payroll TDS deductions. */
+function payrollTdsReturn(company, filters = {}) {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before exporting Form 24Q.' };
+  const quarter = ['Q1', 'Q2', 'Q3', 'Q4'].includes(filters.quarter) ? filters.quarter : 'Q1';
+  const reference = filters.to || company.fyEnd;
+  const range = withholdingQuarterRange(quarter, reference);
+  const employees = new Map((company.payroll?.employees ?? []).map((employee) => [employee.id, employee]));
+  const byEmployee = new Map();
+  for (const run of company.payroll?.runs ?? []) {
+    if (run.reversedAt || run.date < range.from || run.date > range.to) continue;
+    for (const row of run.rows ?? []) {
+      const employee = employees.get(row.employeeId);
+      let entry = byEmployee.get(row.employeeId);
+      if (!entry) {
+        entry = {
+          employeeId: row.employeeId,
+          name: row.name || employee?.name || 'Unassigned',
+          pan: row.pan || employee?.pan || '',
+          gross: 0,
+          tds: 0,
+          months: new Set(),
+        };
+        byEmployee.set(row.employeeId, entry);
+      }
+      entry.months.add(run.month);
+      entry.gross = round2(entry.gross + row.gross);
+      entry.tds = round2(
+        entry.tds +
+          (row.deductions ?? [])
+            .filter((line) => line.statutory === 'TDS')
+            .reduce((sum, line) => sum + line.amount, 0),
+      );
+    }
+  }
+  const rows = [...byEmployee.values()]
+    .map((entry) => ({ ...entry, months: entry.months.size }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    ok: true,
+    kind: '24Q',
+    form: '24Q',
+    quarter,
+    from: range.from,
+    to: range.to,
+    tan: company.tds?.tan ?? '',
+    rows,
+    totals: {
+      employees: rows.length,
+      gross: round2(rows.reduce((sum, row) => sum + row.gross, 0)),
+      tds: round2(rows.reduce((sum, row) => sum + row.tds, 0)),
+    },
+    warnings: rows.some((row) => !row.pan) ? ['One or more employees have no PAN.'] : [],
+    note: 'Form 24Q working paper from payroll TDS deductions. It is not an uploaded return, TRACES filing or acknowledgement.',
+  };
+}
+
+/** Annual Form 16 working paper for one employee; no certificate is signed. */
+function payrollForm16(company, filters = {}) {
+  if (!company.payroll?.enabled) return { ok: false, error: 'Enable payroll before preparing Form 16.' };
+  const employee = (company.payroll?.employees ?? []).find((entry) => entry.id === filters.employeeId);
+  if (!employee) return { ok: false, error: 'Choose an employee for Form 16.' };
+  const from = filters.from || company.fyStart;
+  const to = filters.to || company.fyEnd;
+  const byMonth = new Map();
+  for (const run of company.payroll?.runs ?? []) {
+    if (run.reversedAt || run.date < from || run.date > to) continue;
+    const row = (run.rows ?? []).find((entry) => entry.employeeId === employee.id);
+    if (!row) continue;
+    let month = byMonth.get(run.month);
+    if (!month) {
+      month = { month: run.month, gross: 0, tds: 0, net: 0 };
+      byMonth.set(run.month, month);
+    }
+    month.gross = round2(month.gross + row.gross);
+    month.net = round2(month.net + row.net);
+    month.tds = round2(
+      month.tds +
+        (row.deductions ?? [])
+          .filter((line) => line.statutory === 'TDS')
+          .reduce((sum, line) => sum + line.amount, 0),
+    );
+  }
+  const rows = [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
+  return {
+    ok: true,
+    kind: '16',
+    form: '16',
+    from,
+    to,
+    employee: {
+      name: employee.name,
+      code: employee.code ?? '',
+      pan: employee.pan ?? '',
+      uan: employee.uan ?? '',
+    },
+    employer: {
+      name: company.gst?.legalName || company.name,
+      tan: company.tds?.tan ?? '',
+    },
+    rows,
+    totals: {
+      gross: round2(rows.reduce((sum, row) => sum + row.gross, 0)),
+      tds: round2(rows.reduce((sum, row) => sum + row.tds, 0)),
+      net: round2(rows.reduce((sum, row) => sum + row.net, 0)),
+    },
+    warnings: employee.pan ? [] : ['The employee has no PAN.'],
+    note: 'Form 16 working paper. It is not a signed certificate, Part A/B, TRACES download or tax computation.',
   };
 }
 
@@ -24512,6 +24792,8 @@ function payrollScreen() {
         <label class="field"><span>Code</span><input name="code" maxlength="20" value="${esc(editing?.code ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Designation</span><input name="designation" maxlength="60" value="${esc(editing?.designation ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>PAN</span><input name="pan" maxlength="10" value="${esc(editing?.pan ?? '')}" placeholder="Optional"></label>
+        <label class="field"><span>UAN</span><input name="uan" maxlength="12" inputmode="numeric" value="${esc(editing?.uan ?? '')}" placeholder="12 digits"></label>
+        <label class="field"><span>ESIC number</span><input name="esic" maxlength="17" inputmode="numeric" value="${esc(editing?.esic ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Bank name</span><input name="bankName" maxlength="60" value="${esc(editing?.bankName ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>Bank account</span><input name="bankAccount" maxlength="20" inputmode="numeric" value="${esc(editing?.bankAccount ?? '')}" placeholder="Optional"></label>
         <label class="field"><span>IFSC</span><input name="ifsc" maxlength="11" value="${esc(editing?.ifsc ?? '')}" placeholder="Optional"></label>
@@ -24544,7 +24826,7 @@ function payrollScreen() {
         <td><strong>${esc(employee.name)}</strong>${employee.active === false ? ' <span class="badge">inactive</span>' : ''}</td>
         <td class="muted small">${esc(employee.code || '—')}</td>
         <td class="muted small">${esc(employee.designation || '—')}</td>
-        <td class="muted small">${employee.pan ? esc(employee.pan) : '—'}</td>
+        <td class="muted small">${employee.pan ? esc(employee.pan) : '—'}${employee.uan ? `<div>UAN ${esc(employee.uan)}</div>` : ''}${employee.esic ? `<div>ESIC ${esc(employee.esic)}</div>` : ''}</td>
         <td class="num">${money(totals.gross)}</td>
         <td class="num">${money(totals.deductions)}</td>
         <td class="num">${money(totals.net)}</td>
@@ -24578,7 +24860,7 @@ function payrollScreen() {
     ${employees.length
       ? `<h3 class="column-title">Monthly pay structure</h3>
         <div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
-          <thead><tr><th>Employee</th><th>Code</th><th>Designation</th><th>PAN</th><th class="num">Earnings</th><th class="num">Deductions</th><th class="num">Net</th><th></th></tr></thead>
+          <thead><tr><th>Employee</th><th>Code</th><th>Designation</th><th>PAN / statutory IDs</th><th class="num">Earnings</th><th class="num">Deductions</th><th class="num">Net</th><th></th></tr></thead>
           <tbody>${employeeRows}</tbody>
         </table></div>`
       : '<p class="muted">No employees yet.</p>'}`,
@@ -24628,6 +24910,36 @@ function payrollScreen() {
         <div class="form-actions"><button class="btn small" type="button" data-action="apply-statutory">Apply to pay structures</button></div>`
       : '<p class="muted">Add active employees with earnings to compute PF, ESI and PT.</p>'}`,
     'PF uses Basic up to the wage ceiling, ESI applies to gross within its ceiling, and PT uses the fixed amount. Employer PF/ESI rates are optional; when set, a payroll run debits Salaries and credits the PF/ESI payable ledgers for the employer share. Applying updates employee deduction amounts; a payroll run still posts explicitly.',
+  );
+
+  const statutoryMonth = Number(month.slice(5, 7));
+  const defaultQuarter = statutoryMonth >= 4 && statutoryMonth <= 6
+    ? 'Q1'
+    : statutoryMonth >= 7 && statutoryMonth <= 9
+      ? 'Q2'
+      : statutoryMonth >= 10
+        ? 'Q3'
+        : 'Q4';
+  const statutoryExportPanel = panel(
+    'Statutory working papers',
+    `<form id="payroll-statutory-form" class="form-grid" novalidate>
+      <label class="field"><span>Return</span><select name="kind">
+        <option value="ECR">EPF ECR (monthly)</option>
+        <option value="ESI">ESI return (monthly)</option>
+        <option value="24Q">Form 24Q (quarterly)</option>
+        <option value="16">Form 16 (annual employee paper)</option>
+      </select></label>
+      <label class="field"><span>Month</span><input name="month" type="month" value="${esc(month)}"></label>
+      <label class="field"><span>Quarter</span><select name="quarter">${['Q1', 'Q2', 'Q3', 'Q4'].map((value) => `<option value="${value}"${value === defaultQuarter ? ' selected' : ''}>${value}</option>`).join('')}</select></label>
+      <label class="field"><span>Employee (Form 16)</span><select name="employeeId"><option value="">Choose employee</option>${employees.map((employee) => `<option value="${esc(employee.id)}">${esc(employee.name)}${employee.code ? ` · ${esc(employee.code)}` : ''}</option>`).join('')}</select></label>
+      <div class="field form-actions">
+        <button class="btn small primary" type="submit" name="format" value="csv">Download CSV</button>
+        <button class="btn small ghost" type="submit" name="format" value="json">Download JSON</button>
+      </div>
+      <p id="payroll-statutory-error" class="form-error" role="alert"></p>
+    </form>
+    <p class="muted small">These are local working papers built from stored payroll snapshots. Nothing is uploaded, filed or acknowledged by a government portal, and Form 16 is not a signed certificate.</p>`,
+    'ECR uses UAN and PF wages; ESI uses the ESIC number and gross within the ESI ceiling; 24Q uses payroll deductions tagged TDS; Form 16 shows the annual monthly summary for the chosen employee.',
   );
 
   const runsPanel = panel(
@@ -24745,7 +25057,7 @@ function payrollScreen() {
   );
 
   if (!payroll.enabled) return setupPanel;
-  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${statutoryPanel}${runsPanel}${supplementaryPanel}${report.count ? summaryPanel : ''}`;
+  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${statutoryPanel}${statutoryExportPanel}${runsPanel}${supplementaryPanel}${report.count ? summaryPanel : ''}`;
 }
 
 function salaryRegisterPanel(report, from, to, standalone = false) {
@@ -28975,6 +29287,8 @@ async function handleSubmit(event) {
       code: data.get('code'),
       designation: data.get('designation'),
       pan: data.get('pan'),
+      uan: data.get('uan'),
+      esic: data.get('esic'),
       bankName: data.get('bankName'),
       bankAccount: data.get('bankAccount'),
       ifsc: data.get('ifsc'),
@@ -29004,6 +29318,70 @@ async function handleSubmit(event) {
     persist();
     setFlash(`Employee "${result.employee.name}" ${editingId ? 'updated' : 'added'}.`);
     navigate('payroll');
+    return;
+  }
+
+  if (form.id === 'payroll-statutory-form') {
+    const data = new FormData(form);
+    const kind = String(data.get('kind') ?? 'ECR');
+    const format = String(data.get('format') ?? 'csv');
+    const month = String(data.get('month') ?? '');
+    const result = kind === 'ECR'
+      ? epfEcr(active, { month })
+      : kind === 'ESI'
+        ? esiReturn(active, { month })
+        : kind === '24Q'
+          ? payrollTdsReturn(active, { quarter: data.get('quarter') })
+          : payrollForm16(active, { employeeId: data.get('employeeId') });
+    if (!result.ok) {
+      showFormError(result.error, 'payroll-statutory-error');
+      return;
+    }
+    if (!result.rows.length) {
+      showFormError('No payroll runs match that period, so there is nothing to export.', 'payroll-statutory-error');
+      return;
+    }
+    const label = kind === 'ECR'
+      ? 'EPF ECR'
+      : kind === 'ESI'
+        ? 'ESI return'
+        : kind === '24Q'
+          ? 'Form 24Q'
+          : 'Form 16 working paper';
+    const headers = kind === 'ECR'
+      ? ['UAN', 'Employee', 'Gross wages', 'PF wages', 'Employee PF', 'Employer PF', 'NCP days']
+      : kind === 'ESI'
+        ? ['ESIC number', 'Employee', 'ESI wages', 'Paid days', 'Employee ESI', 'Employer ESI', 'Contribution period']
+        : kind === '24Q'
+          ? ['PAN', 'Employee', 'Gross salary', 'TDS', 'Months']
+          : ['Month', 'Gross salary', 'TDS', 'Net pay'];
+    const csvRows = kind === 'ECR'
+      ? result.rows.map((row) => [row.uan, row.name, row.grossWages, row.pfWages, row.employeePf, row.employerPf, row.ncpDays])
+      : kind === 'ESI'
+        ? result.rows.map((row) => [row.esic, row.name, row.grossWages, row.paidDays, row.employeeEsi, row.employerEsi, row.contributionPeriod])
+        : kind === '24Q'
+          ? result.rows.map((row) => [row.pan, row.name, row.gross, row.tds, row.months])
+          : result.rows.map((row) => [row.month, row.gross, row.tds, row.net]);
+    const period = kind === 'ECR' || kind === 'ESI' ? month : kind === '24Q' ? result.quarter : result.from;
+    const filename = `ZledgerCraft-${kind === '16' ? 'Form16' : kind}-${period}${format === 'json' ? '.json' : '.csv'}`;
+    const content = format === 'json'
+      ? JSON.stringify(result, null, 2)
+      : [headers, ...csvRows].map((row) => row.map(csvCell).join(',')).join('\r\n');
+    const blob = new Blob([format === 'csv' ? '\ufeff' : '', content], {
+      type: format === 'json' ? 'application/json;charset=utf-8' : 'text/csv;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setFlash(
+      `${label} working paper downloaded as ${format.toUpperCase()}${result.warnings?.length ? `; ${result.warnings.join(' ')}` : ''}.`,
+      result.warnings?.length ? 'warn' : 'ok',
+    );
     return;
   }
 

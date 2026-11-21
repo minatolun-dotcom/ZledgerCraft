@@ -392,9 +392,8 @@ disabled.
 - Foreign-currency entry: choose a currency and an exchange rate, enter line
   amounts in that currency, and the voucher posts the converted INR amount. The
   voucher view keeps both the foreign amount and the base value. Stock items and
-  bill-wise settlement are not available on foreign vouchers yet, and a foreign
-  voucher line is still base-ledger accounting, not a separate foreign-currency
-  ledger balance.
+  explicit bill-wise settlement are not available on foreign vouchers; foreign
+  receipts and payments are matched FIFO in the Forex report.
 - GST on Sales, Purchase, Credit Note and Debit Note vouchers: choose a rate
   and place of supply, add the party GSTIN for B2B, and flag reverse charge.
   Tax is computed from the taxable side, CGST+SGST or IGST plus cess are posted
@@ -595,12 +594,17 @@ disabled.
   against total receipts with the 95% test flagged), and a ten-clause Form
   3CD-style checklist with Ready/Review/Manual status. Informational only; not a
   Form 3CD or audit opinion.
-- Forex Revaluation as on a date: foreign balance, book INR value, latest rate,
-  revalued INR value and unrealised gain/loss for foreign asset and liability
-  ledgers. The report can post one revaluation Journal per date to Forex Gain
-  and Forex Loss; realised exchange differences on settlement are not calculated
-  separately and a base-currency settlement does not reduce the foreign balance
-  shown.
+- Currency ledger balances as on a date: foreign debit, credit and balance,
+  book INR value, average and latest rates, and revalued value for every ledger
+  touched by a foreign voucher. Asset and liability differences feed the
+  revaluation Journal; P&L balances are shown for comparison but not revalued.
+- Foreign settlement matching: same-currency receipts, payments and notes are
+  matched FIFO against party invoices. The report shows open foreign/book
+  balances, unrealised differences, matched invoice and settlement rates, and
+  realised gain/loss. The unposted difference can be posted once as a Journal
+  to Forex Gain or Forex Loss; a posted revaluation moves the carrying rate so
+  later settlement does not double-count it. The P&L and balance sheet disclose
+  posted realised/unrealised amounts and open currency exposure.
 - Salary register for a payroll month: employee-wise earnings, deductions by
   pay head, PF/ESI/PT totals and net pay, with a run list and drill-down to the
   posting voucher and printable payslips.
@@ -787,7 +791,8 @@ user-managed compliance calendar and tax-audit reconciliations, TDS/TCS deductio
 and challan tracking, payroll runs with payslips and a salary register, report
 export, backup snapshots,
 an append-only audit trail, bank statement reconciliation, foreign-currency
-vouchers with dated rates and unrealised forex revaluation, and multiple
+vouchers with dated rates, currency ledger balances, FIFO settlement matching,
+realised and unrealised forex posting, and multiple
 financial years with year-end closing.
 
 Deliberately not covered (each is a specialist area, and some are statutory):
@@ -803,7 +808,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque-book ranges with next numbers, cheque/DD advice, receipt deposit-slip and contra advice previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no multiple instruments per voucher, automatic number allocation, magnetic-ink cheque stationery presets or bank-issued advice formats |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary, break-up and an unallocated-line reconciliation; no merging categories or split allocations |
 | Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance, over-budget status and a short amount history; no phased revision workflow, approval or cost-centre budgets |
-| Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting, a postable unrealised forex revaluation and postable simple overdue interest; no realised gain/loss posting, foreign inventory/bill allocations, interest compounding or reminders that post charges |
+| Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting, currency ledger balances, FIFO settlement matching, postable realised and unrealised forex differences, and postable simple overdue interest; no per-ledger currency, foreign openings/inventory, manual foreign bill allocation, interest compounding or reminders that post charges |
 | Multiple financial years per company, year-end closing and carry-forward | Covered — year selector, close/reopen and automatic next year; no closing journal is written because balances are cumulative |
 | Bill-wise entry and allocation | Covered — bill refs, due dates, explicit/FIFO settlements, ageing, bill-wise register and party statement with bill detail; no bill-wise opening allocation or bill interest |
 | User roles, TallyVault, edit log, cloud sync | Partial — local profiles plus password-backed LAN accounts or Neon Auth, owner/accountant/viewer roles, company-level server scoping, TOTP MFA in SQLite mode, hash-chained server audit, append-only app audit, SQLite or Neon Postgres workspace with conservative and scoped merge; Neon Auth mode has no MFA and uses Postgres profiles/sessions; no vault encryption |

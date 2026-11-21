@@ -167,6 +167,43 @@ export function trialBalance(company, filters = {}) {
   };
 }
 
+/** Realised and unrealised forex amounts already posted in a period. */
+export function forexStatementSummary(company, filters = {}) {
+  const from = filters.from || booksStart(company);
+  const to = filters.to || company.fyEnd;
+  let realisedGain = 0;
+  let realisedLoss = 0;
+  let unrealisedGain = 0;
+  let unrealisedLoss = 0;
+  for (const voucher of company.vouchers ?? []) {
+    if (voucher.fxSettlementDate && voucher.fxSettlementDate >= from && voucher.fxSettlementDate <= to) {
+      for (const row of voucher.fxSettlementRows ?? []) {
+        const amount = Number(row.realised) || 0;
+        if (amount > 0) realisedGain = round2(realisedGain + amount);
+        else realisedLoss = round2(realisedLoss - amount);
+      }
+    }
+    if (voucher.fxRevaluationDate && voucher.fxRevaluationDate >= from && voucher.fxRevaluationDate <= to) {
+      for (const row of voucher.fxRevaluationRows ?? []) {
+        const amount = Number(row.difference) || 0;
+        if (amount > 0) unrealisedGain = round2(unrealisedGain + amount);
+        else unrealisedLoss = round2(unrealisedLoss - amount);
+      }
+    }
+  }
+  return {
+    from,
+    to,
+    realisedGain,
+    realisedLoss,
+    unrealisedGain,
+    unrealisedLoss,
+    netRealised: round2(realisedGain - realisedLoss),
+    netUnrealised: round2(unrealisedGain - unrealisedLoss),
+    net: round2(realisedGain - realisedLoss + unrealisedGain - unrealisedLoss),
+  };
+}
+
 export function profitAndLoss(company, filters = {}) {
   const { from, to } = dateRange(company, filters);
   // Opening balances belong to the first day of the books, not to every year.
@@ -224,6 +261,7 @@ export function profitAndLoss(company, filters = {}) {
     grossProfit,
     netProfit,
     isProfit: netProfit >= 0,
+    forex: forexStatementSummary(company, { from, to }),
   };
 }
 
@@ -291,6 +329,10 @@ export function balanceSheet(company, filters = {}) {
     netProfit: pnl.netProfit,
     difference: round2(assetTotal - liabilityTotal),
     balanced: Math.abs(assetTotal - liabilityTotal) < EPSILON,
+    forex: {
+      ...forexStatementSummary(company, { from: booksStart(company), to }),
+      exposure: foreignLedgerBalances(company, { asOn: to }),
+    },
   };
 }
 
@@ -1113,6 +1155,381 @@ export function costCentreBreakup(company, centreId, filters = {}) {
   };
 }
 
+/** Currency-by-currency balances for every ledger touched by a foreign voucher. */
+export function foreignLedgerBalances(company, filters = {}) {
+  const asOn = filters.asOn || new Date().toISOString().slice(0, 10);
+  const buckets = new Map();
+  for (const voucher of company.vouchers ?? []) {
+    if (!voucher.currencyCode || voucher.currencyCode === 'INR' || voucher.date > asOn) continue;
+    for (const line of voucher.lines ?? []) {
+      if (line.currencyAmount === undefined) continue;
+      const ledger = company.ledgers.find((item) => item.id === line.ledgerId);
+      if (!ledger) continue;
+      const key = `${line.ledgerId}|${voucher.currencyCode}`;
+      if (!buckets.has(key)) {
+        const currency = (company.currencies ?? []).find((entry) => entry.code === voucher.currencyCode);
+        buckets.set(key, {
+          ledgerId: ledger.id,
+          ledger: ledger.name,
+          groupId: ledger.groupId,
+          group: groupById(company, ledger.groupId)?.name ?? '',
+          nature: groupNature(company, ledger.groupId),
+          currencyCode: voucher.currencyCode,
+          currencyName: currency?.name ?? voucher.currencyCode,
+          foreignBalance: 0,
+          bookBalance: 0,
+          debitForeign: 0,
+          creditForeign: 0,
+          lastVoucherDate: '',
+        });
+      }
+      const bucket = buckets.get(key);
+      const foreignAmount = Number(line.currencyAmount) || 0;
+      const baseAmount = Number(line.amount) || 0;
+      if (voucher.date > bucket.lastVoucherDate) bucket.lastVoucherDate = voucher.date;
+      if (line.side === 'Cr') {
+        bucket.foreignBalance = round2(bucket.foreignBalance - foreignAmount);
+        bucket.bookBalance = round2(bucket.bookBalance - baseAmount);
+        bucket.creditForeign = round2(bucket.creditForeign + foreignAmount);
+      } else {
+        bucket.foreignBalance = round2(bucket.foreignBalance + foreignAmount);
+        bucket.bookBalance = round2(bucket.bookBalance + baseAmount);
+        bucket.debitForeign = round2(bucket.debitForeign + foreignAmount);
+      }
+    }
+  }
+
+  for (const voucher of company.vouchers ?? []) {
+    if (voucher.fxRevaluationDate && voucher.fxRevaluationDate <= asOn) {
+      for (const row of voucher.fxRevaluationRows ?? []) {
+        const bucket = buckets.get(`${row.ledgerId}|${row.currencyCode}`);
+        if (bucket) bucket.bookBalance = round2(bucket.bookBalance + row.difference);
+      }
+    }
+    if (voucher.fxSettlementDate && voucher.fxSettlementDate <= asOn) {
+      for (const row of voucher.fxSettlementRows ?? []) {
+        const bucket = buckets.get(`${row.ledgerId}|${row.currencyCode}`);
+        if (bucket) bucket.bookBalance = round2(bucket.bookBalance + row.realised);
+      }
+    }
+  }
+
+  const rows = [...buckets.values()]
+    .filter((bucket) => Math.abs(bucket.foreignBalance) >= 0.005 || Math.abs(bucket.bookBalance) >= 0.005)
+    .map((bucket) => {
+      const latestRate = rateForCurrency(company, bucket.currencyCode, asOn);
+      const averageRate = Math.abs(bucket.foreignBalance) >= 0.005
+        ? round3(bucket.bookBalance / bucket.foreignBalance)
+        : null;
+      const revalued = latestRate === null ? null : round2(bucket.foreignBalance * latestRate);
+      const difference = revalued === null ? null : round2(revalued - bucket.bookBalance);
+      return {
+        ...bucket,
+        latestRate,
+        averageRate,
+        revalued,
+        difference,
+        revaluable: bucket.nature === 'Assets' || bucket.nature === 'Liabilities',
+      };
+    })
+    .sort((a, b) => a.currencyCode.localeCompare(b.currencyCode) || a.ledger.localeCompare(b.ledger));
+
+  const currencies = [...new Set(rows.map((row) => row.currencyCode))].map((code) => {
+    const currencyRows = rows.filter((row) => row.currencyCode === code);
+    const currency = (company.currencies ?? []).find((entry) => entry.code === code);
+    return {
+      code,
+      name: currency?.name ?? code,
+      ledgerCount: currencyRows.length,
+      netForeign: round2(currencyRows.reduce((sum, row) => sum + row.foreignBalance, 0)),
+      bookValue: round2(currencyRows.reduce((sum, row) => sum + row.bookBalance, 0)),
+      revalued: round2(currencyRows.reduce((sum, row) => sum + (row.revalued ?? 0), 0)),
+      difference: round2(
+        currencyRows.filter((row) => row.revaluable).reduce((sum, row) => sum + (row.difference ?? 0), 0),
+      ),
+    };
+  });
+
+  return {
+    asOn,
+    rows,
+    count: rows.length,
+    currencies,
+    revaluableDifference: round2(
+      rows.filter((row) => row.revaluable).reduce((sum, row) => sum + (row.difference ?? 0), 0),
+    ),
+  };
+}
+
+function postedSettlementTotals(company, asOn) {
+  const totals = new Map();
+  for (const voucher of company.vouchers ?? []) {
+    if (!voucher.fxSettlementDate || voucher.fxSettlementDate > asOn) continue;
+    for (const row of voucher.fxSettlementRows ?? []) {
+      const key = `${row.ledgerId}|${row.currencyCode}`;
+      totals.set(key, round2((totals.get(key) ?? 0) + (Number(row.realised) || 0)));
+    }
+  }
+  return totals;
+}
+
+/**
+ * FIFO settlement matching for foreign-currency party balances. Invoices create
+ * lots at their booked rate; receipts, payments and notes consume them. A posted
+ * revaluation adjusts the carrying base of the open lots before later matches.
+ */
+export function forexSettlementMatching(company, filters = {}) {
+  const asOn = filters.asOn || new Date().toISOString().slice(0, 10);
+  const ledgers = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
+  const buckets = new Map();
+  const events = new Map();
+
+  const bucketFor = (ledger, currencyCode) => {
+    const side = inGroupKey(company, ledger, 'sundryDebtors')
+      ? 'receivable'
+      : inGroupKey(company, ledger, 'sundryCreditors')
+        ? 'payable'
+        : null;
+    if (!side) return null;
+    const key = `${ledger.id}|${currencyCode}`;
+    if (!buckets.has(key)) {
+      const currency = (company.currencies ?? []).find((entry) => entry.code === currencyCode);
+      buckets.set(key, {
+        ledgerId: ledger.id,
+        party: ledger.name,
+        side,
+        currencyCode,
+        currencyName: currency?.name ?? currencyCode,
+        realised: 0,
+        gain: 0,
+        loss: 0,
+        matches: [],
+        lots: [],
+        advances: [],
+      });
+      events.set(key, []);
+    }
+    return { key, bucket: buckets.get(key), side };
+  };
+
+  for (const voucher of company.vouchers ?? []) {
+    if (!voucher.currencyCode || voucher.currencyCode === 'INR' || voucher.date > asOn) continue;
+    for (const [lineIndex, line] of (voucher.lines ?? []).entries()) {
+      if (line.currencyAmount === undefined) continue;
+      const ledger = ledgers.get(line.ledgerId);
+      if (!ledger) continue;
+      const info = bucketFor(ledger, voucher.currencyCode);
+      if (!info) continue;
+      const direction = info.side === 'receivable'
+        ? line.side === 'Dr' ? 1 : -1
+        : line.side === 'Cr' ? 1 : -1;
+      events.get(info.key).push({
+        kind: 'currency',
+        date: voucher.date,
+        no: Number(voucher.no) || 0,
+        lineIndex,
+        ref: billLabel(voucher),
+        voucherId: voucher.id,
+        direction,
+        foreign: Number(line.currencyAmount) || 0,
+        base: Number(line.amount) || 0,
+      });
+    }
+  }
+
+  for (const voucher of company.vouchers ?? []) {
+    if (!voucher.fxRevaluationDate || voucher.fxRevaluationDate > asOn) continue;
+    for (const row of voucher.fxRevaluationRows ?? []) {
+      const key = `${row.ledgerId}|${row.currencyCode}`;
+      if (!events.has(key)) continue;
+      events.get(key).push({
+        kind: 'revaluation',
+        date: voucher.fxRevaluationDate,
+        no: Number(voucher.no) || 0,
+        lineIndex: 0,
+        ref: billLabel(voucher),
+        voucherId: voucher.id,
+        direction: 0,
+        foreign: 0,
+        base: Number(row.difference) || 0,
+      });
+    }
+  }
+
+  for (const [key, list] of events) {
+    const bucket = buckets.get(key);
+    const directionSign = bucket.side === 'receivable' ? 1 : -1;
+    const addMatch = (match) => {
+      const realised = round2(match.realised);
+      bucket.realised = round2(bucket.realised + realised);
+      if (realised > 0) bucket.gain = round2(bucket.gain + realised);
+      else if (realised < 0) bucket.loss = round2(bucket.loss - realised);
+      bucket.matches.push({ ...match, realised });
+    };
+
+    list.sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) ||
+        (a.kind === 'revaluation' ? 1 : 0) - (b.kind === 'revaluation' ? 1 : 0) ||
+        a.no - b.no ||
+        a.lineIndex - b.lineIndex,
+    );
+
+    for (const event of list) {
+      if (event.kind === 'revaluation') {
+        const allocate = (pool, adjustment) => {
+          const totalForeign = round2(pool.reduce((sum, item) => sum + item.foreignLeft, 0));
+          if (totalForeign <= 0) return;
+          for (const item of pool) {
+            item.baseLeft = round2(
+              item.baseLeft + adjustment * (item.foreignLeft / totalForeign),
+            );
+          }
+        };
+        allocate(bucket.lots, directionSign * event.base);
+        allocate(bucket.advances, -directionSign * event.base);
+        continue;
+      }
+      if (event.foreign <= 0) continue;
+      let left = event.foreign;
+      if (event.direction > 0) {
+        for (const advance of bucket.advances) {
+          if (left <= 0.005) break;
+          if (advance.foreignLeft <= 0.005) continue;
+          const qty = round2(Math.min(advance.foreignLeft, left));
+          if (qty <= 0) continue;
+          const advanceRate = advance.baseLeft / advance.foreignLeft;
+          addMatch({
+            ledgerId: bucket.ledgerId,
+            party: bucket.party,
+            side: bucket.side,
+            currencyCode: bucket.currencyCode,
+            invoiceRef: event.ref,
+            invoiceDate: event.date,
+            settlementRef: advance.ref,
+            settlementDate: advance.date,
+            foreignAmount: qty,
+            invoiceRate: event.base / event.foreign,
+            settlementRate: advanceRate,
+            realised: directionSign * (advanceRate - event.base / event.foreign) * qty,
+          });
+          advance.foreignLeft = round2(advance.foreignLeft - qty);
+          advance.baseLeft = round2(advance.baseLeft - qty * advanceRate);
+          left = round2(left - qty);
+        }
+        if (left > 0.005) {
+          bucket.lots.push({
+            date: event.date,
+            ref: event.ref,
+            voucherId: event.voucherId,
+            foreignLeft: left,
+            baseLeft: round2(left * (event.base / event.foreign)),
+          });
+        }
+      } else {
+        for (const lot of bucket.lots) {
+          if (left <= 0.005) break;
+          if (lot.foreignLeft <= 0.005) continue;
+          const qty = round2(Math.min(lot.foreignLeft, left));
+          if (qty <= 0) continue;
+          const lotRate = lot.baseLeft / lot.foreignLeft;
+          const settlementRate = event.base / event.foreign;
+          addMatch({
+            ledgerId: bucket.ledgerId,
+            party: bucket.party,
+            side: bucket.side,
+            currencyCode: bucket.currencyCode,
+            invoiceRef: lot.ref,
+            invoiceDate: lot.date,
+            settlementRef: event.ref,
+            settlementDate: event.date,
+            foreignAmount: qty,
+            invoiceRate: lotRate,
+            settlementRate,
+            realised: directionSign * (settlementRate - lotRate) * qty,
+          });
+          lot.foreignLeft = round2(lot.foreignLeft - qty);
+          lot.baseLeft = round2(lot.baseLeft - qty * lotRate);
+          left = round2(left - qty);
+        }
+        if (left > 0.005) {
+          bucket.advances.push({
+            date: event.date,
+            ref: event.ref,
+            voucherId: event.voucherId,
+            foreignLeft: left,
+            baseLeft: round2(left * (event.base / event.foreign)),
+          });
+        }
+      }
+    }
+  }
+
+  const posted = postedSettlementTotals(company, asOn);
+  const rows = [...buckets.values()]
+    .map((bucket) => {
+      const openLotsForeign = round2(bucket.lots.reduce((sum, lot) => sum + lot.foreignLeft, 0));
+      const openAdvancesForeign = round2(
+        bucket.advances.reduce((sum, advance) => sum + advance.foreignLeft, 0),
+      );
+      const openLotsBook = round2(bucket.lots.reduce((sum, lot) => sum + lot.baseLeft, 0));
+      const openAdvancesBook = round2(
+        bucket.advances.reduce((sum, advance) => sum + advance.baseLeft, 0),
+      );
+      const directionSign = bucket.side === 'receivable' ? 1 : -1;
+      const openForeign = round2(openLotsForeign - openAdvancesForeign);
+      const openBook = round2(openLotsBook - openAdvancesBook);
+      const latestRate = rateForCurrency(company, bucket.currencyCode, asOn);
+      const unrealised = latestRate === null
+        ? null
+        : round2(openForeign * latestRate * directionSign - openBook * directionSign);
+      const alreadyPosted = posted.get(`${bucket.ledgerId}|${bucket.currencyCode}`) ?? 0;
+      return {
+        ...bucket,
+        matches: bucket.matches.sort(
+          (a, b) => a.settlementDate.localeCompare(b.settlementDate) || a.invoiceDate.localeCompare(b.invoiceDate),
+        ),
+        lots: undefined,
+        advances: undefined,
+        openForeign,
+        openBook,
+        openLotsForeign,
+        openAdvancesForeign,
+        postedRealised: alreadyPosted,
+        unpostedRealised: round2(bucket.realised - alreadyPosted),
+        latestRate,
+        unrealised,
+      };
+    })
+    .filter(
+      (row) =>
+        row.matches.length > 0 ||
+        Math.abs(row.openForeign) >= 0.005 ||
+        Math.abs(row.openAdvancesForeign) >= 0.005,
+    )
+    .sort(
+      (a, b) =>
+        a.currencyCode.localeCompare(b.currencyCode) ||
+        a.side.localeCompare(b.side) ||
+        a.party.localeCompare(b.party),
+    );
+
+  const gain = round2(rows.reduce((sum, row) => sum + row.gain, 0));
+  const loss = round2(rows.reduce((sum, row) => sum + row.loss, 0));
+  return {
+    asOn,
+    rows,
+    count: rows.length,
+    matches: rows.flatMap((row) => row.matches),
+    gain,
+    loss,
+    net: round2(gain - loss),
+    unposted: round2(rows.reduce((sum, row) => sum + row.unpostedRealised, 0)),
+    openForeign: round2(rows.reduce((sum, row) => sum + row.openForeign, 0)),
+    currencies: [...new Set(rows.map((row) => row.currencyCode))],
+  };
+}
+
 /** Unrealised forex revaluation of foreign-currency balance-sheet ledgers. */
 export function forexRevaluation(company, filters = {}) {
   const asOn = filters.asOn || new Date().toISOString().slice(0, 10);
@@ -1151,10 +1568,17 @@ export function forexRevaluation(company, filters = {}) {
   }
 
   for (const voucher of company.vouchers ?? []) {
-    if (!voucher.fxRevaluationDate || voucher.fxRevaluationDate > asOn) continue;
-    for (const row of voucher.fxRevaluationRows ?? []) {
-      const bucket = buckets.get(`${row.ledgerId}|${row.currencyCode}`);
-      if (bucket) bucket.bookBalance = round2(bucket.bookBalance + row.difference);
+    if (voucher.fxRevaluationDate && voucher.fxRevaluationDate <= asOn) {
+      for (const row of voucher.fxRevaluationRows ?? []) {
+        const bucket = buckets.get(`${row.ledgerId}|${row.currencyCode}`);
+        if (bucket) bucket.bookBalance = round2(bucket.bookBalance + row.difference);
+      }
+    }
+    if (voucher.fxSettlementDate && voucher.fxSettlementDate <= asOn) {
+      for (const row of voucher.fxSettlementRows ?? []) {
+        const bucket = buckets.get(`${row.ledgerId}|${row.currencyCode}`);
+        if (bucket) bucket.bookBalance = round2(bucket.bookBalance + row.realised);
+      }
     }
   }
 

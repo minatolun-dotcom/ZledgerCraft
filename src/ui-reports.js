@@ -392,7 +392,10 @@ export function pnlScreen() {
       </div>
       <p class="verdict ${report.netProfit >= 0 ? 'ok' : 'bad'}">
         Net ${report.netProfit >= 0 ? 'profit' : 'loss'}: ${money(Math.abs(report.netProfit))}
-      </p>`,
+      </p>
+      ${report.forex.netRealised || report.forex.netUnrealised
+        ? `<p class="muted small">Forex included above: realised gain ${money(report.forex.realisedGain)}, realised loss ${money(report.forex.realisedLoss)}, unrealised gain ${money(report.forex.unrealisedGain)}, unrealised loss ${money(report.forex.unrealisedLoss)}.</p>`
+        : ''}`,
       `For the period ${esc(dateLabel(report.from))} to ${esc(dateLabel(report.to))}${report.includeOpening ? '' : ' · opening balances excluded'}`,
     )}
     ${panel(
@@ -412,6 +415,12 @@ export function balanceSheetScreen() {
   if (!company()) return emptyCompanyScreen('Balance Sheet');
   const active = company();
   const report = balanceSheet(active, { to: filters.period.to || active.fyEnd });
+  const exposure = report.forex.exposure.rows.filter((row) => row.revaluable);
+  const exposureRows = exposure
+    .map(
+      (row) => `<tr><td><strong>${esc(row.ledger)}</strong><div class="muted small">${esc(row.group)}</div></td><td>${esc(row.currencyCode)}</td><td class="num">${round2(row.foreignBalance).toFixed(2)}</td><td class="num">${money(row.bookBalance)}</td><td class="num">${money(row.revalued)}</td><td class="num ${row.difference > 0 ? 'pos' : row.difference < 0 ? 'neg' : ''}">${row.difference ? money(row.difference) : '—'}</td></tr>`,
+    )
+    .join('');
 
   const side = (sections, total) => `
     ${sections
@@ -445,7 +454,15 @@ export function balanceSheetScreen() {
     </div>
     <p class="verdict ${report.balanced ? 'ok' : 'bad'}">
       ${report.balanced ? 'Balance sheet tallies.' : `Out of balance by ${money(Math.abs(report.difference))}.`}
-    </p>`,
+    </p>
+    ${exposure.length
+      ? `<h3 class="column-title">Foreign-currency exposure</h3>
+        <div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Ledger</th><th>Currency</th><th class="num">Foreign balance</th><th class="num">Book value</th><th class="num">At latest rate</th><th class="num">Difference</th></tr></thead>
+          <tbody>${exposureRows}</tbody>
+        </table></div>
+        <p class="muted small">Posted revaluation difference: ${money(report.forex.exposure.revaluableDifference)}. Unrealised differences above are not adjusted unless posted from the Forex screen.</p>`
+      : ''}`,
     `As on ${esc(dateLabel(report.asOn))} · net ${report.netProfit >= 0 ? 'profit' : 'loss'} ${money(Math.abs(report.netProfit))}`,
   );
 }

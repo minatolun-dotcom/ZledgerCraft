@@ -24,6 +24,8 @@ import {
 import {
   budgetVsActual,
   forexRevaluation,
+  forexSettlementMatching,
+  foreignLedgerBalances,
 } from './accounting.js';
 import { backupEncryptionAvailable } from './backup-crypto.js';
 import {
@@ -827,6 +829,8 @@ export function forexScreen() {
   const lastEnd = years.length ? years[years.length - 1].end : active.fyEnd;
   const asOnValue = filters.forex.asOn || todayIso();
   const report = forexRevaluation(active, { asOn: asOnValue });
+  const balances = foreignLedgerBalances(active, { asOn: asOnValue });
+  const settlements = forexSettlementMatching(active, { asOn: asOnValue });
   const rows = report.rows
     .map(
       (row) => `<tr>
@@ -839,6 +843,57 @@ export function forexScreen() {
         <td class="num">${money(row.revalued)}</td>
         <td class="num ${row.gain ? 'pos' : ''}">${row.gain ? money(row.gain) : '—'}</td>
         <td class="num ${row.loss ? 'neg' : ''}">${row.loss ? money(row.loss) : '—'}</td>
+      </tr>`,
+    )
+    .join('');
+  const balanceRows = balances.rows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.ledger)}</strong><div class="muted small">${esc(row.group)}</div></td>
+        <td class="muted">${esc(row.nature)}</td>
+        <td>${esc(row.currencyCode)}</td>
+        <td class="num">${round2(row.debitForeign).toFixed(2)}</td>
+        <td class="num">${round2(row.creditForeign).toFixed(2)}</td>
+        <td class="num"><strong>${round2(row.foreignBalance).toFixed(2)}</strong></td>
+        <td class="num">${money(row.bookBalance)}</td>
+        <td class="num">${row.averageRate === null ? '—' : esc(row.averageRate.toFixed(4))}</td>
+        <td class="num">${row.latestRate === null ? '—' : money(row.latestRate)}</td>
+        <td class="num">${row.revalued === null ? '—' : money(row.revalued)}</td>
+        <td class="num ${row.revaluable && row.difference > 0 ? 'pos' : row.revaluable && row.difference < 0 ? 'neg' : ''}">${!row.revaluable ? '<span class="muted">Not revalued</span>' : row.difference ? money(row.difference) : '—'}</td>
+      </tr>`,
+    )
+    .join('');
+  const currencyCards = balances.currencies
+    .map(
+      (currency) => `<div class="ratio-card"><span class="ratio-label">${esc(currency.code)} · ${esc(currency.name)}</span><strong>${money(currency.bookValue)}</strong><span class="muted small">${round2(currency.netForeign).toFixed(2)} net foreign · ${currency.ledgerCount} ledger${currency.ledgerCount === 1 ? '' : 's'}${currency.difference ? ` · ${money(currency.difference)} revaluation` : ''}</span></div>`,
+    )
+    .join('');
+  const settlementRows = settlements.rows
+    .map(
+      (row) => `<tr>
+        <td><strong>${esc(row.party)}</strong><div class="muted small">${row.side === 'receivable' ? 'Receivable' : 'Payable'}</div></td>
+        <td>${esc(row.currencyCode)}</td>
+        <td class="num">${round2(row.openForeign).toFixed(2)}</td>
+        <td class="num">${money(row.openBook)}</td>
+        <td class="num ${row.unrealised > 0 ? 'pos' : row.unrealised < 0 ? 'neg' : ''}">${row.unrealised === null ? '—' : money(row.unrealised)}</td>
+        <td class="num ${row.gain ? 'pos' : ''}">${row.gain ? money(row.gain) : '—'}</td>
+        <td class="num ${row.loss ? 'neg' : ''}">${row.loss ? money(row.loss) : '—'}</td>
+        <td class="num">${money(row.postedRealised)}</td>
+        <td class="num ${row.unpostedRealised > 0 ? 'pos' : row.unpostedRealised < 0 ? 'neg' : ''}">${money(row.unpostedRealised)}</td>
+      </tr>`,
+    )
+    .join('');
+  const matchRows = settlements.matches
+    .slice(0, 250)
+    .map(
+      (match) => `<tr>
+        <td><strong>${esc(match.party)}</strong><div class="muted small">${esc(match.currencyCode)} · ${match.side === 'receivable' ? 'Receivable' : 'Payable'}</div></td>
+        <td>${esc(match.invoiceRef)}<div class="muted small">${esc(dateLabel(match.invoiceDate))}</div></td>
+        <td>${esc(match.settlementRef)}<div class="muted small">${esc(dateLabel(match.settlementDate))}</div></td>
+        <td class="num">${round2(match.foreignAmount).toFixed(2)}</td>
+        <td class="num">${money(match.invoiceRate)}</td>
+        <td class="num">${money(match.settlementRate)}</td>
+        <td class="num ${match.realised > 0 ? 'pos' : match.realised < 0 ? 'neg' : ''}">${money(match.realised)}</td>
       </tr>`,
     )
     .join('');
@@ -864,6 +919,42 @@ export function forexScreen() {
         </table></div>`
       : '<p class="muted">No foreign-currency asset or liability balances as on this date. Record a foreign voucher in Vouchers first.</p>'}`,
     'Foreign balances are signed: debit positive, credit negative. Posting creates one Journal that adjusts the foreign ledgers and books the net difference to Forex Gain or Forex Loss. Only one revaluation can be posted per date; the report itself remains a working paper until posted.',
+  ) + panel(
+    'Currency ledger balances',
+    `${currencyCards ? `<div class="ratio-grid">${currencyCards}</div>` : ''}
+    ${balances.rows.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Ledger</th><th>Nature</th><th>Currency</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th><th class="num">Book value</th><th class="num">Avg rate</th><th class="num">Latest rate</th><th class="num">Revalued</th><th class="num">Difference</th></tr></thead>
+          <tbody>${balanceRows}</tbody>
+        </table></div>`
+      : '<p class="muted">No currency activity as on this date. Record a foreign voucher in Vouchers first.</p>'}`,
+    'Every ledger touched by a foreign voucher is shown per currency. Debit and credit are in the foreign currency; book value is INR at the voucher rates. Profit &amp; loss balances are translated at the latest rate for comparison but are not revalued.',
+  ) + panel(
+    'Foreign settlement matching',
+    `<p class="muted">Receipts, payments and notes are matched against invoices FIFO in the same currency. The realised difference compares the settled amount with the invoice's carrying rate; any posted revaluation is reflected in the carrying rate.</p>
+    <div class="ratio-grid">
+      <div class="ratio-card"><span class="ratio-label">Realised gain</span><strong class="pos">${money(settlements.gain)}</strong><span class="muted small">${settlements.matches.length} matched settlement${settlements.matches.length === 1 ? '' : 's'}</span></div>
+      <div class="ratio-card"><span class="ratio-label">Realised loss</span><strong class="neg">${money(settlements.loss)}</strong><span class="muted small">${settlements.currencies.length} currenc${settlements.currencies.length === 1 ? 'y' : 'ies'}</span></div>
+      <div class="ratio-card"><span class="ratio-label">Not yet posted</span><strong class="${settlements.unposted < 0 ? 'neg' : 'pos'}">${money(settlements.unposted)}</strong><span class="muted small">Settlement difference</span></div>
+      <div class="ratio-card"><span class="ratio-label">Open foreign balance</span><strong>${round2(settlements.openForeign).toFixed(2)}</strong><span class="muted small">Across ${settlements.count} party currenc${settlements.count === 1 ? 'y' : 'ies'}</span></div>
+    </div>
+    ${Math.abs(settlements.unposted) >= 0.01 && can('voucher.write')
+      ? `<button class="btn small primary" type="button" data-action="post-forex-settlement" data-date="${esc(settlements.asOn)}">Post realised difference</button>`
+      : ''}
+    ${settlements.rows.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Party</th><th>Currency</th><th class="num">Open foreign</th><th class="num">Open book</th><th class="num">Unrealised</th><th class="num">Gain</th><th class="num">Loss</th><th class="num">Posted</th><th class="num">Unposted</th></tr></thead>
+          <tbody>${settlementRows}</tbody>
+        </table></div>`
+      : '<p class="muted">No foreign party balances to match as on this date.</p>'}
+    ${matchRows
+      ? `<h3 class="column-title">Matched settlements <span class="count">${settlements.matches.length}</span></h3>
+        <div class="table-scroll" tabindex="0"><table class="data-table compact">
+          <thead><tr><th>Party</th><th>Invoice</th><th>Settlement</th><th class="num">Foreign amount</th><th class="num">Book rate</th><th class="num">Settlement rate</th><th class="num">Realised</th></tr></thead>
+          <tbody>${matchRows}</tbody>
+        </table></div>${settlements.matches.length > 250 ? '<p class="muted small">Showing the first 250 matches.</p>' : ''}`
+      : ''}`,
+    'Posting books the unposted difference to the party ledger and Forex Gain or Forex Loss. Re-running the report after a posting only offers newly realised differences; it never posts the same settlement twice.',
   );
 }
 

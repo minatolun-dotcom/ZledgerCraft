@@ -123,8 +123,9 @@ Working now:
 - Annual budgets per ledger or group with a Budget vs Actual report, as-on date,
   variance, used percentage and over-budget status.
 - Foreign currency masters with dated INR rates, voucher-level currency and
-  exchange rate, base-amount posting with retained foreign amounts, and a Forex
-  Revaluation report for foreign asset/liability balances.
+  exchange rate, base-amount posting with retained foreign amounts, currency
+  ledger balances, FIFO settlement matching, a postable realised forex
+  difference and a Forex Revaluation report for foreign asset/liability balances.
 - Bill-wise register for customer/supplier bills with original, settled and
   outstanding amounts, status, overdue days and drill-down; party statement with
   bill references, allocation detail and every bill up to the report date.
@@ -251,7 +252,7 @@ Status: **Done**, **Partial**, **Missing**.
 | Multi-FY closing and carry-forward | Done |
 | Cost centres/categories and reports | Done (Stage 2; one centre per line, no split allocation) |
 | Budgets and budget-vs-actual | Done (Stage 2; annual ledger/group budgets, no phasing or revisions) |
-| Multi-currency and forex gain/loss | Done (Stage 2; voucher-level currency, dated rates and unrealised revaluation report; no realized gain/loss posting) |
+| Multi-currency and forex gain/loss | Done (Stage 2; voucher-level currency, dated rates, currency balances, FIFO settlement matching, realized gain/loss posting and unrealised revaluation; no per-ledger currency or foreign openings) |
 | Post-dated, memorandum, optional and reversing vouchers | Missing |
 | Bill-wise register and party statement | Done (Stage 2; register and party statement with bill detail) |
 | Custom document numbering | Missing |
@@ -321,7 +322,7 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 - [x] Cheque/DD details, cheque printing and post-dated register — 2026-11-18
 - [x] Cost centres and cost-category reports — 2026-11-18
 - [x] Budgets and budget-vs-actual — 2026-11-18
-- [x] Multi-currency and forex gain/loss — 2026-11-18 (voucher-level foreign currency, dated rates and unrealised revaluation; realized differences deferred)
+- [x] Multi-currency and forex gain/loss — 2026-11-18 (voucher-level foreign currency, dated rates, currency balances, FIFO settlement matching and realized/unrealised posting)
 - [x] Bill-wise register and party statement — 2026-11-18
 
 ### Stage 3 — Compliance (complete)
@@ -343,6 +344,17 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
+
+### 2026-11-21 — Phase 61: currency ledger balances and forex settlements
+
+- Every ledger touched by a foreign voucher reports foreign debit, credit,
+  balance, book value, average/latest rate and revalued value by currency.
+- Same-currency party receipts, payments and notes are matched FIFO to invoices;
+  realised gain/loss is posted once through Forex Gain/Loss, and a posted
+  revaluation moves the carrying rate so later settlement does not double count.
+- P&L and balance sheet disclose posted realised/unrealised forex and open
+  currency exposure.
+- Verification: 353 tests (352 pass, 1 skipped); 1,286.4 kB build.
 
 ### 2026-11-21 — Phase 60: stock/WIP posting
 

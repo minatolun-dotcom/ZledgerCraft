@@ -4511,6 +4511,61 @@ export function postForexRevaluation(company, input = {}) {
   return { ok: true, voucher: posted.voucher, gain, loss };
 }
 
+/**
+ * Post the still-unposted realised gain or loss from FIFO foreign-currency
+ * settlement matching. The party balance and Forex Gain/Loss are adjusted.
+ */
+export function postForexSettlement(company, input = {}) {
+  const date = String(input.date ?? '');
+  if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid settlement date.' };
+  seedYears(company);
+  const year = yearForDate(company, date);
+  if (!year) return { ok: false, error: 'The settlement date must fall inside a financial year.' };
+  if (year.closed) return { ok: false, error: 'The financial year is closed. Reopen it before posting forex settlement.' };
+  if ((company.vouchers ?? []).some((voucher) => voucher.fxSettlementDate === date)) {
+    return { ok: false, error: 'A forex settlement posting already exists for this date.' };
+  }
+  const rows = (Array.isArray(input.rows) ? input.rows : [])
+    .map((row) => ({
+      ledgerId: String(row.ledgerId ?? ''),
+      currencyCode: String(row.currencyCode ?? '').trim().toUpperCase(),
+      realised: round2(Number(row.realised) || 0),
+    }))
+    .filter((row) => row.ledgerId && row.currencyCode && Math.abs(row.realised) >= 0.01);
+  if (!rows.length) return { ok: false, error: 'There are no foreign-exchange settlement differences to post.' };
+  const ledgers = new Map((company.ledgers ?? []).map((ledger) => [ledger.id, ledger]));
+  if (rows.some((row) => !ledgers.has(row.ledgerId))) {
+    return { ok: false, error: 'A settlement ledger no longer exists. Refresh the report.' };
+  }
+  const gainLedger = ensureNamedLedger(company, 'Forex Gain', 'indirectIncomes');
+  const lossLedger = ensureNamedLedger(company, 'Forex Loss', 'indirectExpenses');
+  if (!gainLedger || !lossLedger) return { ok: false, error: 'Forex gain/loss ledger groups are missing.' };
+  const lines = [];
+  let gain = 0;
+  let loss = 0;
+  for (const row of rows) {
+    lines.push({
+      ledgerId: row.ledgerId,
+      side: row.realised > 0 ? 'Dr' : 'Cr',
+      amount: Math.abs(row.realised),
+    });
+    if (row.realised > 0) gain = round2(gain + row.realised);
+    else loss = round2(loss - row.realised);
+  }
+  if (gain) lines.push({ ledgerId: gainLedger.id, side: 'Cr', amount: gain });
+  if (loss) lines.push({ ledgerId: lossLedger.id, side: 'Dr', amount: loss });
+  const posted = addVoucher(company, {
+    type: 'Journal',
+    date,
+    narration: `Forex settlement difference as on ${date}`,
+    lines,
+  });
+  if (!posted.ok) return posted;
+  posted.voucher.fxSettlementDate = date;
+  posted.voucher.fxSettlementRows = rows.map((row) => ({ ...row }));
+  return { ok: true, voucher: posted.voucher, gain, loss };
+}
+
 export function postOverdueInterest(company, input = {}) {
   const date = String(input.date ?? '');
   if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid interest posting date.' };

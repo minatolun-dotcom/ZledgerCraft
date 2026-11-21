@@ -111,6 +111,7 @@ import {
   postBankAdjustment,
   postDueRecurringVouchers,
   postForexRevaluation,
+  postForexSettlement,
   postOverdueInterest,
   postRecurringVoucher,
   postStockCount,
@@ -175,6 +176,7 @@ import {
   eInvoiceRegister,
   ewayBillRegister,
   forexRevaluation,
+  forexSettlementMatching,
   godownStockSummary,
   groupSummary,
   gstReturns,
@@ -6337,6 +6339,39 @@ async function handleClick(event) {
       }
       setFlash(
         result.ok ? `Forex revaluation posted as Journal ${result.voucher.no}.` : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
+      break;
+    }
+
+    case 'post-forex-settlement': {
+      if (!can('voucher.write')) {
+        requirePermission('voucher.write');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Post the unposted realised foreign-exchange difference to Forex Gain or Forex Loss?')) break;
+      const report = forexSettlementMatching(active, { asOn: trigger.dataset.date });
+      const result = postForexSettlement(active, {
+        date: report.asOn,
+        rows: report.rows.map((row) => ({
+          ledgerId: row.ledgerId,
+          currencyCode: row.currencyCode,
+          realised: row.unpostedRealised,
+        })),
+      });
+      if (result.ok) {
+        logAudit(
+          'forex.settlement',
+          `Posted realised forex settlement difference for ${report.asOn} as voucher ${result.voucher.no}.`,
+          active,
+          `Journal ${result.voucher.no}`,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok ? `Realised forex difference posted as Journal ${result.voucher.no}.` : result.error,
         result.ok ? 'ok' : 'warn',
       );
       render();

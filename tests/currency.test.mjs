@@ -13,10 +13,17 @@ import {
   importState,
   normalizeCurrencies,
   postForexRevaluation,
+  postForexSettlement,
   rateForCurrency,
   updateCurrencyRate,
 } from '../src/store.js';
-import { forexRevaluation } from '../src/accounting.js';
+import {
+  balanceSheet,
+  forexRevaluation,
+  forexSettlementMatching,
+  foreignLedgerBalances,
+  profitAndLoss,
+} from '../src/accounting.js';
 
 function currencyFixture() {
   const company = createCompany('Forex Co', '2026-04-01').company;
@@ -369,4 +376,240 @@ test('base-currency vouchers are unchanged by the currency feature', () => {
   assert.equal(created.voucher.currencyCode, undefined);
   assert.equal(created.voucher.lines[0].currencyAmount, undefined);
   assert.equal(created.voucher.total, 1000);
+});
+
+test('currency ledger balances show foreign and book values by ledger and currency', () => {
+  const { company, customer, sales } = currencyFixture();
+  usd(company);
+  addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    currencyCode: 'USD',
+    exchangeRate: 83,
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 1000 },
+      { ledgerId: sales.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+  addVoucher(company, {
+    type: 'Receipt',
+    date: '2026-04-06',
+    currencyCode: 'USD',
+    exchangeRate: 84,
+    lines: [
+      { ledgerId: customer.id, side: 'Cr', amount: 400 },
+      { ledgerId: findLedgerByName(company, 'Bank').id, side: 'Dr', amount: 400 },
+    ],
+  });
+  addCurrencyRate(company, 'USD', { date: '2026-04-10', rate: 84 });
+
+  const report = foreignLedgerBalances(company, { asOn: '2026-04-10' });
+  assert.equal(report.rows.length, 3, 'the bank line also carries the receipt currency');
+  const party = report.rows.find((row) => row.ledger === 'Acme Global');
+  assert.equal(party.foreignBalance, 600);
+  assert.equal(party.bookBalance, 49400);
+  assert.equal(party.debitForeign, 1000);
+  assert.equal(party.creditForeign, 400);
+  assert.equal(party.latestRate, 84);
+  assert.equal(party.revalued, 50400);
+  assert.equal(party.difference, 1000);
+  assert.equal(party.revaluable, true);
+  const income = report.rows.find((row) => row.ledger === 'Sales');
+  assert.equal(income.foreignBalance, -1000);
+  assert.equal(income.bookBalance, -83000);
+  assert.equal(income.difference, -1000);
+  assert.equal(income.revaluable, false);
+  const bank = report.rows.find((row) => row.ledger === 'Bank');
+  assert.equal(bank.foreignBalance, 400);
+  assert.equal(bank.bookBalance, 33600);
+  assert.equal(report.currencies[0].code, 'USD');
+  assert.equal(report.currencies[0].netForeign, 0);
+  assert.equal(report.revaluableDifference, 1000);
+  assert.equal(foreignLedgerBalances(company, { asOn: '2026-04-04' }).rows.length, 0);
+});
+
+test('FIFO settlement matching realises the difference and posts it once', () => {
+  const { company, customer, sales } = currencyFixture();
+  usd(company);
+  addCurrencyRate(company, 'USD', { date: '2026-04-10', rate: 84 });
+  addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    currencyCode: 'USD',
+    exchangeRate: 83,
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 1000 },
+      { ledgerId: sales.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+  addVoucher(company, {
+    type: 'Receipt',
+    date: '2026-04-06',
+    currencyCode: 'USD',
+    exchangeRate: 84,
+    lines: [
+      { ledgerId: customer.id, side: 'Cr', amount: 400 },
+      { ledgerId: findLedgerByName(company, 'Bank').id, side: 'Dr', amount: 400 },
+    ],
+  });
+
+  const report = forexSettlementMatching(company, { asOn: '2026-04-10' });
+  assert.equal(report.rows.length, 1);
+  const row = report.rows[0];
+  assert.equal(row.party, 'Acme Global');
+  assert.equal(row.side, 'receivable');
+  assert.equal(row.matches.length, 1);
+  assert.equal(row.matches[0].foreignAmount, 400);
+  assert.equal(row.matches[0].invoiceRate, 83);
+  assert.equal(row.matches[0].settlementRate, 84);
+  assert.equal(row.realised, 400);
+  assert.equal(row.gain, 400);
+  assert.equal(row.openForeign, 600);
+  assert.equal(row.openBook, 49800);
+  assert.equal(row.unrealised, 600);
+  assert.equal(row.unpostedRealised, 400);
+
+  const posted = postForexSettlement(company, {
+    date: report.asOn,
+    rows: report.rows.map((entry) => ({
+      ledgerId: entry.ledgerId,
+      currencyCode: entry.currencyCode,
+      realised: entry.unpostedRealised,
+    })),
+  });
+  assert.equal(posted.ok, true, posted.error);
+  assert.equal(posted.gain, 400);
+  assert.equal(posted.voucher.type, 'Journal');
+  const partyLine = posted.voucher.lines.find((line) => line.ledgerId === customer.id);
+  assert.deepEqual({ side: partyLine.side, amount: partyLine.amount }, { side: 'Dr', amount: 400 });
+  const pnl = profitAndLoss(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(pnl.forex.realisedGain, 400);
+  assert.equal(pnl.forex.unrealisedGain, 0);
+  const sheet = balanceSheet(company, { to: '2026-04-30' });
+  assert.equal(sheet.forex.exposure.rows.find((row) => row.ledger === 'Acme Global').foreignBalance, 600);
+  assert.equal(forexSettlementMatching(company, { asOn: '2026-04-10' }).rows[0].unpostedRealised, 0);
+  assert.equal(
+    postForexSettlement(company, {
+      date: report.asOn,
+      rows: report.rows.map((entry) => ({
+        ledgerId: entry.ledgerId,
+        currencyCode: entry.currencyCode,
+        realised: entry.unpostedRealised,
+      })),
+    }).ok,
+    false,
+  );
+});
+
+test('a payable settled at a higher rate posts a realised loss', () => {
+  const { company, supplier, purchase } = currencyFixture();
+  usd(company);
+  addVoucher(company, {
+    type: 'Purchase',
+    date: '2026-04-06',
+    currencyCode: 'USD',
+    exchangeRate: 83,
+    lines: [
+      { ledgerId: purchase.id, side: 'Dr', amount: 500 },
+      { ledgerId: supplier.id, side: 'Cr', amount: 500 },
+    ],
+  });
+  addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-07',
+    currencyCode: 'USD',
+    exchangeRate: 84,
+    lines: [
+      { ledgerId: supplier.id, side: 'Dr', amount: 500 },
+      { ledgerId: findLedgerByName(company, 'Bank').id, side: 'Cr', amount: 500 },
+    ],
+  });
+
+  const report = forexSettlementMatching(company, { asOn: '2026-04-10' });
+  assert.equal(report.rows[0].side, 'payable');
+  assert.equal(report.rows[0].loss, 500);
+  assert.equal(report.rows[0].unpostedRealised, -500);
+  const posted = postForexSettlement(company, {
+    date: '2026-04-10',
+    rows: report.rows.map((row) => ({
+      ledgerId: row.ledgerId,
+      currencyCode: row.currencyCode,
+      realised: row.unpostedRealised,
+    })),
+  });
+  assert.equal(posted.ok, true, posted.error);
+  assert.equal(posted.loss, 500);
+  const partyLine = posted.voucher.lines.find((line) => line.ledgerId === supplier.id);
+  assert.deepEqual({ side: partyLine.side, amount: partyLine.amount }, { side: 'Cr', amount: 500 });
+});
+
+test('a posted revaluation moves the carrying rate so settlement does not double count', () => {
+  const { company, customer, sales } = currencyFixture();
+  usd(company);
+  addCurrencyRate(company, 'USD', { date: '2026-04-10', rate: 84 });
+  addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    currencyCode: 'USD',
+    exchangeRate: 83,
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 1000 },
+      { ledgerId: sales.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+  const revaluation = forexRevaluation(company, { asOn: '2026-04-10' });
+  assert.equal(postForexRevaluation(company, { date: '2026-04-10', rows: revaluation.rows }).ok, true);
+  addVoucher(company, {
+    type: 'Receipt',
+    date: '2026-04-11',
+    currencyCode: 'USD',
+    exchangeRate: 84,
+    lines: [
+      { ledgerId: customer.id, side: 'Cr', amount: 1000 },
+      { ledgerId: findLedgerByName(company, 'Bank').id, side: 'Dr', amount: 1000 },
+    ],
+  });
+
+  const report = forexSettlementMatching(company, { asOn: '2026-04-11' });
+  assert.equal(report.rows[0].matches.length, 1);
+  assert.equal(report.rows[0].matches[0].invoiceRate, 84);
+  assert.equal(report.rows[0].realised, 0);
+  assert.equal(report.rows[0].unpostedRealised, 0);
+});
+
+test('a revalued customer advance carries its adjustment into the later invoice', () => {
+  const { company, customer, sales } = currencyFixture();
+  usd(company);
+  addCurrencyRate(company, 'USD', { date: '2026-04-10', rate: 84 });
+  addVoucher(company, {
+    type: 'Receipt',
+    date: '2026-04-04',
+    currencyCode: 'USD',
+    exchangeRate: 83,
+    lines: [
+      { ledgerId: customer.id, side: 'Cr', amount: 1000 },
+      { ledgerId: findLedgerByName(company, 'Bank').id, side: 'Dr', amount: 1000 },
+    ],
+  });
+  const revaluation = forexRevaluation(company, { asOn: '2026-04-10' });
+  assert.equal(revaluation.rows[0].ledger, 'Acme Global');
+  assert.equal(revaluation.rows[0].loss, 1000);
+  assert.equal(postForexRevaluation(company, { date: '2026-04-10', rows: revaluation.rows }).ok, true);
+  addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-11',
+    currencyCode: 'USD',
+    exchangeRate: 84,
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 1000 },
+      { ledgerId: sales.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+
+  const report = forexSettlementMatching(company, { asOn: '2026-04-11' });
+  assert.equal(report.rows[0].matches.length, 1);
+  assert.equal(report.rows[0].matches[0].settlementRate, 84);
+  assert.equal(report.rows[0].matches[0].invoiceRate, 84);
+  assert.equal(report.rows[0].realised, 0);
+  assert.equal(report.rows[0].unpostedRealised, 0);
 });

@@ -1624,7 +1624,7 @@ export function voucherNewScreen() {
         </div>
       </div>
       ${ledgerDatalistHtml()}
-      ${foreign ? `<p class="muted small currency-hint">Amounts are entered in ${esc(draft.currencyCode)} and posted to the books in INR at the rate above. Stock items and bill-wise settlement are not available on foreign vouchers yet.</p>` : ''}
+      ${foreign ? `<p class="muted small currency-hint">Amounts are entered in ${esc(draft.currencyCode)} and posted to the books in INR at the rate above. Stock items and explicit bill-wise settlement are not available on foreign vouchers. Foreign receipts and payments are matched FIFO in the Forex report.</p>` : ''}
       <div class="table-scroll" tabindex="0"><table class="lines-table">
         <thead><tr><th>Particulars</th><th>Dr/Cr</th><th class="num">Amount${foreign ? ` (${esc(draft.currencyCode)})` : ''}</th><th>Cost centre</th><th></th></tr></thead>
         <tbody>${rows}</tbody>

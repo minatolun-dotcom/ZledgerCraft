@@ -50,9 +50,9 @@ unreviewed internet exposure; the remaining limits and operator duties are in
 
 **Recommended next work:** choose from the
 [active local backlog](KNOWN_LIMITS.md#active-local-backlog). The highest-leverage
-lanes are local statutory depth (GSTR-2B, GSTR-9, late-fee calculation and
-TDS/payroll working papers), GST model depth (exports/SEZ, RCM, openings and
-split balancing), forex/cost-centre depth and inventory batch/FIFO
+lanes are payroll statutory working papers (ECR, ESI, 24Q and 16), GST model
+depth (exports/SEZ, composition, RCM, openings and split balancing),
+e-invoice line depth, forex/cost-centre depth and inventory batch/FIFO
 manufacturing. Live-workspace encryption, nested-field querying, write
 APIs/webhooks and offline mode remain larger platform projects. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
@@ -183,9 +183,8 @@ Why it is not production-ready: browser mode still lives in one browser's local
 storage with unprotected access-control profiles, the app audit trail is not
 tamper-proof, the live workspace is not encrypted, and LAN mode is one
 same-machine SQLite server with voucher leases but no field-level history. Bank
-reconciliation has no split/many-to-one matching, statutory returns remain
-working papers with no GSTR-2B/GSTR-9 or TDS/payroll return generation, payroll
-has no statutory return files, and inventory lacks FIFO/expiry costing,
+reconciliation has no split/many-to-one matching, payroll has no statutory
+return files, and inventory lacks FIFO/expiry costing,
 batch-tracked BOM components, partial-completion WIP and several automatic
 stock journals. Mobile use, report layout, import recovery and large-workspace
 performance are also deliberately limited. The full deferred list is in
@@ -201,9 +200,9 @@ Status: **Done**, **Partial**, **Missing**.
 | --- | --- |
 | GST registration, tax ledgers, HSN/SAC and rate setup | Done (Stage 3; GSTIN, home state, rate master, tax ledgers and HSN on stock items; no SAC master) |
 | GST on vouchers: CGST/SGST/IGST, cess, reverse charge, exempt/nil | Partial — voucher and per-line rates, cess, RCM flag and Nil/Exempt; no exports/SEZ, composition or ITC reversal |
-| GSTR-1, GSTR-3B, GSTR-2B reconciliation and annual returns | Partial — GSTR-1 outward working papers, HSN summary, GSTR-3B liability/ITC summary, a monthly GSTR-1 JSON export for manual upload and a hand-entered filing/ARN register; no portal filing, GSTN API submission, automatic acknowledgement, 2B reconciliation or annual return |
-| E-invoice and e-way bill generation | Partial — B2B e-invoice readiness and draft NIC-style JSON; e-way working papers, Part B transporter/vehicle details and draft JSON at a configurable threshold; no IRN/QR, consolidated e-way bill, validity, cancellation or amendment |
-| TDS/TCS sections, thresholds, challans, returns and certificates | Partial — TAN, section/rate/threshold master, TDS on purchases, TCS on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns, certificates, threshold enforcement, higher-rate/no-PAN logic or journal deductions |
+| GSTR-1, GSTR-3B, GSTR-2B reconciliation and annual returns | Partial — GSTR-1 outward working papers, HSN summary, GSTR-3B liability/ITC summary, GSTR-2B B2B import/reconciliation, GSTR-9 annual working paper/JSON, a late-fee/interest estimator, a monthly GSTR-1 JSON export and a hand-entered filing/ARN register; no CMP-08/GSTR-4 or other return formats |
+| E-invoice and e-way bill generation | Partial — B2B e-invoice readiness and draft NIC-style JSON; e-way working papers, Part B transporter/vehicle details, distance-based validity and draft JSON at a configurable threshold; no IRN/QR, consolidated e-way bill, per-item e-invoice rates/discounts or amendment |
+| TDS/TCS sections, thresholds, challans, returns and certificates | Partial — TAN, section/rate/threshold master, TDS on purchases, TCS on sales, party PAN, register with quarterly and threshold views, challan tracking and downloadable 26Q/27Q/27EQ working papers; no signed certificates, TRACES, threshold enforcement, higher-rate/no-PAN logic or journal deductions |
 | Tax audit, reconciliation and statutory registers | Partial — turnover, output-tax/ITC and TDS/TCS reconciliations plus a Form 3CD-style checklist and a user-managed compliance calendar; no Form 3CD, audit opinion, statutory registers or consolidation |
 | Immutable audit trail | Done (Stage 1, app-level append-only; not tamper-proof against browser-storage edits) |
 
@@ -346,6 +345,20 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
+
+### 2026-11-21 — Phase 67: local statutory depth and GST/TDS coexistence
+
+- Added GSTR-2B B2B JSON import, stored per period, with supplier-GSTIN,
+  invoice-number and value reconciliation against purchases and inward debit
+  notes, including both-way missing lists and tax-at-risk totals.
+- Added a GSTR-9 annual working paper and JSON download, plus a GST late-fee
+  and simple-interest estimator for GSTR-1, GSTR-3B and GSTR-9.
+- Added quarterly 26Q, 27Q and 27EQ CSV/JSON working papers from the local TDS/TCS
+  register, with missing-PAN counts and challan summaries.
+- GST and TDS/TCS can now share a purchase or sale voucher; withholding uses the
+  taxable value while the party line stays tax-inclusive.
+- E-way working papers now calculate distance-based validity and its expiry date.
+- Verification: 378 tests (377 pass, 1 skipped); 1,361.4 kB build.
 
 ### 2026-11-21 — Phase 66: external dependency parking and local backlog audit
 

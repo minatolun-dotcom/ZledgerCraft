@@ -3485,7 +3485,7 @@ export async function handleSubmit(event) {
       ]);
     }
     setFlash(`Downloaded ${result.form} ${result.quarter} working paper. Nothing was filed.`);
-    break;
+    return;
   }
 
   if (form.id === 'gst-filing-form') {

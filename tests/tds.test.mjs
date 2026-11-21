@@ -208,7 +208,7 @@ test('TDS/TCS validation rejects wrong vouchers, sections and PANs', () => {
   assert.equal(journal.ok, false);
 });
 
-test('GST and TDS/TCS cannot share a voucher', () => {
+test('GST and TDS/TCS can share a voucher', () => {
   const { company, supplier, purchases } = fixture();
   const setup = saveGstSettings(company, {
     enabled: true,
@@ -226,8 +226,10 @@ test('GST and TDS/TCS cannot share a voucher', () => {
     gst: { rateId: company.gst.rates.find((rate) => rate.rate === 18).id, placeOfSupply: '27' },
     tds: { sectionId: section(company, '194J').id },
   });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /both GST and TDS\/TCS/);
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.voucher.tds.base, 1000);
+  assert.equal(result.voucher.tds.amount, 100);
+  assert.equal(result.voucher.lines.find((line) => line.ledgerId === supplier.id).amount, 1080);
 });
 
 test('a 100% section cannot take the whole party amount', () => {

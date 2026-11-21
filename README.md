@@ -415,7 +415,8 @@ disabled.
   and the deductee PAN (prefilled from the party ledger), or set a section per
   taxable line and mark exempt lines. Deductions aggregate by section, post to
   TDS Payable or TCS Payable, and reduce/increase the party line. GST and TDS/TCS
-  cannot be combined on one voucher yet.
+  can be combined on the same purchase or sale: withholding uses the taxable
+  value and the party line stays tax-inclusive.
 
 **Payroll**
 - Run payroll for a month: the run debits each earning ledger, credits each
@@ -567,11 +568,19 @@ disabled.
   with optional late fee and interest and deleted, with payable to date,
   challans paid, late fee, interest and outstanding shown. A
   deductee-and-quarter certificate working paper shows PAN, sections, base and
-  tax for preparing Form 16A/27D-style certificates. Nothing is filed, generated
-  as a certificate or acknowledged by TRACES.
-- GST annual working paper: month-by-month outward taxable value, output tax,
-  ITC and net tax for the financial year, with totals. It is not GSTR-9 or a
-  filed annual return.
+  tax for preparing Form 16A/27D-style certificates. Quarterly 26Q, 27Q and 27EQ
+  CSV/JSON working papers are downloadable from the same register. Nothing is
+  filed, generated as a signed certificate or acknowledged by TRACES.
+- GSTR-9 annual working paper: month-by-month outward taxable value, output
+  tax, ITC and net tax plus an annual summary, rate summary and HSN rows, with a
+  labelled working-paper JSON download. It is not a filed annual return.
+- GSTR-2B reconciliation: import the portal JSON for a period, keep B2B invoices
+  by supplier GSTIN, and compare invoice number, taxable value and tax with
+  purchase and inward debit-note vouchers. Matched, value-difference, missing-in-
+  books and missing-in-2B rows are listed with tax at risk. Nothing is uploaded.
+- GST late-fee/interest estimator for GSTR-1, GSTR-3B and GSTR-9: due date,
+  period, nil-return flag, net tax and annual turnover produce a daily late-fee
+  and 18% simple-interest estimate. It does not create a challan.
 - GST returns as working papers for a period: GSTR-1 outward supplies by rate
   (sales less credit notes), B2B invoices with GSTIN and place of supply, B2C
   supplies by rate, credit notes with optional original-invoice links, an HSN/SAC
@@ -582,7 +591,8 @@ disabled.
   single-month GSTR-1 JSON export includes GSTN-style b2b, b2cs, cdnr/cdnur and
   HSN sections for manual upload. A filing register records the ARN, period,
   filed date and notes after the user files on the GST portal; it does not
-  transmit, verify or claim acceptance. Nothing is reconciled with GSTR-2B.
+  transmit, verify or claim acceptance. Imported GSTR-2B statements are compared
+  locally against purchase and debit-note vouchers.
 - E-invoice register for a period: seller profile from GST registration, every
   outward sales invoice with buyer GSTIN/address, B2B eligibility, readiness
   blockers and warnings for missing GSTIN, address, PIN, HSN/SAC or unit, and a
@@ -590,16 +600,17 @@ disabled.
   is produced and the aggregate-turnover test is not applied.
 - E-way bill register for a period: outward invoices at or above a configurable
   minimum (₹50,000 by default), consignee, destination state, taxable and invoice
-  value, Part A readiness notes, and saved Part B transporter, vehicle and
-  distance details per invoice with a draft JSON download. Nothing is submitted
-  to the portal.
+  value, Part A readiness notes, saved Part B transporter, vehicle and distance
+  details per invoice, and distance-based validity with its expiry date, plus a
+  draft JSON download. Nothing is submitted to the portal.
 - Compliance calendar: user-managed GST, TDS, payroll and other filing tasks
   with title, due date, category and notes. Open tasks are flagged overdue or
   due within seven days, and tasks can be edited, marked done, reopened and
   deleted. Optional filed-on date and acknowledgement/reference fields keep a
   local filing history. Optional late-fee and interest amounts are kept with
-  the task and totalled on the calendar. Due dates are not calculated and
-  nothing is filed.
+  the task and totalled on the calendar. A GST late-fee/interest estimator is
+  available on the GST screen, but task amounts remain manually entered. Nothing
+  is filed.
 - Tax audit working papers for a period: books turnover from Sales Accounts
   versus GST outward taxable, output-tax and input-credit reconciliation between
   GST-role ledgers and GSTR-3B, TDS/TCS deducted, paid and outstanding, the
@@ -814,9 +825,9 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | TallyPrime area | Status |
 | --- | --- |
 | Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, stock ageing, reorder watch, price list, dated stock counts with book/counted differences and batch-level count lines, partially fulfilled sales/purchase orders, multi-level phantom BOMs, production and wastage with automatic stock/WIP production journals; no alternative components/by-products, job work, FIFO/expiry batch costing, partial-completion WIP or automatic opening-stock journals |
-| GST registration, rates and tax on vouchers | Partial — GSTIN and home state, registration/party contacts, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and SAC on service ledgers, invoice-level tax on four voucher types and credit/debit-note invoice links; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
-| GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary, GSTR-3B liability/ITC summary with net payable, a monthly GSTR-1 JSON export for manual upload and a hand-entered ARN/filing-history register, B2B e-invoice readiness with draft NIC-style JSON, e-way drafts with saved Part B details and tax-audit reconciliations; no portal filing, GSTN API submission, IRP/e-way submission, IRN/QR, validity tracking, GSTR-2B reconciliation, annual return or Form 3CD |
-| TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking with optional late fee/interest; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
+| GST registration, rates and tax on vouchers | Partial — GSTIN and home state, registration/party contacts, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and SAC on service ledgers, voucher- and line-level tax on four voucher types, credit/debit-note invoice links and GST with TDS/TCS on one voucher; no exports/SEZ, composition scheme, separate RCM payable, ITC reversal or GST on advances |
+| GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary, GSTR-3B liability/ITC summary with net payable, GSTR-2B B2B import/reconciliation, GSTR-9 working paper/JSON, a late-fee/interest estimator, monthly GSTR-1 JSON, an ARN/filing-history register, B2B e-invoice drafts, e-way drafts with Part B and distance-based validity, and tax-audit reconciliations; no CMP-08/GSTR-4, IRN/QR, consolidated e-way, per-item e-invoice rates/discounts, Form 16/16A or Form 3CD |
+| TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, 26Q/27Q/27EQ working papers, and challan tracking with optional late fee/interest; no signed certificates, TRACES, threshold enforcement, higher-rate/no-PAN logic or journal deductions |
 | Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit and paid-days proration, casual/sick/earned leave balances and a leave register, bank details, one regular journal-posting run per month plus supplementary and signed adjustment runs, employee-wise salary register, printable payslips and a bank-transfer CSV, employee and optional employer PF/ESI, and a fixed PT amount; no automatic leave-to-paid-days link, overtime, general formula language, state PT slabs, ECR/returns, Form 24Q/16 or bank payment workflow |
 | Bank reconciliation and statement import | Covered — CSV, OFX, QIF and MT940 statement import, optional opening/closing balance validation, auto/manual matching, adjustment posting and book balance; no Excel or live bank feeds |
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque-book ranges with next numbers, cheque/DD advice, receipt deposit-slip and contra advice previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no multiple instruments per voucher, automatic number allocation, magnetic-ink cheque stationery presets or bank-issued advice formats |

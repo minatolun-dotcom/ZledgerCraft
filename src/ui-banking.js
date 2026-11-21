@@ -475,15 +475,32 @@ export function bankReconScreen() {
 
   const rows = report.lines
     .map((line) => {
-      const matched = line.matchedVoucherId
-        ? `<span class="badge">matched</span> ${line.matchedEntry ? `${esc(voucherLabel(line.matchedEntry.type))} ${line.matchedEntry.no}` : 'voucher'}
-           <button class="btn small" type="button" data-action="recon-unmatch" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Unmatch</button>`
-        : `<select class="recon-voucher" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>
+      const matchedIds = line.matchedVoucherIds ?? [];
+      const matchedDifference = line.matchedDifference ?? 0;
+      const differenceNote = Math.abs(matchedDifference) >= 0.005
+        ? `<div class="off-text small">Statement differs by ${money(line.amount - (line.matchedEntries ?? []).reduce((sum, entry) => sum + entry.amount, 0))}</div>`
+        : '';
+      let matched = '';
+      if (matchedIds.length > 1) {
+        const labels = (line.matchedEntries ?? [])
+          .map((entry) => `${voucherLabel(entry.type)} ${entry.no}`)
+          .join(' + ');
+        const total = (line.matchedEntries ?? []).reduce((sum, entry) => sum + entry.amount, 0);
+        matched = `<span class="badge">group</span> <strong>${matchedIds.length} vouchers</strong>
+          <div class="muted small">${esc(labels)} · ${money(total)}</div>${differenceNote}
+          <button class="btn small" type="button" data-action="recon-unmatch" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Unmatch</button>`;
+      } else if (matchedIds.length === 1) {
+        matched = `<span class="badge">matched</span> ${line.matchedEntry ? `${esc(voucherLabel(line.matchedEntry.type))} ${line.matchedEntry.no}` : 'voucher'}
+          ${differenceNote}
+          <button class="btn small" type="button" data-action="recon-unmatch" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Unmatch</button>`;
+      } else {
+        matched = `<select class="recon-voucher" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>
              <option value="">Choose voucher…</option>${entryOptions}
            </select>
            <button class="btn small primary" type="button" data-action="recon-match" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Match</button>
            <button class="btn small" type="button" data-action="recon-adjust" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Adjust</button>`;
-      return `<tr class="${line.matchedVoucherId ? '' : 'overdue-row'}">
+      }
+      return `<tr class="${matchedIds.length ? '' : 'overdue-row'}">
         <td>${esc(dateLabel(line.date))}</td>
         <td>${esc(line.description || '—')}${line.reference ? ` <span class="muted small">${esc(line.reference)}</span>` : ''}</td>
         <td class="num ${line.amount < 0 ? 'neg' : ''}">${money(line.amount)}</td>
@@ -491,6 +508,34 @@ export function bankReconScreen() {
       </tr>`;
     })
     .join('');
+
+  const unmatchedLines = report.lines.filter((line) => !(line.matchedVoucherIds ?? []).length);
+  const groupLineOptions = unmatchedLines
+    .map(
+      (line) => `<option value="${esc(line.id)}" data-amount="${line.amount}">${esc(dateLabel(line.date))} · ${esc(line.description || 'No description')} · ${money(line.amount)}</option>`,
+    )
+    .join('');
+  const groupEntries = report.unmatchedEntries.slice(0, 300);
+  const groupEntryOptions = groupEntries
+    .map(
+      (entry) => `<label class="recon-group-option">
+        <input type="checkbox" class="recon-group-voucher" value="${esc(entry.voucherId)}" data-amount="${entry.amount}"${canWrite ? '' : ' disabled'}>
+        <span><strong>${esc(dateLabel(entry.date))}</strong> · ${esc(voucherLabel(entry.type))} ${esc(entry.no)} · ${money(entry.amount)}
+          ${entry.narration ? `<span class="muted small">${esc(entry.narration)}</span>` : ''}</span>
+      </label>`,
+    )
+    .join('');
+  const groupPanel = canWrite && unmatchedLines.length && report.unmatchedEntries.length >= 2
+    ? panel(
+        'Match several vouchers to one statement line',
+        `<p class="muted small">Choose two or more unmatched bank entries whose signed amounts add up to one statement line. This is for one deposit made up of several receipts, or one payment covering several vouchers. Each voucher must appear once on this bank ledger.</p>
+        <label class="field"><span>Statement line</span><select id="recon-group-line"><option value="">Choose statement line…</option>${groupLineOptions}</select></label>
+        <div class="field"><span>Unmatched bank entries</span><div class="recon-group-list">${groupEntryOptions}</div></div>
+        <p id="recon-group-summary" class="muted small">Select at least two entries.</p>
+        <div class="form-actions"><button class="btn small primary" type="button" data-action="recon-group-match"${canWrite ? '' : ' disabled'}>Match selected vouchers</button></div>
+        ${report.unmatchedEntries.length > groupEntries.length ? `<p class="muted small">Showing the first ${groupEntries.length} unmatched entries. Use one-to-one matching for the rest.</p>` : ''}`,
+      )
+    : '';
 
   const unmatchedRows = report.unmatchedEntries
     .map(
@@ -514,9 +559,9 @@ export function bankReconScreen() {
           <select id="recon-adjust-ledger"><option value="">Choose ledger…</option>${adjustmentOptions}</select>
         </label>
       </div>
-      <p class="muted small">For an unmatched statement line, choose the other side and press Adjust. This posts a Journal to the bank ledger and marks the line matched. Auto-match uses narration overlap first, then date and amount; a tolerance allows small bank charges.</p>
+      <p class="muted small">For an unmatched statement line, choose one voucher and press Match, or use the group panel to match several vouchers whose total equals the line. Adjust posts a Journal to the bank ledger and marks the line matched. Auto-match uses narration overlap first, then date and amount; it groups up to three vouchers only when no single voucher fits, and a tolerance allows small bank charges.</p>
       <div class="ratio-grid">
-        <div class="ratio-card"><span class="ratio-label">Matched</span><strong>${report.matchedCount} / ${report.lines.length}</strong><span class="muted small">${report.matchedPercent}% of statement lines</span></div>
+        <div class="ratio-card"><span class="ratio-label">Matched</span><strong>${report.matchedCount} / ${report.lines.length}</strong><span class="muted small">${report.matchedPercent}% of statement lines${report.groupedCount ? ` · ${report.groupedCount} group${report.groupedCount === 1 ? '' : 's'}` : ''}</span></div>
         <div class="ratio-card"><span class="ratio-label">Statement unmatched</span><strong>${report.unmatchedCount}</strong><span class="muted small">${money(report.unmatchedStatementAmount)} value</span></div>
         <div class="ratio-card"><span class="ratio-label">Book unmatched</span><strong>${report.unmatchedEntries.length}</strong><span class="muted small">${money(report.unmatchedBookAmount)} value</span></div>
         <div class="ratio-card"><span class="ratio-label">Bank balance</span><strong>${money(report.bookBalance)}</strong><span class="muted small">${report.importedAt ? `Statement imported ${esc(new Date(report.importedAt).toLocaleDateString('en-IN'))}` : 'No statement imported'}</span></div>
@@ -560,6 +605,7 @@ export function bankReconScreen() {
           </table></div>`
         : '<p class="muted">No statement imported yet. Paste or choose a CSV above.</p>',
     )}
+    ${groupPanel}
     ${panel(
       `Unmatched bank entries <span class="count">${report.unmatchedEntries.length}</span>`,
       report.unmatchedEntries.length

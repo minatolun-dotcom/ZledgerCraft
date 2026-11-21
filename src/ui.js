@@ -135,6 +135,7 @@ import {
   saveState,
   saveTdsSettings,
   selectYear,
+  setBankGroupMatch,
   setBankMatch,
   setCurrentUser,
   setComplianceTaskStatus,
@@ -5363,9 +5364,16 @@ async function handleClick(event) {
         render();
         break;
       }
-      logAudit('bankRecon.auto', `Auto-matched ${result.count} bank statement line${result.count === 1 ? '' : 's'}.`, active, ledgerId);
+      logAudit(
+        'bankRecon.auto',
+        `Auto-matched ${result.count} bank statement line${result.count === 1 ? '' : 's'}${result.grouped ? `, including ${result.grouped} many-to-one group${result.grouped === 1 ? '' : 's'}` : ''}.`,
+        active,
+        ledgerId,
+      );
       persist();
-      setFlash(`Auto-matched ${result.count} line${result.count === 1 ? '' : 's'}.`);
+      setFlash(
+        `Auto-matched ${result.count} line${result.count === 1 ? '' : 's'}${result.grouped ? `, including ${result.grouped} group${result.grouped === 1 ? '' : 's'}` : ''}.`,
+      );
       navigate('bankRecon', { bankLedgerId: ledgerId });
       break;
     }
@@ -5433,6 +5441,44 @@ async function handleClick(event) {
       );
       persist();
       setFlash('Statement line matched.');
+      navigate('bankRecon', { bankLedgerId: ledgerId });
+      break;
+    }
+    case 'recon-group-match': {
+      if (!can('recon.write')) {
+        requirePermission('recon.write');
+        break;
+      }
+      const active = company();
+      const ledgerId = selectedBankLedgerId();
+      const lineId = document.getElementById('recon-group-line')?.value ?? '';
+      const voucherIds = [...document.querySelectorAll('input.recon-group-voucher:checked')].map(
+        (input) => input.value,
+      );
+      if (!active || !ledgerId || !lineId) {
+        setFlash('Choose a statement line first.', 'warn');
+        render();
+        break;
+      }
+      if (voucherIds.length < 2) {
+        setFlash('Choose at least two unmatched vouchers.', 'warn');
+        render();
+        break;
+      }
+      const result = setBankGroupMatch(active, ledgerId, lineId, voucherIds);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit(
+        'bankRecon.groupMatch',
+        `Matched ${result.vouchers.length} vouchers totalling ${money(result.total)} to statement line ${dateLabel(result.line.date)} · ${result.line.description || 'no description'}.`,
+        active,
+        ledgerId,
+      );
+      persist();
+      setFlash(`Matched ${result.vouchers.length} vouchers to one statement line.`);
       navigate('bankRecon', { bankLedgerId: ledgerId });
       break;
     }
@@ -7402,6 +7448,28 @@ export function handleChange(event) {
       })
       .catch(() => setFlash('Could not read that CSV file.', 'warn'));
     target.value = '';
+    return;
+  }
+
+  if (target.matches?.('#recon-group-line, input.recon-group-voucher')) {
+    const lineOption = document.querySelector('#recon-group-line option:checked');
+    const lineAmount = Number(lineOption?.dataset.amount ?? 0);
+    const selected = [...document.querySelectorAll('input.recon-group-voucher:checked')];
+    const total = round2(selected.reduce((sum, input) => sum + Number(input.dataset.amount || 0), 0));
+    const summary = document.getElementById('recon-group-summary');
+    if (summary) {
+      if (!lineOption) {
+        summary.textContent = 'Choose a statement line and at least two entries.';
+        summary.className = 'muted small';
+      } else if (selected.length < 2) {
+        summary.textContent = `Select at least two entries for ${money(lineAmount)}.`;
+        summary.className = 'muted small';
+      } else {
+        const difference = round2(lineAmount - total);
+        summary.textContent = `${selected.length} entries selected · ${money(total)} against ${money(lineAmount)} · ${difference === 0 ? 'balanced' : `difference ${money(difference)}`}`;
+        summary.className = difference === 0 ? 'muted small' : 'off-text small';
+      }
+    }
     return;
   }
 

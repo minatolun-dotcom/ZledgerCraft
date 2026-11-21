@@ -42,7 +42,7 @@ feature slice, L needs a data-model or workflow change.
 | Forex depth | Per-ledger currency, foreign openings, foreign stock/bill allocation, revaluation reversal and history | KL-64, KL-66, KL-67, KL-69 | L |
 | Cost and budget depth | Phased revision workflow and arbitrary multi-centre budgets | KL-21, KL-23, KL-24, KL-31, KL-60, KL-62, KL-63 | M–L |
 | Inventory and manufacturing | FIFO/expiry batch costing, batch-tracked BOM components, production edit/reversal, multi-godown production, automatic stock-adjustment journals, by-products/rework, godown valuation layers | KL-41, KL-44, KL-45, KL-101, KL-103–KL-107 | L |
-| Banking depth | Many-to-one statement matching, bulk adjustments, full instrument lifecycle, cheque/stationery alignment | KL-33, KL-34, KL-37–KL-40 | M |
+| Banking depth | Bulk adjustments, full instrument lifecycle, cheque/stationery alignment | KL-34, KL-37–KL-40 | M |
 | Import and restore | GST/TDS/cost-centre/currency columns, period-only restore, broader Tally XML and Excel coverage | KL-14–KL-18, KL-109–KL-112 | M–L |
 | Reporting and UX | Multi-period columns, configurable charts, report designer, branded full report pack, mobile-first pass, cross-device drafts, bulk voucher alteration, load benchmarks | KL-29, KL-30, KL-52, KL-55–KL-57, KL-117 | M–L |
 | Platform and security | Live-workspace encryption, tamper-evident audit anchoring, write API/webhooks, offline mode, nested-field querying and richer merge metadata | KL-03, KL-09, KL-10, KL-12, KL-108, KL-114, KL-115 | L |
@@ -122,7 +122,7 @@ feature slice, L needs a data-model or workflow change.
 | ID | Limit | Current behaviour / consequence |
 | --- | --- | --- |
 | KL-32 | Bank statement import is CSV only | CSV, OFX, QIF, MT940 and Excel workbooks are supported. No live bank feed. |
-| KL-33 | Auto-match is configurable, still one-to-one | Signed amount within an optional tolerance, a configurable date window and narration-word overlap ranking. It still matches one statement line to one voucher; there is no split or many-to-one matching. |
+| KL-33 | Matching supports many-to-one groups, but not one-to-many splits | Signed amount within an optional tolerance, a configurable date window and narration-word overlap ranking. Manual matching can attach two or more same-direction vouchers to one statement line when their signed total agrees and each voucher has exactly one line on that bank. Auto-match tries one-to-one first, then groups up to three vouchers. One voucher cannot be split across several statement lines, and there is no many-to-many matching. |
 | KL-34 | Reconciliation does not post adjustments | Matched/unmatched is a separate layer. An unmatched line can post a Journal against a chosen adjustment ledger, after which the line is matched. There is no bulk adjustment wizard or automatic category suggestion. |
 | KL-35 | Statement balance validation is optional | An imported statement can carry opening and closing balances, and reconciliation shows whether opening plus movement equals closing. The fields are optional, and the check proves only that the file is internally complete, not that it matches the bank or the book balance. |
 | KL-36 | Manual instrument status is a flag | A cheque/DD can be marked cleared, stopped or cancelled manually, or restored to the automatic post-dated/due/reconciliation status. These are flags only: they do not post entries, alter the voucher, or notify a bank. |

@@ -430,16 +430,32 @@ function isBankLedger(company, ledgerId) {
   return Boolean(ledger && bankGroupChain(company, ledger.groupId));
 }
 
-function bankEntryForVoucher(company, ledgerId, voucherId, amount) {
-  const voucher = company.vouchers.find((item) => item.id === voucherId);
+function signedBankLine(line) {
+  return line.side === 'Cr' ? -round2(line.amount) : round2(line.amount);
+}
+
+function bankLinesForVoucher(company, ledgerId, voucherId) {
+  const voucher = (company.vouchers ?? []).find((item) => item.id === voucherId);
   if (!voucher) return null;
-  return (
-    (voucher.lines ?? []).find((line) => {
-      if (line.ledgerId !== ledgerId) return false;
-      const signed = line.side === 'Cr' ? -round2(line.amount) : round2(line.amount);
-      return Math.abs(signed - round2(amount)) < 0.005;
-    }) ?? null
-  );
+  return { voucher, lines: (voucher.lines ?? []).filter((line) => line.ledgerId === ledgerId) };
+}
+
+function bankEntryForVoucher(company, ledgerId, voucherId, amount) {
+  const found = bankLinesForVoucher(company, ledgerId, voucherId);
+  if (!found) return null;
+  return found.lines.find((line) => Math.abs(signedBankLine(line) - round2(amount)) < 0.005) ?? null;
+}
+
+function bankEntryForVoucherAny(company, ledgerId, voucherId) {
+  return bankLinesForVoucher(company, ledgerId, voucherId)?.lines[0] ?? null;
+}
+
+/** A match is a voucher id for one-to-one, or an array of ids for many-to-one. */
+export function bankMatchVoucherIds(match) {
+  if (Array.isArray(match)) {
+    return [...new Set(match.filter((voucherId) => typeof voucherId === 'string' && voucherId))];
+  }
+  return typeof match === 'string' && match ? [match] : [];
 }
 
 /** Drops malformed cheque/DD details without touching the voucher itself. */
@@ -571,11 +587,21 @@ export function normalizeBankReconciliations(company) {
       ? { opening: round2(opening), closing: round2(closing) }
       : null;
     const matches = {};
-    for (const [lineId, voucherId] of Object.entries(config.matches ?? {})) {
+    for (const [lineId, match] of Object.entries(config.matches ?? {})) {
       const line = lines.find((entry) => entry.id === lineId);
       if (!line) continue;
-      if (!bankEntryForVoucher(company, ledgerId, String(voucherId), line.amount)) continue;
-      matches[lineId] = String(voucherId);
+      const voucherIds = bankMatchVoucherIds(match);
+      if (!voucherIds.length) continue;
+      if (voucherIds.length === 1) {
+        if (!bankEntryForVoucher(company, ledgerId, voucherIds[0], line.amount)) continue;
+        matches[lineId] = voucherIds[0];
+        continue;
+      }
+      const entries = voucherIds.map((voucherId) => bankEntryForVoucherAny(company, ledgerId, voucherId));
+      if (entries.some((entry) => !entry)) continue;
+      const total = round2(entries.reduce((sum, entry) => sum + signedBankLine(entry), 0));
+      if (Math.abs(total - line.amount) >= 0.005) continue;
+      matches[lineId] = voucherIds;
     }
     next[ledgerId] = {
       statement: {
@@ -653,6 +679,14 @@ export function clearBankStatement(company, ledgerId) {
   return { ok: true };
 }
 
+function matchedVoucherIds(config) {
+  const ids = new Set();
+  for (const match of Object.values(config.matches ?? {})) {
+    for (const voucherId of bankMatchVoucherIds(match)) ids.add(voucherId);
+  }
+  return ids;
+}
+
 export function setBankMatch(company, ledgerId, lineId, voucherId) {
   const config = company.bankReconciliations?.[ledgerId];
   if (!config) return { ok: false, error: 'Import a bank statement first.' };
@@ -661,7 +695,7 @@ export function setBankMatch(company, ledgerId, lineId, voucherId) {
   const voucher = company.vouchers.find((entry) => entry.id === voucherId);
   if (!voucher) return { ok: false, error: 'Voucher not found.' };
   if (config.matches[lineId]) return { ok: false, error: 'Unmatch this statement line first.' };
-  if (Object.values(config.matches).includes(voucherId)) {
+  if (matchedVoucherIds(config).has(voucherId)) {
     return { ok: false, error: 'That voucher is already matched to another statement line.' };
   }
   if (!bankEntryForVoucher(company, ledgerId, voucherId, line.amount)) {
@@ -669,6 +703,44 @@ export function setBankMatch(company, ledgerId, lineId, voucherId) {
   }
   config.matches[lineId] = voucherId;
   return { ok: true, line, voucher };
+}
+
+/** Matches several same-direction vouchers to one statement line when their signed total agrees. */
+export function setBankGroupMatch(company, ledgerId, lineId, voucherIds = []) {
+  const config = company.bankReconciliations?.[ledgerId];
+  if (!config) return { ok: false, error: 'Import a bank statement first.' };
+  const line = config.statement.lines.find((entry) => entry.id === lineId);
+  if (!line) return { ok: false, error: 'Statement line not found.' };
+  if (config.matches[lineId]) return { ok: false, error: 'Unmatch this statement line first.' };
+  const ids = [...new Set((Array.isArray(voucherIds) ? voucherIds : []).map((id) => String(id ?? '')).filter(Boolean))];
+  if (ids.length < 2) return { ok: false, error: 'Choose at least two vouchers for a group match.' };
+  if (ids.length > 50) return { ok: false, error: 'Match at most 50 vouchers to one statement line.' };
+  const alreadyMatched = matchedVoucherIds(config);
+  const selected = [];
+  for (const voucherId of ids) {
+    if (alreadyMatched.has(voucherId)) {
+      return { ok: false, error: 'One of those vouchers is already matched to another statement line.' };
+    }
+    const found = bankLinesForVoucher(company, ledgerId, voucherId);
+    if (!found) return { ok: false, error: 'Voucher not found.' };
+    if (found.lines.length !== 1) {
+      return { ok: false, error: `Voucher ${found.voucher.type} ${found.voucher.no} must have exactly one line on this bank ledger to join a group.` };
+    }
+    const amount = signedBankLine(found.lines[0]);
+    if (Math.sign(amount) !== Math.sign(line.amount)) {
+      return { ok: false, error: 'Grouped vouchers must move money in the same direction as the statement line.' };
+    }
+    selected.push({ voucher: found.voucher, amount });
+  }
+  const total = round2(selected.reduce((sum, entry) => sum + entry.amount, 0));
+  if (Math.abs(total - line.amount) >= 0.005) {
+    return {
+      ok: false,
+      error: `Selected vouchers total ${fmtMoney(total)} but the statement line is ${fmtMoney(line.amount)}. Difference ${fmtMoney(line.amount - total)}.`,
+    };
+  }
+  config.matches[lineId] = selected.map((entry) => entry.voucher.id);
+  return { ok: true, line, vouchers: selected.map((entry) => entry.voucher), total };
 }
 
 export function postBankAdjustment(company, ledgerId, lineId, offsetLedgerId) {
@@ -709,7 +781,6 @@ function statementDayGap(a, b) {
   return Math.abs(new Date(`${a}T00:00:00Z`) - new Date(`${b}T00:00:00Z`)) / 86400000;
 }
 
-/** Greedy one-to-one match by signed amount, preferring the nearest date. */
 function matchWords(value) {
   return new Set(
     String(value ?? '')
@@ -719,36 +790,121 @@ function matchWords(value) {
   );
 }
 
+/** Finds up to three same-direction book entries whose signed total fits one statement line. */
+function groupMatchCandidate(line, entries, dateWindow, tolerance) {
+  const target = round2(line.amount);
+  const targetAbs = Math.abs(target);
+  const toleranceAbs = Math.abs(tolerance) + 0.004;
+  const words = matchWords(line.description);
+  const seen = new Set();
+  const candidates = [];
+  for (const entry of entries) {
+    if (seen.has(entry.voucherId) || entry.bankLineCount !== 1) continue;
+    if (Math.sign(entry.amount) !== Math.sign(target)) continue;
+    if (Math.abs(entry.amount) > targetAbs + toleranceAbs) continue;
+    const gap = statementDayGap(line.date, entry.date);
+    if (gap > dateWindow) continue;
+    const entryWords = matchWords(entry.narration);
+    candidates.push({
+      ...entry,
+      gap,
+      overlapWords: [...words].filter((word) => entryWords.has(word)),
+    });
+    seen.add(entry.voucherId);
+  }
+  candidates.sort(
+    (a, b) =>
+      b.overlapWords.length - a.overlapWords.length ||
+      a.gap - b.gap ||
+      Math.abs(b.amount) - Math.abs(a.amount) ||
+      a.date.localeCompare(b.date) ||
+      a.no - b.no,
+  );
+  const pool = candidates.slice(0, 35);
+  if (pool.length < 2) return null;
+  let best = null;
+  let visits = 0;
+  const chosen = [];
+  const consider = (sum, overlapWords) => {
+    if (chosen.length < 2 || Math.abs(sum - target) > toleranceAbs) return;
+    if (visits > 50000) return;
+    const maxGap = Math.max(...chosen.map((entry) => entry.gap));
+    const totalGap = chosen.reduce((total, entry) => total + entry.gap, 0);
+    const amountDiff = Math.abs(sum - target);
+    const key = chosen.map((entry) => `${entry.date}|${entry.no}|${entry.voucherId}`).join('|');
+    if (
+      !best ||
+      overlapWords.size > best.overlap ||
+      (overlapWords.size === best.overlap && maxGap < best.maxGap) ||
+      (overlapWords.size === best.overlap && maxGap === best.maxGap && chosen.length < best.count) ||
+      (overlapWords.size === best.overlap &&
+        maxGap === best.maxGap &&
+        chosen.length === best.count &&
+        (totalGap < best.totalGap ||
+          (totalGap === best.totalGap &&
+            (amountDiff < best.amountDiff ||
+              (amountDiff === best.amountDiff && key < best.key)))))
+    ) {
+      best = {
+        entries: chosen.map(({ overlapWords: ignored, ...entry }) => entry),
+        overlap: overlapWords.size,
+        maxGap,
+        totalGap,
+        count: chosen.length,
+        amountDiff,
+        key,
+      };
+    }
+  };
+  const visit = (start, sum, overlapWords) => {
+    visits += 1;
+    if (visits > 50000) return;
+    consider(sum, overlapWords);
+    if (chosen.length >= 3) return;
+    for (let index = start; index < pool.length; index += 1) {
+      const entry = pool[index];
+      const next = round2(sum + entry.amount);
+      if (Math.abs(next) > targetAbs + toleranceAbs) continue;
+      chosen.push(entry);
+      visit(index + 1, next, new Set([...overlapWords, ...entry.overlapWords]));
+      chosen.pop();
+    }
+  };
+  visit(0, 0, new Set());
+  return best?.entries ?? null;
+}
+
+/** Greedy match by signed amount: one-to-one first, then up to three vouchers to one line. */
+
 export function autoMatchBank(company, ledgerId, options = {}) {
   const config = company.bankReconciliations?.[ledgerId];
   if (!config) return { ok: false, error: 'Import a bank statement first.' };
   const dateWindow = Math.min(60, Math.max(0, Math.round(Number(options.dateWindow ?? 7)) || 0));
   const tolerance = Math.min(100000, Math.max(0, Number(options.tolerance ?? 0.005) || 0));
-  const used = new Set(Object.values(config.matches));
+  const used = matchedVoucherIds(config);
   const entries = [];
   for (const voucher of company.vouchers) {
-    for (const line of voucher.lines ?? []) {
-      if (line.ledgerId !== ledgerId) continue;
+    const bankLines = (voucher.lines ?? []).filter((line) => line.ledgerId === ledgerId);
+    for (const line of bankLines) {
       entries.push({
         voucherId: voucher.id,
         date: voucher.date,
         no: Number(voucher.no) || 0,
         narration: voucher.narration ?? '',
-        amount: line.side === 'Cr' ? -round2(line.amount) : round2(line.amount),
+        amount: signedBankLine(line),
+        bankLineCount: bankLines.length,
       });
     }
   }
   let matched = 0;
+  let grouped = 0;
   const lines = [...config.statement.lines].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   for (const line of lines) {
     if (config.matches[line.id]) continue;
     const words = matchWords(line.description);
-    const candidates = entries
-      .filter(
-        (entry) =>
-          !used.has(entry.voucherId) &&
-          Math.abs(entry.amount - line.amount) <= tolerance + 0.004,
-      )
+    const available = entries.filter((entry) => !used.has(entry.voucherId));
+    const candidates = available
+      .filter((entry) => Math.abs(entry.amount - line.amount) <= tolerance + 0.004)
       .map((entry) => {
         const entryWords = matchWords(entry.narration);
         const overlap = [...words].filter((word) => entryWords.has(word)).length;
@@ -764,12 +920,20 @@ export function autoMatchBank(company, ledgerId, options = {}) {
           a.no - b.no,
       );
     const candidate = candidates[0];
-    if (!candidate) continue;
-    config.matches[line.id] = candidate.voucherId;
-    used.add(candidate.voucherId);
+    if (candidate) {
+      config.matches[line.id] = candidate.voucherId;
+      used.add(candidate.voucherId);
+      matched += 1;
+      continue;
+    }
+    const group = groupMatchCandidate(line, available, dateWindow, tolerance);
+    if (!group) continue;
+    config.matches[line.id] = group.map((entry) => entry.voucherId);
+    for (const entry of group) used.add(entry.voucherId);
+    grouped += 1;
     matched += 1;
   }
-  return { ok: true, count: matched };
+  return { ok: true, count: matched, grouped };
 }
 
 export function pruneBankReconciliations(company) {
@@ -782,11 +946,22 @@ export function pruneBankReconciliations(company) {
       delete company.bankReconciliations[ledgerId];
       continue;
     }
-    for (const [lineId, voucherId] of Object.entries(config.matches ?? {})) {
+    for (const [lineId, match] of Object.entries(config.matches ?? {})) {
       const line = config.statement.lines.find((entry) => entry.id === lineId);
-      if (!line || !bankEntryForVoucher(company, ledgerId, voucherId, line.amount)) {
+      const voucherIds = bankMatchVoucherIds(match);
+      if (!line || !voucherIds.length) {
         delete config.matches[lineId];
+        continue;
       }
+      if (voucherIds.length === 1) {
+        if (!bankEntryForVoucher(company, ledgerId, voucherIds[0], line.amount)) delete config.matches[lineId];
+        continue;
+      }
+      const entries = voucherIds.map((voucherId) => bankEntryForVoucherAny(company, ledgerId, voucherId));
+      const total = entries.every(Boolean)
+        ? round2(entries.reduce((sum, entry) => sum + signedBankLine(entry), 0))
+        : null;
+      if (total === null || Math.abs(total - line.amount) >= 0.005) delete config.matches[lineId];
     }
   }
   return company;
@@ -8842,8 +9017,17 @@ function validateImportedCompany(company) {
           return `Company "${name}": bank statement balances are invalid.`;
         }
       }
-      for (const [lineId, voucherId] of Object.entries(config.matches ?? {})) {
-        if (!config.statement.lines.some((line) => line.id === lineId) || !voucherIds.has(voucherId)) {
+      for (const [lineId, match] of Object.entries(config.matches ?? {})) {
+        if (!config.statement.lines.some((line) => line.id === lineId)) {
+          return `Company "${name}": a bank reconciliation match is invalid.`;
+        }
+        const ids = Array.isArray(match) ? match : [match];
+        if (
+          !ids.length ||
+          ids.some((voucherId) => typeof voucherId !== 'string' || !voucherIds.has(voucherId)) ||
+          new Set(ids).size !== ids.length ||
+          (Array.isArray(match) && ids.length < 2)
+        ) {
           return `Company "${name}": a bank reconciliation match is invalid.`;
         }
       }

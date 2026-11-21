@@ -10,6 +10,7 @@ import {
   importState,
   normalizeInstruments,
   saveBankStatement,
+  setBankGroupMatch,
   setBankMatch,
   setInstrumentStatus,
   updateVoucher,
@@ -145,6 +146,34 @@ test('post-dated register status follows the as-on date and reconciliation', () 
   assert.equal(report.clearedCount, 1);
   assert.equal(report.postDatedCount, 0);
   assert.equal(postDatedRegister(company, { asOn: '2026-05-20', status: 'Due' }).count, 0);
+});
+
+test('a grouped statement match clears every instrument in the group', () => {
+  const { company, bank, expense } = chequeFixture();
+  const first = payment(company, bank, expense, 500, '2026-05-10', {
+    kind: 'Cheque',
+    number: '7101',
+    date: '2026-05-20',
+    bankLedgerId: bank.id,
+  });
+  const second = payment(company, bank, expense, 300, '2026-05-10', {
+    kind: 'Cheque',
+    number: '7102',
+    date: '2026-05-20',
+    bankLedgerId: bank.id,
+  });
+  assert.equal(first.ok, true, first.error);
+  assert.equal(second.ok, true, second.error);
+  saveBankStatement(company, bank.id, [
+    { date: '2026-05-20', description: 'Cheques 7101 and 7102', amount: -800 },
+  ]);
+  const lineId = company.bankReconciliations[bank.id].statement.lines[0].id;
+  const matched = setBankGroupMatch(company, bank.id, lineId, [first.voucher.id, second.voucher.id]);
+  assert.equal(matched.ok, true, matched.error);
+
+  const report = postDatedRegister(company, { asOn: '2026-05-20' });
+  assert.equal(report.clearedCount, 2);
+  assert.equal(report.postDatedCount, 0);
 });
 
 test('instruments can be marked cleared, stopped or cancelled manually', () => {

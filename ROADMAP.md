@@ -113,8 +113,9 @@ Working now:
   Batch masters, bill allocations, GST/TDS detail and voucher numbers are not
   imported yet.
 - Bank reconciliation: CSV statement import, signed auto-matching within seven
-  days, one-to-one manual match/unmatch, unmatched book entries and statement
-  lines, book balance and audit events. Matching never changes a voucher.
+  days, one-to-one manual match/unmatch, manual many-to-one voucher groups,
+  bounded automatic groups, unmatched book entries and statement lines, book
+  balance and audit events. Matching never changes a voucher.
 - Cheque/DD details on payment, receipt and contra vouchers, a post-dated/due/
   cleared register with reconciliation-aware status, and a printable cheque
   preview with Indian-numbering amount words.
@@ -183,8 +184,8 @@ Why it is not production-ready: browser mode still lives in one browser's local
 storage with unprotected access-control profiles, the app audit trail is not
 tamper-proof, the live workspace is not encrypted, and LAN mode is one
 same-machine SQLite server with voucher leases but no field-level history. Bank
-reconciliation has no split/many-to-one matching, payroll has no statutory
-return files, and inventory lacks FIFO/expiry costing,
+reconciliation has no one-to-many voucher splitting or bulk adjustments,
+payroll has no statutory return files, and inventory lacks FIFO/expiry costing,
 batch-tracked BOM components, partial-completion WIP and several automatic
 stock journals. Mobile use, report layout, import recovery and large-workspace
 performance are also deliberately limited. The full deferred list is in
@@ -251,8 +252,8 @@ Status: **Done**, **Partial**, **Missing**.
 | --- | --- |
 | Double entry, eight voucher types, bill-wise allocation | Done |
 | Multi-FY closing and carry-forward | Done |
-| Cost centres/categories and reports | Done (Stage 2; one centre per line, no split allocation) |
-| Budgets and budget-vs-actual | Done (Stage 2; annual ledger/group budgets, no phasing or revisions) |
+| Cost centres/categories and reports | Done (Stage 2; single or amount-split centres per line, year-scoped openings and reports) |
+| Budgets and budget-vs-actual | Done (Stage 2; ledger/group and centre/category budgets, quarterly or monthly phasing; no revision workflow) |
 | Multi-currency and forex gain/loss | Done (Stage 2; voucher-level currency, dated rates, currency balances, FIFO settlement matching, realized gain/loss posting and unrealised revaluation; no per-ledger currency or foreign openings) |
 | Post-dated, memorandum, optional and reversing vouchers | Missing |
 | Bill-wise register and party statement | Done (Stage 2; register and party statement with bill detail) |
@@ -368,6 +369,20 @@ inside those stages.
   related limit IDs and rough size.
 - Corrected stale register entries: per-line GST is resolved; GST filing
   history and local statutory gaps are stated separately.
+
+### 2026-11-21 — Phase 72: many-to-one bank statement matching
+
+- A statement line can match several vouchers. Single matches remain voucher-id
+  strings, while groups store an array of ids in the same `matches` map, so old
+  backups and reports keep working.
+- Manual group matching requires at least two same-direction vouchers, exactly
+  one bank line per voucher and a signed total equal to the statement line.
+  Auto-match tries one-to-one first, then searches groups of up to three.
+- Reconciliation rows show group members, totals and any tolerance difference;
+  grouped matches clear every instrument in the post-dated register. Backup
+  validation, normalization, editing/deleting vouchers and statement pruning all
+  understand group matches.
+- Verification: 392 tests (391 pass, 1 skipped); 1,424.5 kB build.
 
 ### 2026-11-21 — Phase 71: multiple cost centres per voucher line
 

@@ -34,6 +34,10 @@ SQLite/Postgres workspace mirror and node:test regression suites.
 - Single-company restore while preserving the rest of the workspace.
 - Cost-centre amount splits per voucher line, with validated shares and
   split-aware summaries, break-ups, budgets and master merges.
+- Many-to-one bank statement matching: manual groups require same-direction
+  vouchers with an exact signed total, auto-match groups up to three after
+  one-to-one fails, and grouped matches survive backups and clear every
+  instrument in the group.
 - Optional quarterly budget phasing with elapsed-quarter budget-to-date.
 - Alternate-unit master, line conversion and amount-preserving valuation.
 - Full test suite and release verification recorded below.
@@ -46,10 +50,10 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 ## Verification
 
-- Full suite: 387 tests (386 pass, 1 skipped), 0 failures.
-- Build: 1,409.1 kB.
+- Full suite: 392 tests (391 pass, 1 skipped), 0 failures.
+- Build: 1,424.5 kB.
 - Targeted suites: GST, GSTR-2B, GSTR-9, late fee, TDS returns, inventory, bank, budgets, currency, bulk vouchers, payroll.
-- Latest deployment: https://86ba1a9f.zledgercraft.pages.dev (HTTP 200); custom domain https://zledgercraft.pages.dev/ also HTTP 200.
+- Latest deployment: https://67ee7f6b.zledgercraft.pages.dev (HTTP 200); custom domain https://zledgercraft.pages.dev/ also HTTP 200.
 - Projects 1–7 are complete. Project 8’s local work is complete; its parked
   external dependencies are excluded from the active backlog.
 

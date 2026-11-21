@@ -1,6 +1,7 @@
 // ZledgerCraft - accounting engine. Pure functions over a company object.
 import {
   VOUCHER_TYPES,
+  bankMatchVoucherIds,
   billLabel,
   booksStart,
   groupById,
@@ -427,6 +428,12 @@ export function bankReconciliation(company, ledgerId) {
   if (!ledger) return null;
   const config = company.bankReconciliations?.[ledgerId] ?? null;
   const matches = config?.matches ?? {};
+  const lineByVoucher = new Map();
+  for (const [lineId, match] of Object.entries(matches)) {
+    for (const voucherId of bankMatchVoucherIds(match)) {
+      if (!lineByVoucher.has(voucherId)) lineByVoucher.set(voucherId, lineId);
+    }
+  }
   const entries = [];
   const vouchers = [...company.vouchers].sort(
     (a, b) => a.date.localeCompare(b.date) || (Number(a.no) || 0) - (Number(b.no) || 0),
@@ -434,7 +441,6 @@ export function bankReconciliation(company, ledgerId) {
   for (const voucher of vouchers) {
     for (const [lineIndex, line] of (voucher.lines ?? []).entries()) {
       if (line.ledgerId !== ledgerId) continue;
-      const matchedLineId = Object.entries(matches).find(([, voucherId]) => voucherId === voucher.id)?.[0] ?? null;
       entries.push({
         voucherId: voucher.id,
         lineIndex,
@@ -443,16 +449,24 @@ export function bankReconciliation(company, ledgerId) {
         date: voucher.date,
         narration: voucher.narration ?? '',
         amount: line.side === 'Cr' ? -round2(line.amount) : round2(line.amount),
-        matchedLineId,
+        matchedLineId: lineByVoucher.get(voucher.id) ?? null,
       });
     }
   }
-  const lines = (config?.statement?.lines ?? []).map((line) => ({
-    ...line,
-    matchedVoucherId: matches[line.id] ?? null,
-    matchedEntry: entries.find((entry) => entry.voucherId === matches[line.id]) ?? null,
-  }));
-  const matchedLines = lines.filter((line) => line.matchedVoucherId);
+  const lines = (config?.statement?.lines ?? []).map((line) => {
+    const matchedVoucherIds = bankMatchVoucherIds(matches[line.id]);
+    const matchedEntries = entries.filter((entry) => matchedVoucherIds.includes(entry.voucherId));
+    const matchedTotal = round2(matchedEntries.reduce((sum, entry) => sum + entry.amount, 0));
+    return {
+      ...line,
+      matchedVoucherIds,
+      matchedVoucherId: matchedVoucherIds.length === 1 ? matchedVoucherIds[0] : null,
+      matchedEntry: matchedEntries[0] ?? null,
+      matchedEntries,
+      matchedDifference: matchedVoucherIds.length ? round2(matchedTotal - line.amount) : null,
+    };
+  });
+  const matchedLines = lines.filter((line) => line.matchedVoucherIds.length);
   const unmatchedEntries = entries.filter((entry) => !entry.matchedLineId);
   const opening = signedOpening(ledger);
   const bookBalance = round2(opening + entries.reduce((sum, entry) => sum + entry.amount, 0));
@@ -470,6 +484,11 @@ export function bankReconciliation(company, ledgerId) {
     unmatchedEntries,
     matchedCount: matchedLines.length,
     unmatchedCount: lines.length - matchedLines.length,
+    groupedCount: matchedLines.filter((line) => line.matchedVoucherIds.length > 1).length,
+    groupedVoucherCount: matchedLines.reduce(
+      (sum, line) => sum + Math.max(0, line.matchedVoucherIds.length - 1),
+      0,
+    ),
     matchedAmount: round2(matchedLines.reduce((sum, line) => sum + Math.abs(line.amount), 0)),
     unmatchedStatementAmount: round2(
       lines.filter((line) => !line.matchedVoucherId).reduce((sum, line) => sum + Math.abs(line.amount), 0),
@@ -817,7 +836,9 @@ export function postDatedRegister(company, filters = {}) {
   const asOn = filters.asOn || new Date().toISOString().slice(0, 10);
   const clearedVoucherIds = new Set();
   for (const config of Object.values(company.bankReconciliations ?? {})) {
-    for (const voucherId of Object.values(config.matches ?? {})) clearedVoucherIds.add(voucherId);
+    for (const match of Object.values(config.matches ?? {})) {
+      for (const voucherId of bankMatchVoucherIds(match)) clearedVoucherIds.add(voucherId);
+    }
   }
 
   const rows = (company.vouchers ?? [])

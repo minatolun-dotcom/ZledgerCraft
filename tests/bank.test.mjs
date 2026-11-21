@@ -18,6 +18,7 @@ import {
   updateChequeBook,
   postBankAdjustment,
   saveBankStatement,
+  setBankGroupMatch,
   setBankMatch,
   unsetBankMatch,
   updateVoucher,
@@ -165,6 +166,112 @@ test('auto-match honours narration overlap, date window and amount tolerance', (
   assert.equal(wider.count, 1);
   const rentLine = bankReconciliation(company, bank.id).lines.find((line) => line.description === 'Rent April cheque');
   assert.equal(company.bankReconciliations[bank.id].matches[rentLine.id], small.id);
+});
+
+test('manual group matching requires same-direction vouchers and an exact total', () => {
+  const { company, bank, capital, rent } = bankFixture();
+  const first = receipt(company, bank, capital, 1000, '2026-04-10', 'Deposit one');
+  const second = receipt(company, bank, capital, 500, '2026-04-11', 'Deposit two');
+  const third = receipt(company, bank, capital, 200, '2026-04-12', 'Deposit three');
+  const paid = payment(company, bank, rent, 300, '2026-04-13', 'Rent');
+  saveBankStatement(company, bank.id, [
+    { date: '2026-04-10', description: 'Combined deposit', amount: 1500 },
+    { date: '2026-04-11', description: 'Third deposit', amount: 200 },
+    { date: '2026-04-13', description: 'Rent cheque', amount: -300 },
+  ]);
+  const lines = company.bankReconciliations[bank.id].statement.lines;
+
+  const short = setBankGroupMatch(company, bank.id, lines[0].id, [first.id, third.id]);
+  assert.equal(short.ok, false);
+  assert.match(short.error, /total/i);
+
+  const duplicate = setBankGroupMatch(company, bank.id, lines[0].id, [first.id, first.id]);
+  assert.equal(duplicate.ok, false);
+  assert.match(duplicate.error, /at least two/i);
+
+  const mixed = setBankGroupMatch(company, bank.id, lines[0].id, [first.id, paid.id]);
+  assert.equal(mixed.ok, false);
+  assert.match(mixed.error, /same direction/i);
+
+  const matched = setBankGroupMatch(company, bank.id, lines[0].id, [first.id, second.id]);
+  assert.equal(matched.ok, true, matched.error);
+  assert.equal(matched.total, 1500);
+  assert.deepEqual(company.bankReconciliations[bank.id].matches[lines[0].id], [first.id, second.id]);
+
+  const report = bankReconciliation(company, bank.id);
+  const groupLine = report.lines.find((line) => line.id === lines[0].id);
+  assert.deepEqual(groupLine.matchedVoucherIds, [first.id, second.id]);
+  assert.equal(groupLine.matchedEntries.length, 2);
+  assert.equal(groupLine.matchedDifference, 0);
+  assert.equal(report.groupedCount, 1);
+  assert.equal(report.groupedVoucherCount, 1);
+  assert.equal(report.matchedCount, 1);
+  assert.equal(report.unmatchedEntries.length, 2);
+
+  assert.equal(setBankMatch(company, bank.id, lines[1].id, first.id).ok, false);
+  assert.equal(unsetBankMatch(company, bank.id, lines[0].id).ok, true);
+  assert.equal(company.bankReconciliations[bank.id].matches[lines[0].id], undefined);
+});
+
+test('auto-match groups up to three vouchers when no single amount fits', () => {
+  const { company, bank, capital } = bankFixture();
+  const first = receipt(company, bank, capital, 1000, '2026-04-10', 'Acme invoice one');
+  const second = receipt(company, bank, capital, 500, '2026-04-11', 'Acme invoice two');
+  saveBankStatement(company, bank.id, [
+    { date: '2026-04-10', description: 'Acme settlement', amount: 1500 },
+  ]);
+  const lineId = company.bankReconciliations[bank.id].statement.lines[0].id;
+
+  const matched = autoMatchBank(company, bank.id);
+  assert.equal(matched.ok, true, matched.error);
+  assert.equal(matched.count, 1);
+  assert.equal(matched.grouped, 1);
+  assert.deepEqual(company.bankReconciliations[bank.id].matches[lineId], [first.id, second.id]);
+
+  const report = bankReconciliation(company, bank.id);
+  assert.equal(report.matchedCount, 1);
+  assert.equal(report.groupedCount, 1);
+  assert.equal(report.lines[0].matchedEntries.length, 2);
+  assert.equal(report.unmatchedEntries.length, 0);
+});
+
+test('group matches survive backup restore and are removed when a voucher changes', () => {
+  const { company, bank, capital } = bankFixture();
+  const first = receipt(company, bank, capital, 1000, '2026-04-10');
+  const second = receipt(company, bank, capital, 500, '2026-04-11');
+  saveBankStatement(company, bank.id, [{ date: '2026-04-10', amount: 1500 }]);
+  const lineId = company.bankReconciliations[bank.id].statement.lines[0].id;
+  assert.equal(setBankGroupMatch(company, bank.id, lineId, [first.id, second.id]).ok, true);
+
+  const restored = importState(exportState({ version: 1, activeCompanyId: company.id, companies: [company] }));
+  assert.equal(restored.ok, true, restored.error);
+  const copy = restored.state.companies[0];
+  assert.deepEqual(copy.bankReconciliations[bank.id].matches[lineId], [first.id, second.id]);
+  assert.equal(bankReconciliation(copy, bank.id).groupedCount, 1);
+
+  const changed = updateVoucher(copy, first.id, {
+    type: 'Receipt',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: bank.id, side: 'Dr', amount: 1100 },
+      { ledgerId: capital.id, side: 'Cr', amount: 1100 },
+    ],
+  });
+  assert.equal(changed.ok, true, changed.error);
+  assert.equal(copy.bankReconciliations[bank.id].matches[lineId], undefined);
+});
+
+test('a backup with an invalid group match is rejected', () => {
+  const { company, bank, capital } = bankFixture();
+  const first = receipt(company, bank, capital, 1000, '2026-04-10');
+  const second = receipt(company, bank, capital, 500, '2026-04-11');
+  saveBankStatement(company, bank.id, [{ date: '2026-04-10', amount: 1500 }]);
+  const lineId = company.bankReconciliations[bank.id].statement.lines[0].id;
+  setBankGroupMatch(company, bank.id, lineId, [first.id, second.id]);
+  company.bankReconciliations[bank.id].matches[lineId] = [first.id, 'missing-voucher'];
+  const restored = importState(exportState({ version: 1, activeCompanyId: company.id, companies: [company] }));
+  assert.equal(restored.ok, false);
+  assert.match(restored.error, /bank reconciliation match is invalid/i);
 });
 
 test('unmatched statement lines can be posted as bank adjustments', () => {

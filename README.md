@@ -535,10 +535,13 @@ disabled.
   configurable date window and amount tolerance with narration-word ranking,
   match or unmatch manually, and see matched, unmatched
   statement lines, unmatched bank vouchers, inflow/outflow and book balance.
-  Optional opening and closing balances check that the statement file is
-  complete. An unmatched line can post a Journal against a chosen adjustment
-  ledger and is then matched automatically. Matching itself never alters a
-  voucher, and editing or deleting a matched voucher drops the stale match.
+  Auto-match tries one-to-one first and then groups up to three same-direction
+  vouchers; the group panel matches several vouchers to one line when their
+  signed total agrees. Optional opening and closing balances check that the
+  statement file is complete. An unmatched line can post a Journal against a
+  chosen adjustment ledger and is then matched automatically. Matching itself
+  never alters a voucher, and editing or deleting a matched voucher drops the
+  stale match.
 - Cheque / DD register with period, as-on, status, bank, party text, exact party
   account and cheque-number range filters, post-dated/due/cleared status,
   instrument detail, totals and drill-down. A voucher can store multiple allocated
@@ -840,9 +843,9 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary, GSTR-3B liability/ITC summary with net payable, GSTR-2B B2B import/reconciliation, GSTR-9 working paper/JSON, a late-fee/interest estimator, monthly GSTR-1 JSON, an ARN/filing-history register, B2B e-invoice drafts for invoices and credit/debit notes with mixed-rate line splitting, e-way drafts with Part B, distance-based validity and consolidated JSON, and tax-audit reconciliations; no CMP-08/GSTR-4, IRN/QR, multi-vehicle e-way, e-invoice discounts/charges, Form 16/16A or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, 26Q/27Q/27EQ working papers, and challan tracking with optional late fee/interest; no signed certificates, TRACES, threshold enforcement, higher-rate/no-PAN logic or journal deductions |
 | Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, PAN/UAN/ESIC and bank details, joining/exit and paid-days proration, casual/sick/earned leave balances and a leave register, one regular journal-posting run per month plus supplementary and signed adjustment runs, employee-wise salary register, printable payslips and a bank-transfer CSV, employee and optional employer PF/ESI, a fixed PT amount, and EPF ECR/ESI/24Q/16 CSV/JSON working papers; no automatic leave-to-paid-days link, overtime, general formula language, state PT slabs, portal filing or bank payment workflow |
-| Bank reconciliation and statement import | Covered — CSV, OFX, QIF and MT940 statement import, optional opening/closing balance validation, auto/manual matching, adjustment posting and book balance; no Excel or live bank feeds |
+| Bank reconciliation and statement import | Covered — CSV, OFX, QIF and MT940 statement import, optional opening/closing balance validation, auto/manual one-to-one matching, manual many-to-one groups, bounded auto groups, adjustment posting and book balance; no one-to-many voucher splits, bulk adjustments, Excel import or live bank feeds |
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque-book ranges with next numbers, cheque/DD advice, receipt deposit-slip and contra advice previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no multiple instruments per voucher, automatic number allocation, magnetic-ink cheque stationery presets or bank-issued advice formats |
-| Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary, break-up and an unallocated-line reconciliation; no merging categories or split allocations |
+| Cost centres and cost-category reports | Covered — categories, renaming and moving centres, single or amount-split centres per voucher line, year-scoped openings, summary, break-up, budgets and an unallocated-value reconciliation; no merging categories |
 | Annual budgets and budget-vs-actual | Covered — ledger/group and cost-centre/category budgets, year-scoped cost-centre openings, period actuals, variance, over-budget status, a short amount history and quarterly or monthly phasing; no phased revision workflow or approval |
 | Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting, currency ledger balances, FIFO settlement matching, postable realised and unrealised forex differences, and postable simple overdue interest; no per-ledger currency, foreign openings/inventory, manual foreign bill allocation, interest compounding or reminders that post charges |
 | Multiple financial years per company, year-end closing and carry-forward | Covered — year selector, close/reopen and automatic next year; no closing journal is written because balances are cumulative |

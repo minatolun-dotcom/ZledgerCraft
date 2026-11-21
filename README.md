@@ -495,13 +495,17 @@ disabled.
   godown, with an optional output batch and expiry. An optional wastage quantity
   consumes extra components while finished-good quantity stays as entered.
   Component availability is checked first.
-- Production preserves total stock value: components leave at weighted-average
-  cost plus optional labour and overhead amounts, and finished goods enter at
-  that total. It is a quantity/cost working paper, not a WIP journal, and no
-  ledger entry is posted. Deleting a production entry is refused when it would
-  make the finished item's stock negative on or after that date.
-- Stock is valued operationally: it does not post stock value into the P&L or
-  balance sheet, which stay driven by ledger balances only.
+- Production preserves total stock value and posts a balanced journal: components
+  leave Stock in Hand for Work in Progress at weighted-average cost, labour and
+  overhead are capitalised, and finished goods return to Stock in Hand at the
+  total production cost. Stock in Hand, Work in Progress, Production Labour and
+  Production Overhead ledgers are created automatically. Deleting a production
+  entry removes its journal and is refused when it would make the finished item's
+  stock negative on or after that date.
+- The Inventory screen reconciles the posted Stock in Hand ledger against
+  operational stock value. Opening stock, purchases, sales and stock adjustments
+  still need explicit journals, so the unposted difference is shown rather than
+  silently adjusted.
 
 **Reports**
 - Day Book, with type and date filters and paging (100/250/500 rows or all);
@@ -790,7 +794,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 
 | TallyPrime area | Status |
 | --- | --- |
-| Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, stock ageing, reorder watch, price list, dated stock counts with book/counted differences and batch-level count lines, partially fulfilled sales/purchase orders, multi-level phantom BOMs, production and wastage; no alternative components/by-products, job work, FIFO/expiry batch costing, WIP accounting or stock posting to the financial statements |
+| Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, stock ageing, reorder watch, price list, dated stock counts with book/counted differences and batch-level count lines, partially fulfilled sales/purchase orders, multi-level phantom BOMs, production and wastage with automatic stock/WIP production journals; no alternative components/by-products, job work, FIFO/expiry batch costing, partial-completion WIP or automatic opening-stock journals |
 | GST registration, rates and tax on vouchers | Partial — GSTIN and home state, registration/party contacts, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and SAC on service ledgers, invoice-level tax on four voucher types and credit/debit-note invoice links; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way drafts with saved Part B details and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, validity tracking, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking with optional late fee/interest; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |

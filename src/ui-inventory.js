@@ -4,6 +4,7 @@ import {
   booksStart,
   dateLabel,
   defaultGodownId,
+  ensureInventoryLedgers,
   orderRemainingItems,
   round2,
   stockBatchesOnHand,
@@ -17,6 +18,7 @@ import {
   priceList,
   reorderReport,
   stockAgeing,
+  stockLedgerReconciliation,
   stockMovements,
   stockSummary,
   stockValueAnalysis,
@@ -274,6 +276,7 @@ export function inventoryScreen() {
   const ageingReport = stockAgeing(active, { asOn: to });
   const reorder = reorderReport(active, { from, to });
   const valueAnalysis = stockValueAnalysis(active, { from, to });
+  const stockReconciliation = stockLedgerReconciliation(active, { to });
   const priceRows = priceList(active);
   const purchasePrices = new Map(
     priceList(active, { priceType: 'purchase' }).rows.map((row) => [row.itemId, row.price]),
@@ -610,9 +613,10 @@ export function inventoryScreen() {
         .join(', ');
       const componentGodown = godowns.find((entry) => entry.id === manufacture.componentGodownId)?.name ?? '—';
       const outputGodown = godowns.find((entry) => entry.id === manufacture.outputGodownId)?.name ?? '—';
+      const journal = (active.vouchers ?? []).find((voucher) => voucher.id === manufacture.journalVoucherId);
       return `<tr>
         <td>${esc(dateLabel(manufacture.date))}</td>
-        <td><strong>MFG-${manufacture.no}</strong></td>
+        <td><strong>MFG-${manufacture.no}</strong>${journal ? `<div class="muted small">JV-${esc(journal.no)}</div>` : ''}</td>
         <td>${esc(manufacture.bomName)}</td>
         <td><strong>${esc(output?.name ?? 'Unknown item')}</strong><div class="muted small">${components}</div></td>
         <td class="num">${fmtQty(manufacture.outputQty)} ${esc(unit)}${manufacture.outputBatchNo ? `<div class="muted small">Batch ${esc(manufacture.outputBatchNo)}</div>` : ''}${manufacture.wastageQty ? `<div class="muted small">Wastage ${fmtQty(manufacture.wastageQty)}</div>` : ''}</td>
@@ -863,7 +867,16 @@ export function inventoryScreen() {
               </table>`
             : '<p class="muted">No production entries yet. Consumption and finished goods appear in stock reports.</p>'}`
         : '<p class="muted">Create a BOM above before recording production.</p>',
-      'Production consumes components and brings finished goods in at component cost plus any labour and overhead entered. It does not post a ledger entry or create a WIP account.',
+      'Production consumes components and brings finished goods in at component cost plus any labour and overhead entered. Each completed run posts a balanced Stock-in-Hand / Work-in-Progress journal automatically.',
+    )}
+    ${panel(
+      'Stock posting',
+      stockReconciliation.configured
+        ? `<p class="muted">Stock ledger <strong>${esc(stockReconciliation.stockLedgerName)}</strong> shows ${money(stockReconciliation.ledgerValue)} against operational stock of ${money(stockReconciliation.stockValue)} as on ${esc(dateLabel(stockReconciliation.asOn))}. WIP balance: ${money(stockReconciliation.wipBalance)}.</p>
+          <p class="${Math.abs(stockReconciliation.difference) >= 0.01 ? 'form-error' : 'muted small'}">${Math.abs(stockReconciliation.difference) >= 0.01 ? `Unposted difference: ${money(stockReconciliation.difference)}. Post opening stock or adjustments through a journal to reconcile.` : 'Stock ledger and operational stock agree.'}</p>`
+        : `<p class="muted">Production posting creates Stock in Hand, Work in Progress, Production Labour and Production Overhead ledgers automatically. You can also create them now.</p>
+          <button class="btn small" type="button" data-action="setup-inventory-ledgers">Create stock ledgers</button>`,
+      'Production journals debit WIP for components and conversion cost, then transfer the completed cost to Stock in Hand. Deleting a run removes its journal.',
     )}
     ${panel(
       'Godowns',

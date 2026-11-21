@@ -4292,3 +4292,26 @@ export function taxAuditSummary(company, filters = {}) {
     note: 'Informational working papers only. Form 3CD, audit applicability and disclosures must be completed by a chartered accountant.',
   };
 }
+
+/** Compares posted stock/WIP ledger balances with the operational stock value. */
+export function stockLedgerReconciliation(company, filters = {}) {
+  const asOn = filters.to || company.fyEnd;
+  const accounts = company.inventoryAccounts ?? {};
+  const totals = ledgerTotals(company, { to: asOn });
+  const stockLedger = totals.get(accounts.stock);
+  const wipLedger = totals.get(accounts.wip);
+  const stockValue = stockSummary(company, { to: asOn }).totals.closingValue;
+  const ledgerValue = stockLedger?.closing ?? 0;
+  return {
+    asOn,
+    configured: Boolean(stockLedger),
+    stockLedgerId: accounts.stock ?? '',
+    stockLedgerName: stockLedger?.name ?? '',
+    stockValue,
+    ledgerValue,
+    difference: round2(ledgerValue - stockValue),
+    wipLedgerId: accounts.wip ?? '',
+    wipLedgerName: wipLedger?.name ?? '',
+    wipBalance: wipLedger?.closing ?? 0,
+  };
+}

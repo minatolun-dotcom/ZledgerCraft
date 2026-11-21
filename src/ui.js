@@ -34,6 +34,7 @@ import {
   applyStatutoryDeductions,
   addLedger,
   addManufacture,
+  ensureInventoryLedgers,
   addStockCount,
   addStockGroup,
   addStockTransfer,
@@ -6598,6 +6599,22 @@ async function handleClick(event) {
         persist();
       }
       setFlash(result.ok ? `BOM "${result.bom.name}" deleted.` : result.error, result.ok ? 'ok' : 'warn');
+      render();
+      break;
+    }
+    case 'setup-inventory-ledgers': {
+      if (!can('master.write')) {
+        requirePermission('master.write');
+        break;
+      }
+      const active = company();
+      if (!active) break;
+      const result = ensureInventoryLedgers(active);
+      if (!result.error) {
+        logAudit('inventory.ledgers', 'Created stock, WIP, labour and overhead ledgers.', active);
+        persist();
+      }
+      setFlash(!result.error ? 'Stock posting ledgers are ready.' : result.error, !result.error ? 'ok' : 'warn');
       render();
       break;
     }

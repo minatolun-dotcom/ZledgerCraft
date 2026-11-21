@@ -4868,6 +4868,7 @@ export function allocationsAgainst(company, voucherId) {
 export function deleteVoucher(company, voucherId) {
   if (allocationsAgainst(company, voucherId).size > 0) return false;
   const existing = company.vouchers.find((voucher) => voucher.id === voucherId);
+  if (existing?.manufacturePosting) return false;
   const year = existing ? yearForDate(company, existing.date) : null;
   if (year?.closed) return false;
   const before = company.vouchers.length;
@@ -6249,6 +6250,164 @@ export function deleteBom(company, bomId) {
   return { ok: true, bom };
 }
 
+const INVENTORY_LEDGER_DEFS = [
+  { key: 'stock', name: 'Stock in Hand', groupKey: 'stockInHand' },
+  { key: 'wip', name: 'Work in Progress', groupKey: 'stockInHand' },
+  { key: 'labour', name: 'Production Labour', groupKey: 'directExpenses' },
+  { key: 'overhead', name: 'Production Overhead', groupKey: 'indirectExpenses' },
+];
+
+/** Creates or returns the ledgers used by production posting. */
+export function ensureInventoryLedgers(company) {
+  const accounts = {};
+  for (const def of INVENTORY_LEDGER_DEFS) {
+    const configured = company.inventoryAccounts?.[def.key];
+    const existing = company.ledgers.find((ledger) => ledger.id === configured);
+    if (existing) {
+      accounts[def.key] = existing.id;
+      continue;
+    }
+    const ledger = ensureNamedLedger(company, def.name, def.groupKey);
+    if (!ledger) return { error: `The ${def.groupKey} ledger group is missing from this company.` };
+    accounts[def.key] = ledger.id;
+  }
+  company.inventoryAccounts = accounts;
+  return { accounts };
+}
+
+/** Weighted-average stock states immediately before a production date. */
+function stockCostStates(company, to) {
+  const states = new Map();
+  for (const item of company.stockItems ?? []) {
+    const qty = round3(item.openingQty ?? 0);
+    const rate = round2(item.openingRate ?? 0);
+    states.set(item.id, { qty, value: round2(qty * rate), lastCost: rate });
+  }
+  const moveOut = (state, qty) => {
+    const value = round2(qty * state.lastCost);
+    state.qty = round3(state.qty - qty);
+    state.value = round2(state.value - value);
+    if (state.qty <= 0) {
+      if (Math.abs(state.qty) < 0.0005) state.qty = 0;
+      state.value = state.qty === 0 ? 0 : round2(state.qty * state.lastCost);
+    }
+    return value;
+  };
+  const events = [];
+  for (const voucher of company.vouchers ?? []) {
+    if (voucher.date > to || !INVENTORY_TYPES.includes(voucher.type)) continue;
+    events.push({ kind: 'voucher', date: voucher.date, no: Number(voucher.no) || 0, voucher });
+  }
+  for (const adjustment of company.stockAdjustments ?? []) {
+    if (adjustment.date > to) continue;
+    events.push({ kind: 'adjustment', date: adjustment.date, no: Number(adjustment.no) || 0, adjustment });
+  }
+  for (const manufacture of company.manufactures ?? []) {
+    if (manufacture.date > to) continue;
+    events.push({ kind: 'manufacture', date: manufacture.date, no: Number(manufacture.no) || 0, manufacture });
+  }
+  events.sort((a, b) => a.date.localeCompare(b.date) || a.no - b.no || a.kind.localeCompare(b.kind));
+  for (const event of events) {
+    if (event.kind === 'voucher') {
+      const { voucher } = event;
+      const isIn = voucher.type === 'Purchase' || voucher.type === 'CreditNote';
+      for (const line of voucher.items ?? []) {
+        const state = states.get(line.stockItemId);
+        if (!state) continue;
+        const qty = round3(line.qty);
+        if (isIn) {
+          const rate = voucher.type === 'Purchase'
+            ? round2(line.amount !== undefined ? line.amount / qty : line.rate)
+            : state.lastCost;
+          state.qty = round3(state.qty + qty);
+          state.value = round2(state.value + qty * rate);
+          if (state.qty > 0) state.lastCost = round2(state.value / state.qty);
+        } else {
+          moveOut(state, qty);
+        }
+      }
+    } else if (event.kind === 'adjustment') {
+      for (const line of event.adjustment.rows ?? []) {
+        const state = states.get(line.stockItemId);
+        if (!state) continue;
+        const diff = round3(line.difference);
+        if (diff > 0) {
+          const value = round2(diff * state.lastCost);
+          state.qty = round3(state.qty + diff);
+          state.value = round2(state.value + value);
+          if (state.qty > 0) state.lastCost = round2(state.value / state.qty);
+        } else if (diff < 0) {
+          moveOut(state, Math.abs(diff));
+        }
+      }
+    } else if (event.kind === 'manufacture') {
+      const manufacture = event.manufacture;
+      let cost = 0;
+      for (const line of manufacture.components ?? []) {
+        const state = states.get(line.stockItemId);
+        if (!state) continue;
+        cost = round2(cost + moveOut(state, round3(line.qty)));
+      }
+      cost = round2(cost + Number(manufacture.labourCost ?? 0) + Number(manufacture.overheadCost ?? 0));
+      const output = states.get(manufacture.outputItemId);
+      if (output) {
+        const qty = round3(manufacture.outputQty);
+        output.qty = round3(output.qty + qty);
+        output.value = round2(output.value + cost);
+        if (output.qty > 0) output.lastCost = round2(output.value / output.qty);
+      }
+    }
+  }
+  return states;
+}
+
+/** Posts the component, conversion and finished-goods entries for production. */
+function postManufactureJournal(company, manufacture) {
+  const ledgers = ensureInventoryLedgers(company);
+  if (ledgers.error) return { ok: false, error: ledgers.error };
+  const states = stockCostStates(company, manufacture.date);
+  const componentLines = (manufacture.components ?? [])
+    .map((line) => {
+      const state = states.get(line.stockItemId);
+      return {
+        stockItemId: line.stockItemId,
+        qty: round3(line.qty),
+        value: state ? round2(round3(line.qty) * state.lastCost) : 0,
+      };
+    })
+    .filter((line) => line.value > 0);
+  const componentCost = round2(componentLines.reduce((sum, line) => sum + line.value, 0));
+  const labour = round2(Number(manufacture.labourCost ?? 0));
+  const overhead = round2(Number(manufacture.overheadCost ?? 0));
+  const total = round2(componentCost + labour + overhead);
+  if (total <= 0) return { ok: true, voucher: null, componentCost, total };
+  const lines = [];
+  if (componentCost > 0) {
+    lines.push({ ledgerId: ledgers.accounts.wip, side: 'Dr', amount: componentCost });
+    lines.push({ ledgerId: ledgers.accounts.stock, side: 'Cr', amount: componentCost });
+  }
+  if (labour > 0) {
+    lines.push({ ledgerId: ledgers.accounts.wip, side: 'Dr', amount: labour });
+    lines.push({ ledgerId: ledgers.accounts.labour, side: 'Cr', amount: labour });
+  }
+  if (overhead > 0) {
+    lines.push({ ledgerId: ledgers.accounts.wip, side: 'Dr', amount: overhead });
+    lines.push({ ledgerId: ledgers.accounts.overhead, side: 'Cr', amount: overhead });
+  }
+  lines.push({ ledgerId: ledgers.accounts.stock, side: 'Dr', amount: total });
+  lines.push({ ledgerId: ledgers.accounts.wip, side: 'Cr', amount: total });
+  const posted = addVoucher(company, {
+    type: 'Journal',
+    date: manufacture.date,
+    narration: `Production MFG-${manufacture.no} · ${manufacture.bomName}`,
+    lines,
+  });
+  if (!posted.ok) return posted;
+  posted.voucher.manufacturePosting = true;
+  posted.voucher.manufactureId = manufacture.id;
+  return { ok: true, voucher: posted.voucher, componentCost, total, componentLines };
+}
+
 export function addManufacture(company, input) {
   const date = String(input.date ?? '');
   if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid production date.' };
@@ -6331,6 +6490,15 @@ export function addManufacture(company, input) {
     narration: String(input.narration ?? '').trim().slice(0, 400),
     createdAt: new Date().toISOString(),
   };
+  if (input.postToLedger !== false) {
+    const posting = postManufactureJournal(company, manufacture);
+    if (!posting.ok) return posting;
+    if (posting.voucher) {
+      manufacture.journalVoucherId = posting.voucher.id;
+      manufacture.stockCost = posting.componentCost;
+      manufacture.productionCost = posting.total;
+    }
+  }
   company.manufactures.push(manufacture);
   return { ok: true, manufacture };
 }
@@ -6377,6 +6545,10 @@ export function deleteManufacture(company, manufactureId) {
         };
       }
     }
+  }
+  if (manufacture.journalVoucherId) {
+    company.vouchers = (company.vouchers ?? []).filter((voucher) => voucher.id !== manufacture.journalVoucherId);
+    pruneBankReconciliations(company);
   }
   company.manufactures = (company.manufactures ?? []).filter((entry) => entry.id !== manufactureId);
   return { ok: true, manufacture };

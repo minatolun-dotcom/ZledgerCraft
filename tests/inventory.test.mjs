@@ -49,6 +49,7 @@ import {
   reorderReport,
   statistics,
   stockAgeing,
+  ledgerTotals,
   stockMovements,
   stockSummary,
   stockValueAnalysis,
@@ -1717,4 +1718,38 @@ test('alternate units convert line quantities to base stock and preserve amount'
   const row = stockSummary(company).rows.find((entry) => entry.itemId === item.id);
   assert.equal(row.closingQty, 24);
   assert.equal(row.closingValue, 240);
+});
+
+test('production posts a balanced stock and WIP journal and removes it on delete', () => {
+  const { company, unit, group } = inventoryFixture();
+  const raw = addStockItem(company, {
+    name: 'Journal Fabric', stockGroupId: group.id, unitId: unit.id,
+    openingQty: 10, openingRate: 40,
+  }).item;
+  const finished = addStockItem(company, {
+    name: 'Journal Shirt', stockGroupId: group.id, unitId: unit.id,
+    openingQty: 0, openingRate: 0,
+  }).item;
+  const bom = addBom(company, {
+    name: 'Journal recipe', outputItemId: finished.id, outputQty: 1,
+    components: [{ stockItemId: raw.id, qty: 2 }],
+  });
+  const production = addManufacture(company, {
+    date: '2026-04-10', bomId: bom.bom.id, outputQty: 1,
+    labourCost: 30,
+    componentGodownId: defaultGodownId(company), outputGodownId: defaultGodownId(company),
+  });
+  assert.equal(production.ok, true, production.error);
+  assert.ok(production.manufacture.journalVoucherId);
+  const journal = company.vouchers.find((voucher) => voucher.id === production.manufacture.journalVoucherId);
+  assert.ok(journal);
+  assert.equal(journal.type, 'Journal');
+  assert.equal(journal.manufacturePosting, true);
+  const totals = ledgerTotals(company, { to: '2026-04-10' });
+  assert.equal(totals.get(company.inventoryAccounts.stock).closing, 30);
+  assert.equal(totals.get(company.inventoryAccounts.wip).closing, 0);
+  assert.equal(totals.get(company.inventoryAccounts.labour).closing, -30);
+  const deleted = deleteManufacture(company, production.manufacture.id);
+  assert.equal(deleted.ok, true, deleted.error);
+  assert.equal(company.vouchers.some((voucher) => voucher.id === journal.id), false);
 });

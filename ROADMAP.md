@@ -185,7 +185,7 @@ GST returns, e-invoice/e-way drafts and TDS/TCS records are unfiled working
 papers, no IRN/QR or portal acknowledgement is produced, the tax-audit checklist
 is not a Form 3CD or an audit opinion, payroll has no attendance, PF/ESI
 computation or statutory returns, and inventory has no physical stock count,
-batch-wise costing, WIP accounting, wastage or job work. The full deferred list
+batch-wise costing, partial-completion WIP, automatic opening-stock journals or job work. The full deferred list
 is in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 ## Missing feature inventory
@@ -236,7 +236,7 @@ Status: **Done**, **Partial**, **Missing**.
 | Negative-stock blocking and negative-balance flags | Done |
 | Godowns/locations and stock transfers | Done — godown master, transfer register, source availability and godown balances; no physical stock count or inter-branch accounting |
 | Batches and expiry dates | Partial — optional batch tracking, batch/expiry entry on item lines, batch balances; no batch-wise costing or expiry alerts |
-| BOM, manufacturing journal, production, wastage, job work | Partial — BOM recipes, scaled component consumption, finished-goods output and output batches; no multi-level BOM, wastage, by-products, job work or WIP accounting |
+| BOM, manufacturing journal, production, wastage, job work | Partial — BOM recipes, scaled component consumption, finished-goods output, output batches and automatic stock/WIP production journals; no partial-completion WIP, by-products or job work |
 | Quotations, orders, delivery/receipt notes, rejection notes | Partial — sales/purchase orders with status and voucher prefill; no quotations, delivery/receipt notes, rejection notes or fulfilment tracking |
 | Reorder levels, price lists, discounts, additional costs | Missing |
 | Stock ageing, godown, reorder and movement-analysis reports | Missing/Partial |
@@ -333,7 +333,7 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 ### Stage 4 — Depth and scale
 
-- [x] Inventory: godowns, batches, BOM/manufacturing, orders, transfers — 2026-11-18 (batch/expiry, transfers, orders and production; no physical count, wastage, job work or WIP posting)
+- [x] Inventory: godowns, batches, BOM/manufacturing, orders, transfers — 2026-11-18 (batch/expiry, transfers, orders, production, counts, wastage and stock/WIP posting)
 - [ ] Cloud sync, backend database and multi-user concurrency — SQLite backend, normalized collection rows, conservative three-way merge (including scoped accounts), revision-checked writes, conflict/reload flow, enforced voucher edit leases, LAN server authentication and company-level scoping done 2026-11-19; Neon Postgres workspace, Postgres profiles/sessions/login state, shared Postgres login/reset rate limits, Postgres JSON backups with R2 listing/restore, Neon Auth login, same-origin auth proxy, Neon Function deployment, Cloudflare Worker API proxy, branch integration test, production smoke test and field-level merge audit done 2026-11-19
 - [ ] Tally XML/Excel import, APIs and integrations — Tally XML account group, ledger, stock group/item, voucher, stock-line and batch detail import plus Excel `.xlsx` ledger/voucher loading done 2026-11-18; read-only token API with company-scoped tokens, shared rate limits and OpenAPI contract added 2026-11-19; GST/discount stock-line splits, write APIs and webhooks pending
 - [ ] Advanced MIS, charts, scheduled email/Excel exports — local monthly MIS chart, summary cards, party/stock/working-capital/expense tables, three-month run-rate, Excel export, Resend scheduled daily summaries and a branded PDF attachment done 2026-11-19; deeper forecasts pending
@@ -343,6 +343,17 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
+
+### 2026-11-21 — Phase 60: stock/WIP posting
+
+- Production posts a balanced journal: components leave Stock in Hand for WIP,
+  labour and overhead are capitalised, and finished goods return to Stock in Hand.
+- Stock in Hand, Work in Progress, Production Labour and Production Overhead
+  ledgers are created automatically; deleting a run removes its journal.
+- Inventory reconciles the posted stock ledger against operational stock and
+  shows the unposted opening/adjustment difference.
+- Verification: production journal balances and deletion test; full suite 348
+  tests (347 pass, 1 skipped); 1,257.9 kB build.
 
 ### 2026-11-21 — Phase 59: multiple instruments
 

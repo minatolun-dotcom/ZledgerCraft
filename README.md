@@ -399,11 +399,13 @@ disabled.
   and place of supply, add the party GSTIN for B2B, and flag reverse charge.
   Tax is computed from the taxable side, CGST+SGST or IGST plus cess are posted
   to the tax ledgers, and the party/cash line becomes the tax-inclusive total.
-  The voucher form previews taxable value, tax split and gross before saving;
-  the voucher view records the rate, supply type and GSTIN. Credit and debit
-  notes can link to the original sales or purchase invoice, and the link appears
-  in the GSTR-1 credit-note working paper. Tax ledgers can be created or renamed
-  from the GST registration panel.
+  Each taxable ledger line can select its own GST rate; taxes are calculated per
+  line and aggregated into CGST/SGST/IGST/Cess. Mixed-rate invoices keep a rate
+  breakup and feed separate GSTR-1 rate rows. The voucher form previews taxable
+  value, tax split and gross before saving; the voucher view records the rate,
+  supply type and GSTIN. Credit and debit notes can link to the original sales or
+  purchase invoice, and the link appears in the GSTR-1 credit-note working paper.
+  Tax ledgers can be created or renamed from the GST registration panel.
 - TDS on purchase vouchers and TCS on sales vouchers: choose a section and the
   deductee PAN (prefilled from the party ledger). The deduction is computed from
   the taxable side, posted to TDS Payable or TCS Payable, and the party/cash line

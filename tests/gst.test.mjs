@@ -691,3 +691,31 @@ test('GST is unavailable on foreign-currency vouchers', () => {
   assert.equal(result.ok, false);
   assert.match(result.error, /foreign-currency/);
 });
+
+test('per-line GST rates aggregate into rate breakup and return buckets', () => {
+  const { company, sales, cash } = fixture();
+  const five = rateId(company, 5) ?? addGstRate(company, { rate: 5 }).rate.id;
+  const eighteen = rateId(company, 18) ?? addGstRate(company, { rate: 18 }).rate.id;
+  const created = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-15',
+    lines: [
+      { ledgerId: cash.id, side: 'Dr', amount: 1640 },
+      { ledgerId: sales.id, side: 'Cr', amount: 1000, gstRateId: five },
+      { ledgerId: sales.id, side: 'Cr', amount: 500, gstRateId: eighteen },
+    ],
+    gst: { placeOfSupply: '27' },
+  });
+  assert.equal(created.ok, true, created.error);
+  assert.equal(created.voucher.gst.taxable, 1500);
+  assert.equal(created.voucher.gst.cgst, 70);
+  assert.equal(created.voucher.gst.sgst, 70);
+  assert.equal(created.voucher.gst.mixedRate, true);
+  assert.equal(created.voucher.gst.rateBreakup.length, 2);
+  assert.equal(created.voucher.lines.find((line) => line.ledgerId === cash.id).amount, 1640);
+  const returns = gstReturns(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(returns.outward.taxable, 1500);
+  assert.equal(returns.gstr1.rateRows.length, 2);
+  assert.equal(returns.gstr1.rateRows.find((row) => row.rate === 5).taxable, 1000);
+  assert.equal(returns.gstr1.rateRows.find((row) => row.rate === 18).taxable, 500);
+});

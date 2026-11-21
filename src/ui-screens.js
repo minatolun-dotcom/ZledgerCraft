@@ -1443,7 +1443,11 @@ export function voucherNewScreen() {
           </select>
         </td>
         <td class="num" data-label="Amount"><input class="amount" inputmode="decimal" placeholder="0.00" value="${esc(line.amount)}"
-          aria-label="Line ${index + 1} amount"></td>
+          aria-label="Line ${index + 1} amount">${['Sales', 'Purchase', 'CreditNote', 'DebitNote'].includes(draft.type)
+            ? `<select class="gst-line-rate" aria-label="Line ${index + 1} GST rate"><option value="">Default GST</option>${(active.gst?.rates ?? [])
+                .map((rate) => `<option value="${esc(rate.id)}"${line.gstRateId === rate.id ? ' selected' : ''}>${esc(rate.label)}</option>`)
+                .join('')}</select>`
+            : ''}</td>
         <td data-label="Cost centre"><select class="cost-centre" aria-label="Line ${index + 1} cost centre">${costCentreSelectOptions(active, line.costCentreId)}</select></td>
         <td class="row-actions">
           <button type="button" class="icon-btn" data-action="remove-line" data-index="${index}"

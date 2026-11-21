@@ -1469,6 +1469,7 @@ export function formLines(form) {
       side: row.querySelector('select.side').value,
       amount: row.querySelector('input.amount').value,
       costCentreId: row.querySelector('select.cost-centre')?.value ?? '',
+      gstRateId: row.querySelector('select.gst-line-rate')?.value ?? '',
     };
     if (allocationsByLine.has(index)) line.allocations = allocationsByLine.get(index);
     return line;

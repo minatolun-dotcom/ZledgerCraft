@@ -3006,26 +3006,53 @@ export function gstReturns(company, filters = {}) {
       cess: gst.cess,
       taxTotal,
       total: round2(gst.taxable + taxTotal),
+      rateBreakup: gst.rateBreakup ?? [],
     };
     documents.push(document);
+    const rateDocuments = document.rateBreakup.length
+      ? document.rateBreakup.map((bucket) => ({
+          ...document,
+          rate: bucket.rate,
+          cessRate: bucket.cessRate,
+          taxable: bucket.taxable,
+          cgst: bucket.cgst,
+          sgst: bucket.sgst,
+          igst: bucket.igst,
+          cess: bucket.cess,
+          taxTotal: round2(bucket.cgst + bucket.sgst + bucket.igst + bucket.cess),
+          total: round2(bucket.taxable + bucket.cgst + bucket.sgst + bucket.igst + bucket.cess),
+        }))
+      : [document];
 
     if (voucher.type === 'Sales') {
       gstAdd(outward, document, 1);
-      gstAdd(gstRateBucket(outwardRates, document), document, 1);
+      for (const rateDocument of rateDocuments) {
+        gstAdd(gstRateBucket(outwardRates, rateDocument), rateDocument, 1);
+      }
       if (document.partyGstin) b2b.push(document);
-      else gstAdd(gstRateBucket(b2cRates, document), document, 1);
+      else {
+        for (const rateDocument of rateDocuments) {
+          gstAdd(gstRateBucket(b2cRates, rateDocument), rateDocument, 1);
+        }
+      }
     } else if (voucher.type === 'CreditNote') {
       gstAdd(creditNotes, document, 1);
       gstAdd(outward, document, -1);
-      gstAdd(gstRateBucket(outwardRates, document), document, -1);
+      for (const rateDocument of rateDocuments) {
+        gstAdd(gstRateBucket(outwardRates, rateDocument), rateDocument, -1);
+      }
     } else if (voucher.type === 'Purchase') {
       gstAdd(purchases, document, 1);
-      gstAdd(gstRateBucket(inwardRates, document), document, 1);
+      for (const rateDocument of rateDocuments) {
+        gstAdd(gstRateBucket(inwardRates, rateDocument), rateDocument, 1);
+      }
       if (document.reverseCharge) gstAdd(rcm, document, 1);
     } else if (voucher.type === 'DebitNote') {
       gstAdd(debitNotes, document, 1);
       gstAdd(purchases, document, -1);
-      gstAdd(gstRateBucket(inwardRates, document), document, -1);
+      for (const rateDocument of rateDocuments) {
+        gstAdd(gstRateBucket(inwardRates, rateDocument), rateDocument, -1);
+      }
       if (document.reverseCharge) gstAdd(rcm, document, -1);
     }
 

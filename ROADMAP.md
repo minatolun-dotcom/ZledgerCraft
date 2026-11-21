@@ -344,6 +344,17 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-21 — Phase 57: per-line GST rates
+
+- Ledger lines can carry their own GST rate while retaining the voucher-level
+  default.
+- GST is calculated per taxable line, then aggregated into CGST/SGST/IGST/Cess
+  and stored as a rate breakup.
+- GSTR-1/GSTR-3B rate rows split mixed-rate invoices instead of reporting the
+  whole invoice under one rate.
+- Verification: mixed 5% and 18% intra-state invoice, tax aggregation and return
+  buckets; full suite 344 tests (343 pass, 1 skipped); 1,236.6 kB build.
+
 ### 2026-11-21 — Phase 56: alternate units
 
 - Stock items can carry one alternate unit and a six-decimal conversion factor.

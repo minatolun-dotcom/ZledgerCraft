@@ -3713,6 +3713,12 @@ export function validateVoucherInput(company, type, input, options = {}) {
       }
       parsed.costCentreId = costCentreId;
     }
+    const gstRateId = String(line.gstRateId ?? '').trim();
+    if (gstRateId) {
+      const rateEntry = (company.gst?.rates ?? []).find((entry) => entry.id === gstRateId);
+      if (!rateEntry) return { ok: false, error: `Line ${index + 1}: that GST rate no longer exists.` };
+      parsed.gstRateId = gstRateId;
+    }
 
     const rawAllocations = Array.isArray(line.allocations) ? line.allocations : [];
     if (rawAllocations.length) {
@@ -3769,7 +3775,8 @@ export function validateVoucherInput(company, type, input, options = {}) {
 
   let gst = null;
   const gstInput = input.gst && typeof input.gst === 'object' ? input.gst : null;
-  if (gstInput && String(gstInput.rateId ?? '').trim()) {
+  const hasLineGst = lines.some((line) => String(line.gstRateId ?? '').trim());
+  if (gstInput && (String(gstInput.rateId ?? '').trim() || hasLineGst)) {
     if (!company.gst?.enabled) {
       return { ok: false, error: 'GST is not enabled. Save GST settings before recording tax on invoices.' };
     }
@@ -3783,8 +3790,12 @@ export function validateVoucherInput(company, type, input, options = {}) {
     if (!GST_STATES.some(([code]) => code === homeState)) {
       return { ok: false, error: 'Save GST settings with a home state before applying GST to vouchers.' };
     }
-    const rateEntry = (company.gst.rates ?? []).find((entry) => entry.id === gstInput.rateId);
-    if (!rateEntry) return { ok: false, error: 'That GST rate is no longer in the rate master.' };
+    const defaultRateEntry = String(gstInput.rateId ?? '').trim()
+      ? (company.gst.rates ?? []).find((entry) => entry.id === gstInput.rateId)
+      : null;
+    if (String(gstInput.rateId ?? '').trim() && !defaultRateEntry) {
+      return { ok: false, error: 'That GST rate is no longer in the rate master.' };
+    }
 
     const taxLedgers = gstTaxLedgers(company);
     const taxLedgerIds = new Set(Object.values(taxLedgers).map((ledger) => ledger.id));
@@ -3837,15 +3848,48 @@ export function validateVoucherInput(company, type, input, options = {}) {
     }
 
     const supplyType = placeOfSupply === homeState ? 'Intra' : 'Inter';
-    const rateValue = round2(rateEntry.rate);
-    const cessRate = round2(rateEntry.cess ?? 0);
-    const taxTotal = round2((taxable * rateValue) / 100);
-    const half = round2(taxTotal / 2);
-    const cgst = supplyType === 'Intra' ? half : 0;
-    const sgst = supplyType === 'Intra' ? round2(taxTotal - half) : 0;
-    const igst = supplyType === 'Inter' ? taxTotal : 0;
-    const cess = round2((taxable * cessRate) / 100);
+    const buckets = new Map();
+    for (const line of lines.filter((entry) => entry.side === goodsSide)) {
+      const rateEntry = line.gstRateId
+        ? (company.gst.rates ?? []).find((entry) => entry.id === line.gstRateId)
+        : defaultRateEntry;
+      if (!rateEntry) {
+        return {
+          ok: false,
+          error: `A taxable line has no GST rate. Choose a voucher rate or a rate on every taxable line.`,
+        };
+      }
+      const rateValue = round2(rateEntry.rate);
+      const cessRate = round2(rateEntry.cess ?? 0);
+      const taxTotal = round2((line.amount * rateValue) / 100);
+      const half = round2(taxTotal / 2);
+      const key = `${rateEntry.id}:${supplyType}`;
+      const bucket = buckets.get(key) ?? {
+        rateId: rateEntry.id,
+        rate: rateValue,
+        cessRate,
+        taxable: 0,
+        cgst: 0,
+        sgst: 0,
+        igst: 0,
+        cess: 0,
+      };
+      bucket.taxable = round2(bucket.taxable + line.amount);
+      bucket.cgst = round2(bucket.cgst + (supplyType === 'Intra' ? half : 0));
+      bucket.sgst = round2(bucket.sgst + (supplyType === 'Intra' ? round2(taxTotal - half) : 0));
+      bucket.igst = round2(bucket.igst + (supplyType === 'Inter' ? taxTotal : 0));
+      bucket.cess = round2(bucket.cess + round2((line.amount * cessRate) / 100));
+      buckets.set(key, bucket);
+    }
+    const rateBreakup = [...buckets.values()];
+    const cgst = round2(rateBreakup.reduce((sum, bucket) => sum + bucket.cgst, 0));
+    const sgst = round2(rateBreakup.reduce((sum, bucket) => sum + bucket.sgst, 0));
+    const igst = round2(rateBreakup.reduce((sum, bucket) => sum + bucket.igst, 0));
+    const cess = round2(rateBreakup.reduce((sum, bucket) => sum + bucket.cess, 0));
     const gross = round2(taxable + cgst + sgst + igst + cess);
+    const firstBucket = rateBreakup[0];
+    const rateValue = firstBucket?.rate ?? 0;
+    const cessRate = firstBucket?.cessRate ?? 0;
 
     const components = [
       ['cgst', cgst],
@@ -3873,9 +3917,11 @@ export function validateVoucherInput(company, type, input, options = {}) {
     }
 
     gst = {
-      rateId: rateEntry.id,
+      rateId: firstBucket?.rateId ?? '',
       rate: rateValue,
       cessRate,
+      mixedRate: rateBreakup.length > 1,
+      rateBreakup,
       supplyType,
       placeOfSupply,
       partyGstin,

@@ -3719,6 +3719,14 @@ export function validateVoucherInput(company, type, input, options = {}) {
       if (!rateEntry) return { ok: false, error: `Line ${index + 1}: that GST rate no longer exists.` };
       parsed.gstRateId = gstRateId;
     }
+    const tdsSectionId = String(line.tdsSectionId ?? '').trim();
+    if (tdsSectionId && tdsSectionId !== '__none__') {
+      const section = (company.tds?.sections ?? []).find((entry) => entry.id === tdsSectionId);
+      if (!section) return { ok: false, error: `Line ${index + 1}: that TDS/TCS section no longer exists.` };
+      parsed.tdsSectionId = tdsSectionId;
+    } else if (tdsSectionId === '__none__') {
+      parsed.tdsSectionId = '__none__';
+    }
 
     const rawAllocations = Array.isArray(line.allocations) ? line.allocations : [];
     if (rawAllocations.length) {
@@ -3938,7 +3946,8 @@ export function validateVoucherInput(company, type, input, options = {}) {
 
   let tds = null;
   const tdsInput = input.tds && typeof input.tds === 'object' ? input.tds : null;
-  if (tdsInput && String(tdsInput.sectionId ?? '').trim()) {
+  const hasLineTds = lines.some((line) => String(line.tdsSectionId ?? '').trim());
+  if (tdsInput && (String(tdsInput.sectionId ?? '').trim() || hasLineTds)) {
     if (!company.tds?.enabled) {
       return { ok: false, error: 'TDS/TCS is not enabled. Save TDS/TCS settings before deducting tax.' };
     }
@@ -3952,12 +3961,16 @@ export function validateVoucherInput(company, type, input, options = {}) {
       return { ok: false, error: 'TDS/TCS is not available on foreign-currency vouchers yet.' };
     }
     const kind = type === 'Purchase' ? 'TDS' : 'TCS';
-    const section = (company.tds.sections ?? []).find((entry) => entry.id === tdsInput.sectionId);
-    if (!section) return { ok: false, error: 'That TDS/TCS section no longer exists.' };
-    if (section.kind !== kind) {
+    const defaultSection = String(tdsInput.sectionId ?? '').trim()
+      ? (company.tds.sections ?? []).find((entry) => entry.id === tdsInput.sectionId)
+      : null;
+    if (String(tdsInput.sectionId ?? '').trim() && !defaultSection) {
+      return { ok: false, error: 'That TDS/TCS section no longer exists.' };
+    }
+    if (defaultSection && defaultSection.kind !== kind) {
       return {
         ok: false,
-        error: `${section.code} is a ${section.kind} section. Use a ${kind} section on a ${type.toLowerCase()} voucher.`,
+        error: `${defaultSection.code} is a ${defaultSection.kind} section. Use a ${kind} section on a ${type.toLowerCase()} voucher.`,
       };
     }
 
@@ -3984,9 +3997,41 @@ export function validateVoucherInput(company, type, input, options = {}) {
     if (base <= 0) {
       return { ok: false, error: `Enter the amount on the ${goodsSide === 'Dr' ? 'debit' : 'credit'} side before applying ${kind}.` };
     }
-    const amount = round2((base * section.rate) / 100);
+    const sections = new Map();
+    let amount = 0;
+    for (const line of lines.filter((entry) => entry.side === goodsSide)) {
+      if (line.tdsSectionId === '__none__') continue;
+      const section = line.tdsSectionId
+        ? (company.tds.sections ?? []).find((entry) => entry.id === line.tdsSectionId)
+        : defaultSection;
+      if (!section) {
+        return {
+          ok: false,
+          error: `A deductible line has no ${kind} section. Choose a voucher section or set one on every line.`,
+        };
+      }
+      if (section.kind !== kind) {
+        return {
+          ok: false,
+          error: `${section.code} is a ${section.kind} section. Use a ${kind} section on a ${type.toLowerCase()} voucher.`,
+        };
+      }
+      const lineAmount = round2((line.amount * section.rate) / 100);
+      const entry = sections.get(section.id) ?? {
+        sectionId: section.id,
+        code: section.code,
+        label: section.label,
+        rate: section.rate,
+        base: 0,
+        amount: 0,
+      };
+      entry.base = round2(entry.base + line.amount);
+      entry.amount = round2(entry.amount + lineAmount);
+      sections.set(section.id, entry);
+      amount = round2(amount + lineAmount);
+    }
     if (amount <= 0) {
-      return { ok: false, error: `Section ${section.code} has a 0% rate, so there is nothing to deduct.` };
+      return { ok: false, error: `The selected ${kind} sections deduct nothing from these lines.` };
     }
     if (base - amount <= 0) {
       return { ok: false, error: `The ${kind} deduction covers the whole party amount. Reduce the rate or enter a larger base.` };
@@ -4014,12 +4059,15 @@ export function validateVoucherInput(company, type, input, options = {}) {
       return { ok: false, error: 'Bill allocations exceed the party amount after tax deduction.' };
     }
 
+    const sectionList = [...sections.values()];
+    const primary = sectionList[0];
     tds = {
       kind,
-      sectionId: section.id,
-      code: section.code,
-      label: section.label,
-      rate: section.rate,
+      sectionId: primary.sectionId,
+      code: primary.code,
+      label: primary.label,
+      rate: primary.rate,
+      sections: sectionList,
       base,
       amount,
       partyLedgerId: balancing[0].ledgerId,

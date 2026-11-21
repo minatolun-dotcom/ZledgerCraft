@@ -406,11 +406,11 @@ disabled.
   supply type and GSTIN. Credit and debit notes can link to the original sales or
   purchase invoice, and the link appears in the GSTR-1 credit-note working paper.
   Tax ledgers can be created or renamed from the GST registration panel.
-- TDS on purchase vouchers and TCS on sales vouchers: choose a section and the
-  deductee PAN (prefilled from the party ledger). The deduction is computed from
-  the taxable side, posted to TDS Payable or TCS Payable, and the party/cash line
-  is reduced (TDS) or increased (TCS). GST and TDS/TCS cannot be combined on one
-  voucher yet.
+- TDS on purchase vouchers and TCS on sales vouchers: choose a default section
+  and the deductee PAN (prefilled from the party ledger), or set a section per
+  taxable line and mark exempt lines. Deductions aggregate by section, post to
+  TDS Payable or TCS Payable, and reduce/increase the party line. GST and TDS/TCS
+  cannot be combined on one voucher yet.
 
 **Payroll**
 - Run payroll for a month: the run debits each earning ledger, credits each

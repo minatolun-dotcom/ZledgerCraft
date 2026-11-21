@@ -18,7 +18,7 @@ SQLite/Postgres workspace mirror and node:test regression suites.
 | # | Project | Status | Implemented | Remaining |
 | --- | --- | --- | --- | --- |
 | 1 | Alternate units | Complete | One alternate unit per stock item with a six-decimal factor; voucher lines select base/alternate unit; quantities convert to base, entered values are retained and exact line amounts drive valuation. | Compound/multiple alternate units and unit-specific pricing remain out of scope. |
-| 2 | Per-line GST/TDS | Partial | Ledger lines can carry `gstRateId`; GST is calculated per taxable line, aggregated into CGST/SGST/IGST/Cess and stored as `gst.rateBreakup`; GSTR-1 rate rows split mixed-rate invoices. Voucher-level rates remain supported. | Per-line TDS sections, exemptions and e-invoice line-rate export remain open. |
+| 2 | Per-line GST/TDS | Complete | Ledger lines can carry `gstRateId` and `tdsSectionId`; GST and TDS/TCS calculate per line, aggregate by rate/section, and split GSTR-1 and withholding summaries. Exempt lines and voucher-level defaults remain supported. | E-invoice line-rate export remains tracked under KL-98, outside this project's return integration. |
 | 3 | Multiple instruments per voucher | Open | One cheque/DD plus cheque-book ranges. | Instrument arrays, amount allocation, multiple status histories, register flattening. |
 | 4 | Stock/WIP posting | Open | Operational stock valuation and production cost only. | WIP/stock ledgers, production journals, reversals, stock-to-ledger reconciliation. |
 | 5 | Foreign-currency ledger balances | Open | Voucher-level foreign amounts and revaluation working paper. | Currency-aware ledger balances, realised/unrealised differences, settlement matching, statements. |
@@ -44,13 +44,12 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 ## Verification
 
-- Full suite: 344 tests (343 pass, 1 skipped), 0 failures.
-- Build: 1,236.6 kB.
+- Full suite: 345 tests (344 pass, 1 skipped), 0 failures.
+- Build: 1,239.6 kB.
 - Targeted suites: inventory, bank, budgets, payroll.
 
 ## Exact next action
 
-Complete per-line TDS sections and e-invoice rate-breakup export, then continue
-with multiple instruments. Statutory filing
+Continue with multiple instruments per voucher. Statutory filing
 cannot be completed without GSTN/IRP/TRACES credentials and authorization; do not
 simulate submission.

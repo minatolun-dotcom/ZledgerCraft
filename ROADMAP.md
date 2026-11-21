@@ -344,6 +344,15 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-21 — Phase 58: per-line TDS sections
+
+- Taxable purchase/sales lines can select their own TDS/TCS section or be marked
+  exempt; the voucher section remains the default.
+- Deductions aggregate by section into one payable ledger line, and withholding
+  summaries flatten the section breakdown.
+- Verification: mixed 194C/194J purchase with an exempt line and withholding
+  summary buckets; full suite 345 tests (344 pass, 1 skipped); 1,239.6 kB build.
+
 ### 2026-11-21 — Phase 57: per-line GST rates
 
 - Ledger lines can carry their own GST rate while retaining the voucher-level

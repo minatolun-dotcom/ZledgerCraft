@@ -3245,10 +3245,13 @@ export function withholdingSummary(company, filters = {}) {
     );
   const period = all.filter((voucher) => voucher.date >= from && voucher.date <= to);
 
-  const documents = period.map((voucher) => {
+  const documents = period.flatMap((voucher) => {
     const entry = voucher.tds;
     const quarter = withholdingQuarter(voucher.date);
-    return {
+    const sections = Array.isArray(entry.sections) && entry.sections.length
+      ? entry.sections
+      : [{ sectionId: entry.sectionId, code: entry.code, label: entry.label, rate: entry.rate, base: entry.base, amount: entry.amount }];
+    return sections.map((section) => ({
       id: voucher.id,
       type: voucher.type,
       no: voucher.no,
@@ -3256,15 +3259,15 @@ export function withholdingSummary(company, filters = {}) {
       ref: voucher.bill?.ref || `${VOUCHER_TYPES[voucher.type]?.label ?? voucher.type} ${voucher.no}`,
       party: ledgerName(entry.partyLedgerId),
       pan: entry.pan || '',
-      sectionId: entry.sectionId,
-      code: entry.code,
-      label: entry.label,
-      rate: entry.rate,
-      base: entry.base,
-      amount: entry.amount,
+      sectionId: section.sectionId,
+      code: section.code,
+      label: section.label,
+      rate: section.rate,
+      base: section.base,
+      amount: section.amount,
       quarter: quarter.key,
       quarterLabel: quarter.label,
-    };
+    }));
   });
 
   const sectionMap = new Map();

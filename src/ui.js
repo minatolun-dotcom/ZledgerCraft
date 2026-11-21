@@ -1470,6 +1470,7 @@ export function formLines(form) {
       amount: row.querySelector('input.amount').value,
       costCentreId: row.querySelector('select.cost-centre')?.value ?? '',
       gstRateId: row.querySelector('select.gst-line-rate')?.value ?? '',
+      tdsSectionId: row.querySelector('select.tds-line-section')?.value ?? '',
     };
     if (allocationsByLine.has(index)) line.allocations = allocationsByLine.get(index);
     return line;

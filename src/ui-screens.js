@@ -1447,6 +1447,11 @@ export function voucherNewScreen() {
             ? `<select class="gst-line-rate" aria-label="Line ${index + 1} GST rate"><option value="">Default GST</option>${(active.gst?.rates ?? [])
                 .map((rate) => `<option value="${esc(rate.id)}"${line.gstRateId === rate.id ? ' selected' : ''}>${esc(rate.label)}</option>`)
                 .join('')}</select>`
+            : ''}${['Sales', 'Purchase'].includes(draft.type)
+            ? `<select class="tds-line-section" aria-label="Line ${index + 1} TDS/TCS section"><option value="">Default TDS/TCS</option><option value="__none__"${line.tdsSectionId === '__none__' ? ' selected' : ''}>Exempt</option>${(active.tds?.sections ?? [])
+                .filter((section) => section.kind === (draft.type === 'Purchase' ? 'TDS' : 'TCS'))
+                .map((section) => `<option value="${esc(section.id)}"${line.tdsSectionId === section.id ? ' selected' : ''}>${esc(section.code)} · ${esc(section.rate)}%</option>`)
+                .join('')}</select>`
             : ''}</td>
         <td data-label="Cost centre"><select class="cost-centre" aria-label="Line ${index + 1} cost centre">${costCentreSelectOptions(active, line.costCentreId)}</select></td>
         <td class="row-actions">

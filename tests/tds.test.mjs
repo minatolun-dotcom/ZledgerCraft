@@ -500,3 +500,29 @@ test('TDS/TCS settings, sections, vouchers and challans survive a backup', () =>
   assert.equal(report.periodAmount, 1000);
   assert.equal(report.paidToDate, 400);
 });
+
+test('per-line TDS sections aggregate deductions and exempt lines', () => {
+  const { company, supplier, purchases } = fixture();
+  const contractor = section(company, '194C');
+  const professional = section(company, '194J');
+  const created = addVoucher(company, {
+    type: 'Purchase',
+    date: '2026-04-12',
+    lines: [
+      { ledgerId: purchases.id, side: 'Dr', amount: 1000, tdsSectionId: contractor.id },
+      { ledgerId: purchases.id, side: 'Dr', amount: 500, tdsSectionId: professional.id },
+      { ledgerId: purchases.id, side: 'Dr', amount: 200, tdsSectionId: '__none__' },
+      { ledgerId: supplier.id, side: 'Cr', amount: 1630 },
+    ],
+    tds: { pan: 'ABCDE1234F' },
+  });
+  assert.equal(created.ok, true, created.error);
+  assert.equal(created.voucher.tds.base, 1700);
+  assert.equal(created.voucher.tds.amount, 70);
+  assert.equal(created.voucher.tds.sections.length, 2);
+  assert.equal(created.voucher.tds.sections.find((entry) => entry.code === '194C').amount, 20);
+  assert.equal(created.voucher.tds.sections.find((entry) => entry.code === '194J').amount, 50);
+  const summary = withholdingSummary(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(summary.periodAmount, 70);
+  assert.equal(summary.sections.length, 2);
+});

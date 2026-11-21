@@ -1526,39 +1526,54 @@ export function voucherNewScreen() {
   const rateValue = draft.exchangeRate || (foreign ? rateForCurrency(active, draft.currencyCode, draft.date) ?? '' : '');
 
   const cashVoucher = ['Payment', 'Receipt', 'Contra'].includes(draft.type);
-  const instrument = draft.instrument ?? {};
   const firstBankLine = draft.lines.find((line) =>
     active.ledgers.some(
       (ledger) => ledger.id === line.ledgerId && groupChainKeys(active, ledger.groupId).includes('bank'),
     ),
   );
   const firstBank = active.ledgers.find((ledger) => groupChainKeys(active, ledger.groupId).includes('bank'));
-  const instrumentBank = instrument.bankLedgerId || firstBankLine?.ledgerId || firstBank?.id || '';
+  const defaultInstrumentBank = firstBankLine?.ledgerId || firstBank?.id || '';
+  const instruments = draft.instruments?.length ? draft.instruments : [draft.instrument ?? {}];
+  const instrumentRows = instruments.map((instrument, index) => {
+    const instrumentBank = instrument.bankLedgerId || defaultInstrumentBank;
+    return `<div class="instrument-row" data-index="${index}">
+      <div class="instrument-grid">
+        <label class="field"><span>Instrument</span>
+          <select name="instrumentKind">
+            <option value=""${!instrument.kind ? ' selected' : ''}>None</option>
+            <option value="Cheque"${instrument.kind === 'Cheque' ? ' selected' : ''}>Cheque</option>
+            <option value="DD"${instrument.kind === 'DD' ? ' selected' : ''}>DD</option>
+          </select>
+        </label>
+        <label class="field"><span>Number</span>
+          <input name="instrumentNumber" maxlength="30" placeholder="e.g. 123456" value="${esc(instrument.number ?? '')}">
+        </label>
+        <label class="field"><span>Instrument date</span>
+          <input name="instrumentDate" type="date" value="${esc(instrument.date ?? '')}">
+        </label>
+        <label class="field"><span>Bank ledger</span>
+          <select name="instrumentBank">${bankLedgerSelectOptions(active, instrumentBank)}</select>
+        </label>
+        <label class="field"><span>Amount</span>
+          <input name="instrumentAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Allocated amount" value="${esc(instrument.amount ?? '')}">
+        </label>
+      </div>
+      ${instruments.length > 1
+        ? `<div class="line-actions"><button type="button" class="btn small ghost" data-action="remove-instrument" data-index="${index}">Remove instrument</button></div>`
+        : ''}
+    </div>`;
+  }).join('');
   const instrumentBlock = cashVoucher
     ? `<div class="instrument-block">
         <div class="inventory-head">
           <h2>Cheque / DD details</h2>
-          <span class="muted">Optional. Record the instrument now; the bank must also appear on a voucher line.</span>
+          <span class="muted">Optional. Split across several instruments by allocating each amount; the bank must also appear on a voucher line.</span>
         </div>
-        <div class="instrument-grid">
-          <label class="field"><span>Instrument</span>
-            <select name="instrumentKind">
-              <option value=""${!instrument.kind ? ' selected' : ''}>None</option>
-              <option value="Cheque"${instrument.kind === 'Cheque' ? ' selected' : ''}>Cheque</option>
-              <option value="DD"${instrument.kind === 'DD' ? ' selected' : ''}>DD</option>
-            </select>
-          </label>
-          <label class="field"><span>Number</span>
-            <input name="instrumentNumber" maxlength="30" placeholder="e.g. 123456" value="${esc(instrument.number ?? '')}">
-          </label>
-          <label class="field"><span>Instrument date</span>
-            <input name="instrumentDate" type="date" value="${esc(instrument.date ?? '')}">
-          </label>
-          <label class="field"><span>Bank ledger</span>
-            <select name="instrumentBank">${bankLedgerSelectOptions(active, instrumentBank)}</select>
-          </label>
+        ${instrumentRows}
+        <div class="line-actions">
+          <button type="button" class="btn small" data-action="add-instrument">+ Add instrument</button>
         </div>
-        <p class="muted small">Post-dated instruments appear in the Cheque / DD register until their date. Bank reconciliation marks them cleared when matched.</p>
+        <p class="muted small">Leave amounts blank for a single full-value instrument. Post-dated instruments appear in the Cheque / DD register until their date; bank reconciliation marks them cleared when matched.</p>
       </div>`
     : '';
 
@@ -1704,7 +1719,7 @@ export function voucherViewScreen() {
         <div><span class="label">Amount</span><strong>${money(voucher.total)}</strong></div>
         ${voucherCurrency ? `<div><span class="label">Currency</span><span>${foreignMoney(voucher.currencyTotal)} @ ${money(voucher.exchangeRate)}<br><span class="muted small">${esc(voucherCurrency.name)}</span></span></div>` : ''}
         ${voucher.bill ? `<div><span class="label">Bill</span><span>${esc(voucher.bill.ref || '—')}${voucher.bill.dueDate ? ` · due ${esc(dateLabel(voucher.bill.dueDate))}` : ''}</span></div>` : ''}
-        ${voucher.instrument ? `<div><span class="label">Instrument</span><span>${esc(voucher.instrument.kind)} ${esc(voucher.instrument.number)} · ${esc(dateLabel(voucher.instrument.date))}<br><span class="muted small">${esc(active.ledgers.find((ledger) => ledger.id === voucher.instrument.bankLedgerId)?.name ?? 'Unknown bank')}</span></span></div>` : ''}
+        ${Array.isArray(voucher.instruments) && voucher.instruments.length ? `<div><span class="label">Instruments</span><span>${voucher.instruments.map((instrument) => `${esc(instrument.kind)} ${esc(instrument.number)} · ${esc(dateLabel(instrument.date))} · ${money(instrument.amount ?? voucher.total)}<br><span class="muted small">${esc(active.ledgers.find((ledger) => ledger.id === instrument.bankLedgerId)?.name ?? 'Unknown bank')}${instrument.status ? ` · ${esc(instrument.status)}` : ''}</span>`).join('<br>')}</span></div>` : voucher.instrument ? `<div><span class="label">Instrument</span><span>${esc(voucher.instrument.kind)} ${esc(voucher.instrument.number)} · ${esc(dateLabel(voucher.instrument.date))}<br><span class="muted small">${esc(active.ledgers.find((ledger) => ledger.id === voucher.instrument.bankLedgerId)?.name ?? 'Unknown bank')}</span></span></div>` : ''}
         ${voucher.tds ? `<div><span class="label">${esc(voucher.tds.kind)}</span><span>${esc(voucher.tds.code)} · ${voucher.tds.rate}%<br><span class="muted small">Base ${money(voucher.tds.base)} · ${voucher.tds.kind.toLowerCase()} ${money(voucher.tds.amount)}${voucher.tds.pan ? ` · PAN ${esc(voucher.tds.pan)}` : ''}</span></span></div>` : ''}
         ${voucher.gst ? `<div><span class="label">GST</span><span>${esc(gstRateLabel(voucher.gst.rate, voucher.gst.cessRate))} · ${esc(voucher.gst.supplyType)}<br><span class="muted small">Taxable ${money(voucher.gst.taxable)} · tax ${money(round2(voucher.gst.cgst + voucher.gst.sgst + voucher.gst.igst + voucher.gst.cess))}${voucher.gst.partyGstin ? ` · ${esc(voucher.gst.partyGstin)}` : ''}${voucher.gst.reverseCharge ? ' · RCM' : ''}</span></span></div>` : ''}
         <div><span class="label">Narration</span><span>${esc(voucher.narration || '—')}</span></div>

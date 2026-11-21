@@ -888,6 +888,12 @@ kbd {
   background: #f9fbfd;
 }
 
+.instrument-row + .instrument-row {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--line);
+}
+
 .instrument-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -2871,70 +2877,95 @@ function bankEntryForVoucher(company, ledgerId, voucherId, amount) {
 /** Drops malformed cheque/DD details without touching the voucher itself. */
 function normalizeInstruments(company) {
   for (const voucher of company.vouchers ?? []) {
-    if (!voucher.instrument) continue;
-    const instrument = voucher.instrument;
-    if (!['Payment', 'Receipt', 'Contra'].includes(voucher.type) || !['Cheque', 'DD'].includes(instrument.kind)) {
+    const source = Array.isArray(voucher.instruments) && voucher.instruments.length
+      ? voucher.instruments
+      : voucher.instrument
+        ? [voucher.instrument]
+        : [];
+    if (!source.length) continue;
+    if (!['Payment', 'Receipt', 'Contra'].includes(voucher.type)) {
       delete voucher.instrument;
-      continue;
-    }
-    const number = String(instrument.number ?? '').trim().slice(0, 30);
-    const date = String(instrument.date || voucher.date);
-    if (!number || !isValidIsoDate(date)) {
-      delete voucher.instrument;
+      delete voucher.instruments;
       continue;
     }
     const bankLineIds = (voucher.lines ?? [])
       .filter((line) => isBankLedger(company, line.ledgerId))
       .map((line) => line.ledgerId);
-    const bankLedgerId = instrument.bankLedgerId || bankLineIds[0];
-    if (!bankLedgerId || !bankLineIds.includes(bankLedgerId)) {
+    const normalized = [];
+    for (const instrument of source) {
+      if (!instrument || !['Cheque', 'DD'].includes(instrument.kind)) continue;
+      const number = String(instrument.number ?? '').trim().slice(0, 30);
+      const date = String(instrument.date || voucher.date);
+      if (!number || !isValidIsoDate(date)) continue;
+      const bankLedgerId = instrument.bankLedgerId || bankLineIds[0];
+      if (!bankLedgerId || !bankLineIds.includes(bankLedgerId)) continue;
+      const amount = instrument.amount === undefined || instrument.amount === null || String(instrument.amount).trim() === ''
+        ? null
+        : round2(Number(instrument.amount));
+      if (amount !== null && (!Number.isFinite(amount) || amount <= 0)) continue;
+      const status = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
+        ? instrument.status
+        : null;
+      const statusHistory = Array.isArray(instrument.statusHistory)
+        ? instrument.statusHistory
+            .filter(
+              (entry) =>
+                entry &&
+                ['Automatic', 'Cleared', 'Stopped', 'Cancelled'].includes(entry.status) &&
+                !Number.isNaN(Date.parse(String(entry.at ?? ''))),
+            )
+            .map((entry) => ({ status: entry.status, at: String(entry.at) }))
+            .slice(-20)
+        : [];
+      normalized.push({
+        kind: instrument.kind,
+        number,
+        date,
+        bankLedgerId,
+        ...(amount !== null ? { amount } : {}),
+        ...(status ? { status } : {}),
+        ...(statusHistory.length ? { statusHistory } : {}),
+      });
+    }
+    if (!normalized.length) {
       delete voucher.instrument;
+      delete voucher.instruments;
       continue;
     }
-    const status = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
-      ? instrument.status
-      : null;
-    const statusHistory = Array.isArray(instrument.statusHistory)
-      ? instrument.statusHistory
-          .filter(
-            (entry) =>
-              entry &&
-              ['Automatic', 'Cleared', 'Stopped', 'Cancelled'].includes(entry.status) &&
-              !Number.isNaN(Date.parse(String(entry.at ?? ''))),
-          )
-          .map((entry) => ({ status: entry.status, at: String(entry.at) }))
-          .slice(-20)
-      : [];
-    voucher.instrument = {
-      kind: instrument.kind,
-      number,
-      date,
-      bankLedgerId,
-      ...(status ? { status } : {}),
-      ...(statusHistory.length ? { statusHistory } : {}),
-    };
+    voucher.instrument = normalized[0];
+    if (normalized.length > 1) voucher.instruments = normalized;
+    else delete voucher.instruments;
   }
   return company;
 }
 
 /** Sets or clears a manual cheque/DD status; an empty status returns to the derived one. */
-function setInstrumentStatus(company, voucherId, status = '') {
+function setInstrumentStatus(company, voucherId, status = '', instrumentIndex = 0) {
   const voucher = (company.vouchers ?? []).find((entry) => entry.id === voucherId);
   if (!voucher?.instrument) return { ok: false, error: 'Cheque/DD details not found on that voucher.' };
   const allowed = ['', 'Cleared', 'Stopped', 'Cancelled'];
   if (!allowed.includes(status)) return { ok: false, error: 'Unknown cheque/DD status.' };
+  const instruments = Array.isArray(voucher.instruments) && voucher.instruments.length
+    ? voucher.instruments
+    : [voucher.instrument];
+  const index = Number(instrumentIndex);
+  if (!Number.isInteger(index) || index < 0 || index >= instruments.length) {
+    return { ok: false, error: 'Unknown instrument on that voucher.' };
+  }
+  const instrument = instruments[index];
   const next = status || 'Automatic';
-  const previous = voucher.instrument.status || 'Automatic';
+  const previous = instrument.status || 'Automatic';
   if (next !== previous) {
-    voucher.instrument.statusHistory = [
-      ...(Array.isArray(voucher.instrument.statusHistory) ? voucher.instrument.statusHistory : []),
+    instrument.statusHistory = [
+      ...(Array.isArray(instrument.statusHistory) ? instrument.statusHistory : []),
       { status: next, at: new Date().toISOString() },
     ].slice(-20);
   }
-  if (status) voucher.instrument.status = status;
-  else delete voucher.instrument.status;
+  if (status) instrument.status = status;
+  else delete instrument.status;
+  voucher.instrument = instruments[0];
   voucher.updatedAt = new Date().toISOString();
-  return { ok: true, voucher, status };
+  return { ok: true, voucher, status, instrument, instrumentIndex: index };
 }
 
 /** Keeps statement lines and matches consistent with vouchers and bank ledgers. */
@@ -9608,6 +9639,43 @@ function validateImportedCompany(company) {
         !(voucher.lines ?? []).some((line) => line.ledgerId === instrument.bankLedgerId)
       ) {
         return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has cheque/DD details for a bank not on the voucher.`;
+      }
+      if (voucher.instruments !== undefined) {
+        if (!Array.isArray(voucher.instruments) || !voucher.instruments.length) {
+          return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has invalid instrument details.`;
+        }
+        let allocated = 0;
+        let hasAmount = false;
+        for (const entry of voucher.instruments) {
+          if (!entry || !['Cheque', 'DD'].includes(entry.kind)) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid instrument type.`;
+          }
+          if (!String(entry.number ?? '').trim() || !isValidIsoDate(String(entry.date ?? ''))) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid cheque/DD number or date.`;
+          }
+          if (entry.status !== undefined && !['Cleared', 'Stopped', 'Cancelled'].includes(entry.status)) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid cheque/DD status.`;
+          }
+          if (!ledgerIds.has(entry.bankLedgerId) || !isBankLedger(company, entry.bankLedgerId)) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has cheque/DD details for a missing bank.`;
+          }
+          if (entry.amount !== undefined) {
+            const amount = parseAmount(entry.amount);
+            if (amount === null || amount <= 0) {
+              return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid instrument amount.`;
+            }
+            allocated = round2(allocated + amount);
+            hasAmount = true;
+          }
+        }
+        if (hasAmount) {
+          const bankTotal = round2((voucher.lines ?? [])
+            .filter((line) => isBankLedger(company, line.ledgerId))
+            .reduce((sum, line) => sum + (parseAmount(line.amount) ?? 0), 0));
+          if (Math.abs(allocated - bankTotal) >= 0.01) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} does not reconcile its instrument amounts with its bank lines.`;
+          }
+        }
       }
     }
     if (voucher.bill !== undefined) {
@@ -17707,39 +17775,54 @@ function voucherNewScreen() {
   const rateValue = draft.exchangeRate || (foreign ? rateForCurrency(active, draft.currencyCode, draft.date) ?? '' : '');
 
   const cashVoucher = ['Payment', 'Receipt', 'Contra'].includes(draft.type);
-  const instrument = draft.instrument ?? {};
   const firstBankLine = draft.lines.find((line) =>
     active.ledgers.some(
       (ledger) => ledger.id === line.ledgerId && groupChainKeys(active, ledger.groupId).includes('bank'),
     ),
   );
   const firstBank = active.ledgers.find((ledger) => groupChainKeys(active, ledger.groupId).includes('bank'));
-  const instrumentBank = instrument.bankLedgerId || firstBankLine?.ledgerId || firstBank?.id || '';
+  const defaultInstrumentBank = firstBankLine?.ledgerId || firstBank?.id || '';
+  const instruments = draft.instruments?.length ? draft.instruments : [draft.instrument ?? {}];
+  const instrumentRows = instruments.map((instrument, index) => {
+    const instrumentBank = instrument.bankLedgerId || defaultInstrumentBank;
+    return `<div class="instrument-row" data-index="${index}">
+      <div class="instrument-grid">
+        <label class="field"><span>Instrument</span>
+          <select name="instrumentKind">
+            <option value=""${!instrument.kind ? ' selected' : ''}>None</option>
+            <option value="Cheque"${instrument.kind === 'Cheque' ? ' selected' : ''}>Cheque</option>
+            <option value="DD"${instrument.kind === 'DD' ? ' selected' : ''}>DD</option>
+          </select>
+        </label>
+        <label class="field"><span>Number</span>
+          <input name="instrumentNumber" maxlength="30" placeholder="e.g. 123456" value="${esc(instrument.number ?? '')}">
+        </label>
+        <label class="field"><span>Instrument date</span>
+          <input name="instrumentDate" type="date" value="${esc(instrument.date ?? '')}">
+        </label>
+        <label class="field"><span>Bank ledger</span>
+          <select name="instrumentBank">${bankLedgerSelectOptions(active, instrumentBank)}</select>
+        </label>
+        <label class="field"><span>Amount</span>
+          <input name="instrumentAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Allocated amount" value="${esc(instrument.amount ?? '')}">
+        </label>
+      </div>
+      ${instruments.length > 1
+        ? `<div class="line-actions"><button type="button" class="btn small ghost" data-action="remove-instrument" data-index="${index}">Remove instrument</button></div>`
+        : ''}
+    </div>`;
+  }).join('');
   const instrumentBlock = cashVoucher
     ? `<div class="instrument-block">
         <div class="inventory-head">
           <h2>Cheque / DD details</h2>
-          <span class="muted">Optional. Record the instrument now; the bank must also appear on a voucher line.</span>
+          <span class="muted">Optional. Split across several instruments by allocating each amount; the bank must also appear on a voucher line.</span>
         </div>
-        <div class="instrument-grid">
-          <label class="field"><span>Instrument</span>
-            <select name="instrumentKind">
-              <option value=""${!instrument.kind ? ' selected' : ''}>None</option>
-              <option value="Cheque"${instrument.kind === 'Cheque' ? ' selected' : ''}>Cheque</option>
-              <option value="DD"${instrument.kind === 'DD' ? ' selected' : ''}>DD</option>
-            </select>
-          </label>
-          <label class="field"><span>Number</span>
-            <input name="instrumentNumber" maxlength="30" placeholder="e.g. 123456" value="${esc(instrument.number ?? '')}">
-          </label>
-          <label class="field"><span>Instrument date</span>
-            <input name="instrumentDate" type="date" value="${esc(instrument.date ?? '')}">
-          </label>
-          <label class="field"><span>Bank ledger</span>
-            <select name="instrumentBank">${bankLedgerSelectOptions(active, instrumentBank)}</select>
-          </label>
+        ${instrumentRows}
+        <div class="line-actions">
+          <button type="button" class="btn small" data-action="add-instrument">+ Add instrument</button>
         </div>
-        <p class="muted small">Post-dated instruments appear in the Cheque / DD register until their date. Bank reconciliation marks them cleared when matched.</p>
+        <p class="muted small">Leave amounts blank for a single full-value instrument. Post-dated instruments appear in the Cheque / DD register until their date; bank reconciliation marks them cleared when matched.</p>
       </div>`
     : '';
 
@@ -17885,7 +17968,7 @@ function voucherViewScreen() {
         <div><span class="label">Amount</span><strong>${money(voucher.total)}</strong></div>
         ${voucherCurrency ? `<div><span class="label">Currency</span><span>${foreignMoney(voucher.currencyTotal)} @ ${money(voucher.exchangeRate)}<br><span class="muted small">${esc(voucherCurrency.name)}</span></span></div>` : ''}
         ${voucher.bill ? `<div><span class="label">Bill</span><span>${esc(voucher.bill.ref || '—')}${voucher.bill.dueDate ? ` · due ${esc(dateLabel(voucher.bill.dueDate))}` : ''}</span></div>` : ''}
-        ${voucher.instrument ? `<div><span class="label">Instrument</span><span>${esc(voucher.instrument.kind)} ${esc(voucher.instrument.number)} · ${esc(dateLabel(voucher.instrument.date))}<br><span class="muted small">${esc(active.ledgers.find((ledger) => ledger.id === voucher.instrument.bankLedgerId)?.name ?? 'Unknown bank')}</span></span></div>` : ''}
+        ${Array.isArray(voucher.instruments) && voucher.instruments.length ? `<div><span class="label">Instruments</span><span>${voucher.instruments.map((instrument) => `${esc(instrument.kind)} ${esc(instrument.number)} · ${esc(dateLabel(instrument.date))} · ${money(instrument.amount ?? voucher.total)}<br><span class="muted small">${esc(active.ledgers.find((ledger) => ledger.id === instrument.bankLedgerId)?.name ?? 'Unknown bank')}${instrument.status ? ` · ${esc(instrument.status)}` : ''}</span>`).join('<br>')}</span></div>` : voucher.instrument ? `<div><span class="label">Instrument</span><span>${esc(voucher.instrument.kind)} ${esc(voucher.instrument.number)} · ${esc(dateLabel(voucher.instrument.date))}<br><span class="muted small">${esc(active.ledgers.find((ledger) => ledger.id === voucher.instrument.bankLedgerId)?.name ?? 'Unknown bank')}</span></span></div>` : ''}
         ${voucher.tds ? `<div><span class="label">${esc(voucher.tds.kind)}</span><span>${esc(voucher.tds.code)} · ${voucher.tds.rate}%<br><span class="muted small">Base ${money(voucher.tds.base)} · ${voucher.tds.kind.toLowerCase()} ${money(voucher.tds.amount)}${voucher.tds.pan ? ` · PAN ${esc(voucher.tds.pan)}` : ''}</span></span></div>` : ''}
         ${voucher.gst ? `<div><span class="label">GST</span><span>${esc(gstRateLabel(voucher.gst.rate, voucher.gst.cessRate))} · ${esc(voucher.gst.supplyType)}<br><span class="muted small">Taxable ${money(voucher.gst.taxable)} · tax ${money(round2(voucher.gst.cgst + voucher.gst.sgst + voucher.gst.igst + voucher.gst.cess))}${voucher.gst.partyGstin ? ` · ${esc(voucher.gst.partyGstin)}` : ''}${voucher.gst.reverseCharge ? ' · RCM' : ''}</span></span></div>` : ''}
         <div><span class="label">Narration</span><span>${esc(voucher.narration || '—')}</span></div>
@@ -22941,10 +23024,10 @@ function postDatedScreen() {
             : ''}
           ${canWrite
             ? `<div class="row-actions">${row.manualStatus
-                ? `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="" data-id="${esc(row.voucherId)}">Restore automatic</button>`
-                : `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cleared" data-id="${esc(row.voucherId)}">Mark cleared</button>
-                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Stopped" data-id="${esc(row.voucherId)}">Stop</button>
-                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cancelled" data-id="${esc(row.voucherId)}">Cancel</button>`}</div>`
+                ? `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="" data-id="${esc(row.voucherId)}" data-instrument-index="${row.instrumentIndex}">Restore automatic</button>`
+                : `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cleared" data-id="${esc(row.voucherId)}" data-instrument-index="${row.instrumentIndex}">Mark cleared</button>
+                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Stopped" data-id="${esc(row.voucherId)}" data-instrument-index="${row.instrumentIndex}">Stop</button>
+                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cancelled" data-id="${esc(row.voucherId)}" data-instrument-index="${row.instrumentIndex}">Cancel</button>`}</div>`
             : ''}
         </td>
         <td class="num">${money(row.amount)}</td>
@@ -24225,7 +24308,18 @@ function prepareDraft(type, source = null) {
       number: source?.instrument?.number ?? '',
       date: source?.instrument?.date ?? '',
       bankLedgerId: source?.instrument?.bankLedgerId ?? '',
+      amount: source?.instrument?.amount ?? '',
     },
+    instruments: (Array.isArray(source?.instruments) && source.instruments.length
+      ? source.instruments
+      : [source?.instrument ?? {}]
+    ).map((entry) => ({
+      kind: entry.kind ?? '',
+      number: entry.number ?? '',
+      date: entry.date ?? '',
+      bankLedgerId: entry.bankLedgerId ?? '',
+      amount: entry.amount ?? '',
+    })),
     gst: {
       rateId: source?.gst?.rateId ?? '',
       partyGstin: source?.gst?.partyGstin ?? '',
@@ -24446,15 +24540,19 @@ function formBill(form) {
   };
 }
 
+function formInstruments(form) {
+  if (!form.querySelector('.instrument-row')) return null;
+  return [...form.querySelectorAll('.instrument-row')].map((row) => ({
+    kind: row.querySelector('[name="instrumentKind"]')?.value ?? '',
+    number: row.querySelector('[name="instrumentNumber"]')?.value ?? '',
+    date: row.querySelector('[name="instrumentDate"]')?.value ?? '',
+    bankLedgerId: row.querySelector('[name="instrumentBank"]')?.value ?? '',
+    amount: row.querySelector('[name="instrumentAmount"]')?.value ?? '',
+  }));
+}
+
 function formInstrument(form) {
-  const kind = form.querySelector('[name="instrumentKind"]');
-  if (!kind) return null;
-  return {
-    kind: kind.value,
-    number: form.querySelector('[name="instrumentNumber"]')?.value ?? '',
-    date: form.querySelector('[name="instrumentDate"]')?.value ?? '',
-    bankLedgerId: form.querySelector('[name="instrumentBank"]')?.value ?? '',
-  };
+  return formInstruments(form)?.[0] ?? null;
 }
 
 function formGst(form) {
@@ -24580,6 +24678,7 @@ function captureDraft() {
   draft.currencyCode = form.querySelector('[name="currencyCode"]')?.value ?? 'INR';
   draft.exchangeRate = form.querySelector('[name="exchangeRate"]')?.value ?? '';
   draft.bill = formBill(form);
+  draft.instruments = formInstruments(form) ?? draft.instruments;
   draft.instrument = formInstrument(form);
   draft.gst = formGst(form) ?? draft.gst;
   draft.tds = formTds(form) ?? draft.tds;
@@ -24610,6 +24709,7 @@ function readVoucherForm() {
     exchangeRate: form.querySelector('[name="exchangeRate"]')?.value ?? '',
     bill: formBill(form),
     instrument: formInstrument(form),
+    instruments: formInstruments(form) ?? [],
     gst: formGst(form),
     tds: formTds(form),
     lines: formLines(form),
@@ -27365,11 +27465,11 @@ async function handleClick(event) {
       const active = company();
       if (!active) break;
       const status = trigger.dataset.status ?? '';
-      const result = setInstrumentStatus(active, trigger.dataset.id, status);
+      const result = setInstrumentStatus(active, trigger.dataset.id, status, trigger.dataset.instrumentIndex ?? 0);
       if (result.ok) {
         logAudit(
           'instrument.status',
-          `${status ? `Marked ${active.vouchers.find((voucher) => voucher.id === trigger.dataset.id)?.instrument?.kind ?? 'instrument'} ${status.toLowerCase()}` : 'Restored automatic instrument status'}.`,
+          `${status ? `Marked ${result.instrument.kind} ${result.instrument.number} ${status.toLowerCase()}` : 'Restored automatic instrument status'}.`,
           active,
           trigger.dataset.id,
         );
@@ -29134,6 +29234,24 @@ async function handleClick(event) {
       render();
       const inputs = document.querySelectorAll('#voucher-form input.ledger');
       inputs[inputs.length - 1]?.focus();
+      break;
+    }
+    case 'add-instrument': {
+      captureDraft();
+      draft.instruments = draft.instruments?.length ? draft.instruments : [draft.instrument ?? {}];
+      draft.instruments.push({ kind: '', number: '', date: '', bankLedgerId: '', amount: '' });
+      render();
+      const rows = document.querySelectorAll('#voucher-form .instrument-row');
+      rows[rows.length - 1]?.querySelector('[name="instrumentKind"]')?.focus();
+      break;
+    }
+    case 'remove-instrument': {
+      captureDraft();
+      draft.instruments = draft.instruments?.length ? draft.instruments : [draft.instrument ?? {}];
+      draft.instruments.splice(Number(trigger.dataset.index), 1);
+      if (!draft.instruments.length) draft.instruments.push({ kind: '', number: '', date: '', bankLedgerId: '', amount: '' });
+      draft.instrument = draft.instruments[0];
+      render();
       break;
     }
     case 'add-item': {

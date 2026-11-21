@@ -318,3 +318,30 @@ test('a voucher can carry multiple instruments with allocated amounts', () => {
   assert.equal(register.total, 300);
   assert.equal(register.rows.find((row) => row.number === 'DD-2').amount, 200);
 });
+
+test('per-instrument status updates only the selected row and keeps the primary in sync', () => {
+  const { company, bank, expense } = chequeFixture();
+  const created = addVoucher(company, {
+    type: 'Payment',
+    date: '2026-05-10',
+    instruments: [
+      { kind: 'Cheque', number: '8001', date: '2026-05-11', bankLedgerId: bank.id, amount: 100 },
+      { kind: 'Cheque', number: '8002', date: '2026-05-12', bankLedgerId: bank.id, amount: 200 },
+    ],
+    lines: [
+      { ledgerId: expense.id, side: 'Dr', amount: 300 },
+      { ledgerId: bank.id, side: 'Cr', amount: 300 },
+    ],
+  });
+  assert.equal(created.ok, true, created.error);
+  const marked = setInstrumentStatus(company, created.voucher.id, 'Stopped', 1);
+  assert.equal(marked.ok, true, marked.error);
+  assert.equal(created.voucher.instruments[0].status, undefined);
+  assert.equal(created.voucher.instruments[1].status, 'Stopped');
+  assert.equal(created.voucher.instrument.number, '8001');
+  assert.equal(created.voucher.instruments[1].statusHistory[0].status, 'Stopped');
+  const restored = setInstrumentStatus(company, created.voucher.id, '', 1);
+  assert.equal(restored.ok, true, restored.error);
+  assert.equal(created.voucher.instruments[1].status, undefined);
+  assert.equal(setInstrumentStatus(company, created.voucher.id, 'Cleared', 9).ok, false);
+});

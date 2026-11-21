@@ -1265,7 +1265,18 @@ export function prepareDraft(type, source = null) {
       number: source?.instrument?.number ?? '',
       date: source?.instrument?.date ?? '',
       bankLedgerId: source?.instrument?.bankLedgerId ?? '',
+      amount: source?.instrument?.amount ?? '',
     },
+    instruments: (Array.isArray(source?.instruments) && source.instruments.length
+      ? source.instruments
+      : [source?.instrument ?? {}]
+    ).map((entry) => ({
+      kind: entry.kind ?? '',
+      number: entry.number ?? '',
+      date: entry.date ?? '',
+      bankLedgerId: entry.bankLedgerId ?? '',
+      amount: entry.amount ?? '',
+    })),
     gst: {
       rateId: source?.gst?.rateId ?? '',
       partyGstin: source?.gst?.partyGstin ?? '',
@@ -1486,15 +1497,19 @@ export function formBill(form) {
   };
 }
 
+export function formInstruments(form) {
+  if (!form.querySelector('.instrument-row')) return null;
+  return [...form.querySelectorAll('.instrument-row')].map((row) => ({
+    kind: row.querySelector('[name="instrumentKind"]')?.value ?? '',
+    number: row.querySelector('[name="instrumentNumber"]')?.value ?? '',
+    date: row.querySelector('[name="instrumentDate"]')?.value ?? '',
+    bankLedgerId: row.querySelector('[name="instrumentBank"]')?.value ?? '',
+    amount: row.querySelector('[name="instrumentAmount"]')?.value ?? '',
+  }));
+}
+
 export function formInstrument(form) {
-  const kind = form.querySelector('[name="instrumentKind"]');
-  if (!kind) return null;
-  return {
-    kind: kind.value,
-    number: form.querySelector('[name="instrumentNumber"]')?.value ?? '',
-    date: form.querySelector('[name="instrumentDate"]')?.value ?? '',
-    bankLedgerId: form.querySelector('[name="instrumentBank"]')?.value ?? '',
-  };
+  return formInstruments(form)?.[0] ?? null;
 }
 
 export function formGst(form) {
@@ -1620,6 +1635,7 @@ export function captureDraft() {
   draft.currencyCode = form.querySelector('[name="currencyCode"]')?.value ?? 'INR';
   draft.exchangeRate = form.querySelector('[name="exchangeRate"]')?.value ?? '';
   draft.bill = formBill(form);
+  draft.instruments = formInstruments(form) ?? draft.instruments;
   draft.instrument = formInstrument(form);
   draft.gst = formGst(form) ?? draft.gst;
   draft.tds = formTds(form) ?? draft.tds;
@@ -1650,6 +1666,7 @@ export function readVoucherForm() {
     exchangeRate: form.querySelector('[name="exchangeRate"]')?.value ?? '',
     bill: formBill(form),
     instrument: formInstrument(form),
+    instruments: formInstruments(form) ?? [],
     gst: formGst(form),
     tds: formTds(form),
     lines: formLines(form),
@@ -4405,11 +4422,11 @@ async function handleClick(event) {
       const active = company();
       if (!active) break;
       const status = trigger.dataset.status ?? '';
-      const result = setInstrumentStatus(active, trigger.dataset.id, status);
+      const result = setInstrumentStatus(active, trigger.dataset.id, status, trigger.dataset.instrumentIndex ?? 0);
       if (result.ok) {
         logAudit(
           'instrument.status',
-          `${status ? `Marked ${active.vouchers.find((voucher) => voucher.id === trigger.dataset.id)?.instrument?.kind ?? 'instrument'} ${status.toLowerCase()}` : 'Restored automatic instrument status'}.`,
+          `${status ? `Marked ${result.instrument.kind} ${result.instrument.number} ${status.toLowerCase()}` : 'Restored automatic instrument status'}.`,
           active,
           trigger.dataset.id,
         );
@@ -6174,6 +6191,24 @@ async function handleClick(event) {
       render();
       const inputs = document.querySelectorAll('#voucher-form input.ledger');
       inputs[inputs.length - 1]?.focus();
+      break;
+    }
+    case 'add-instrument': {
+      captureDraft();
+      draft.instruments = draft.instruments?.length ? draft.instruments : [draft.instrument ?? {}];
+      draft.instruments.push({ kind: '', number: '', date: '', bankLedgerId: '', amount: '' });
+      render();
+      const rows = document.querySelectorAll('#voucher-form .instrument-row');
+      rows[rows.length - 1]?.querySelector('[name="instrumentKind"]')?.focus();
+      break;
+    }
+    case 'remove-instrument': {
+      captureDraft();
+      draft.instruments = draft.instruments?.length ? draft.instruments : [draft.instrument ?? {}];
+      draft.instruments.splice(Number(trigger.dataset.index), 1);
+      if (!draft.instruments.length) draft.instruments.push({ kind: '', number: '', date: '', bankLedgerId: '', amount: '' });
+      draft.instrument = draft.instruments[0];
+      render();
       break;
     }
     case 'add-item': {

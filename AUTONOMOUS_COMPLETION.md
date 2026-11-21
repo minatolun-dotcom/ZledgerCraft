@@ -19,7 +19,7 @@ SQLite/Postgres workspace mirror and node:test regression suites.
 | --- | --- | --- | --- | --- |
 | 1 | Alternate units | Complete | One alternate unit per stock item with a six-decimal factor; voucher lines select base/alternate unit; quantities convert to base, entered values are retained and exact line amounts drive valuation. | Compound/multiple alternate units and unit-specific pricing remain out of scope. |
 | 2 | Per-line GST/TDS | Complete | Ledger lines can carry `gstRateId` and `tdsSectionId`; GST and TDS/TCS calculate per line, aggregate by rate/section, and split GSTR-1 and withholding summaries. Exempt lines and voucher-level defaults remain supported. | E-invoice line-rate export remains tracked under KL-98, outside this project's return integration. |
-| 3 | Multiple instruments per voucher | Partial | Vouchers store an allocated `instruments` array with per-instrument bank/date/number/amount; validation enforces complete amounts and bank-total reconciliation; the register flattens rows and preserves the primary instrument. | Multi-row voucher-form editor, per-instrument status editing and split bank posting remain open. |
+| 3 | Multiple instruments per voucher | Complete | Vouchers store an allocated `instruments` array with per-instrument bank/date/number/amount; validation enforces complete amounts and bank-total reconciliation; the voucher form adds/removes rows, the register flattens rows and targets status changes per instrument, and the primary instrument stays backward compatible. | Automatic instrument numbering and a full issued-instrument lifecycle remain out of scope. |
 | 4 | Stock/WIP posting | Open | Operational stock valuation and production cost only. | WIP/stock ledgers, production journals, reversals, stock-to-ledger reconciliation. |
 | 5 | Foreign-currency ledger balances | Open | Voucher-level foreign amounts and revaluation working paper. | Currency-aware ledger balances, realised/unrealised differences, settlement matching, statements. |
 | 6 | Bulk voucher grid | Open | Single voucher entry and all-or-nothing CSV/Tally import. | Spreadsheet grid, row validation, atomic batch posting, duplicate prevention. |
@@ -44,12 +44,12 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 ## Verification
 
-- Full suite: 346 tests (345 pass, 1 skipped), 0 failures.
-- Build: 1,241.2 kB.
+- Full suite: 347 tests (346 pass, 1 skipped), 0 failures.
+- Build: 1,247.8 kB.
 - Targeted suites: inventory, bank, budgets, payroll.
 
 ## Exact next action
 
-Finish the multi-instrument voucher form and per-instrument status editing. Statutory filing
+Continue with stock/WIP posting depth. Statutory filing
 cannot be completed without GSTN/IRP/TRACES credentials and authorization; do not
 simulate submission.

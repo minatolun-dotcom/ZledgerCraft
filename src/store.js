@@ -445,70 +445,95 @@ function bankEntryForVoucher(company, ledgerId, voucherId, amount) {
 /** Drops malformed cheque/DD details without touching the voucher itself. */
 export function normalizeInstruments(company) {
   for (const voucher of company.vouchers ?? []) {
-    if (!voucher.instrument) continue;
-    const instrument = voucher.instrument;
-    if (!['Payment', 'Receipt', 'Contra'].includes(voucher.type) || !['Cheque', 'DD'].includes(instrument.kind)) {
+    const source = Array.isArray(voucher.instruments) && voucher.instruments.length
+      ? voucher.instruments
+      : voucher.instrument
+        ? [voucher.instrument]
+        : [];
+    if (!source.length) continue;
+    if (!['Payment', 'Receipt', 'Contra'].includes(voucher.type)) {
       delete voucher.instrument;
-      continue;
-    }
-    const number = String(instrument.number ?? '').trim().slice(0, 30);
-    const date = String(instrument.date || voucher.date);
-    if (!number || !isValidIsoDate(date)) {
-      delete voucher.instrument;
+      delete voucher.instruments;
       continue;
     }
     const bankLineIds = (voucher.lines ?? [])
       .filter((line) => isBankLedger(company, line.ledgerId))
       .map((line) => line.ledgerId);
-    const bankLedgerId = instrument.bankLedgerId || bankLineIds[0];
-    if (!bankLedgerId || !bankLineIds.includes(bankLedgerId)) {
+    const normalized = [];
+    for (const instrument of source) {
+      if (!instrument || !['Cheque', 'DD'].includes(instrument.kind)) continue;
+      const number = String(instrument.number ?? '').trim().slice(0, 30);
+      const date = String(instrument.date || voucher.date);
+      if (!number || !isValidIsoDate(date)) continue;
+      const bankLedgerId = instrument.bankLedgerId || bankLineIds[0];
+      if (!bankLedgerId || !bankLineIds.includes(bankLedgerId)) continue;
+      const amount = instrument.amount === undefined || instrument.amount === null || String(instrument.amount).trim() === ''
+        ? null
+        : round2(Number(instrument.amount));
+      if (amount !== null && (!Number.isFinite(amount) || amount <= 0)) continue;
+      const status = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
+        ? instrument.status
+        : null;
+      const statusHistory = Array.isArray(instrument.statusHistory)
+        ? instrument.statusHistory
+            .filter(
+              (entry) =>
+                entry &&
+                ['Automatic', 'Cleared', 'Stopped', 'Cancelled'].includes(entry.status) &&
+                !Number.isNaN(Date.parse(String(entry.at ?? ''))),
+            )
+            .map((entry) => ({ status: entry.status, at: String(entry.at) }))
+            .slice(-20)
+        : [];
+      normalized.push({
+        kind: instrument.kind,
+        number,
+        date,
+        bankLedgerId,
+        ...(amount !== null ? { amount } : {}),
+        ...(status ? { status } : {}),
+        ...(statusHistory.length ? { statusHistory } : {}),
+      });
+    }
+    if (!normalized.length) {
       delete voucher.instrument;
+      delete voucher.instruments;
       continue;
     }
-    const status = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
-      ? instrument.status
-      : null;
-    const statusHistory = Array.isArray(instrument.statusHistory)
-      ? instrument.statusHistory
-          .filter(
-            (entry) =>
-              entry &&
-              ['Automatic', 'Cleared', 'Stopped', 'Cancelled'].includes(entry.status) &&
-              !Number.isNaN(Date.parse(String(entry.at ?? ''))),
-          )
-          .map((entry) => ({ status: entry.status, at: String(entry.at) }))
-          .slice(-20)
-      : [];
-    voucher.instrument = {
-      kind: instrument.kind,
-      number,
-      date,
-      bankLedgerId,
-      ...(status ? { status } : {}),
-      ...(statusHistory.length ? { statusHistory } : {}),
-    };
+    voucher.instrument = normalized[0];
+    if (normalized.length > 1) voucher.instruments = normalized;
+    else delete voucher.instruments;
   }
   return company;
 }
 
 /** Sets or clears a manual cheque/DD status; an empty status returns to the derived one. */
-export function setInstrumentStatus(company, voucherId, status = '') {
+export function setInstrumentStatus(company, voucherId, status = '', instrumentIndex = 0) {
   const voucher = (company.vouchers ?? []).find((entry) => entry.id === voucherId);
   if (!voucher?.instrument) return { ok: false, error: 'Cheque/DD details not found on that voucher.' };
   const allowed = ['', 'Cleared', 'Stopped', 'Cancelled'];
   if (!allowed.includes(status)) return { ok: false, error: 'Unknown cheque/DD status.' };
+  const instruments = Array.isArray(voucher.instruments) && voucher.instruments.length
+    ? voucher.instruments
+    : [voucher.instrument];
+  const index = Number(instrumentIndex);
+  if (!Number.isInteger(index) || index < 0 || index >= instruments.length) {
+    return { ok: false, error: 'Unknown instrument on that voucher.' };
+  }
+  const instrument = instruments[index];
   const next = status || 'Automatic';
-  const previous = voucher.instrument.status || 'Automatic';
+  const previous = instrument.status || 'Automatic';
   if (next !== previous) {
-    voucher.instrument.statusHistory = [
-      ...(Array.isArray(voucher.instrument.statusHistory) ? voucher.instrument.statusHistory : []),
+    instrument.statusHistory = [
+      ...(Array.isArray(instrument.statusHistory) ? instrument.statusHistory : []),
       { status: next, at: new Date().toISOString() },
     ].slice(-20);
   }
-  if (status) voucher.instrument.status = status;
-  else delete voucher.instrument.status;
+  if (status) instrument.status = status;
+  else delete instrument.status;
+  voucher.instrument = instruments[0];
   voucher.updatedAt = new Date().toISOString();
-  return { ok: true, voucher, status };
+  return { ok: true, voucher, status, instrument, instrumentIndex: index };
 }
 
 /** Keeps statement lines and matches consistent with vouchers and bank ledgers. */
@@ -7182,6 +7207,43 @@ function validateImportedCompany(company) {
         !(voucher.lines ?? []).some((line) => line.ledgerId === instrument.bankLedgerId)
       ) {
         return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has cheque/DD details for a bank not on the voucher.`;
+      }
+      if (voucher.instruments !== undefined) {
+        if (!Array.isArray(voucher.instruments) || !voucher.instruments.length) {
+          return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has invalid instrument details.`;
+        }
+        let allocated = 0;
+        let hasAmount = false;
+        for (const entry of voucher.instruments) {
+          if (!entry || !['Cheque', 'DD'].includes(entry.kind)) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid instrument type.`;
+          }
+          if (!String(entry.number ?? '').trim() || !isValidIsoDate(String(entry.date ?? ''))) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid cheque/DD number or date.`;
+          }
+          if (entry.status !== undefined && !['Cleared', 'Stopped', 'Cancelled'].includes(entry.status)) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid cheque/DD status.`;
+          }
+          if (!ledgerIds.has(entry.bankLedgerId) || !isBankLedger(company, entry.bankLedgerId)) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has cheque/DD details for a missing bank.`;
+          }
+          if (entry.amount !== undefined) {
+            const amount = parseAmount(entry.amount);
+            if (amount === null || amount <= 0) {
+              return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid instrument amount.`;
+            }
+            allocated = round2(allocated + amount);
+            hasAmount = true;
+          }
+        }
+        if (hasAmount) {
+          const bankTotal = round2((voucher.lines ?? [])
+            .filter((line) => isBankLedger(company, line.ledgerId))
+            .reduce((sum, line) => sum + (parseAmount(line.amount) ?? 0), 0));
+          if (Math.abs(allocated - bankTotal) >= 0.01) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} does not reconcile its instrument amounts with its bank lines.`;
+          }
+        }
       }
     }
     if (voucher.bill !== undefined) {

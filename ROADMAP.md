@@ -348,10 +348,12 @@ inside those stages.
 
 - Vouchers accept an allocated instrument array with bank, number, date and
   amount; complete amount allocation is required when split.
+- The voucher form adds and removes instrument rows, and the register targets
+  manual status changes at the selected instrument.
 - Instrument totals must reconcile to the bank-line total, the first instrument
   remains the compatible primary, and the register flattens every instrument.
-- Verification: two-instrument payment and register total/rows; full suite 346
-  tests (345 pass, 1 skipped); 1,241.2 kB build.
+- Verification: split-instrument payment, register rows and per-row status;
+  full suite 347 tests (346 pass, 1 skipped); 1,247.8 kB build.
 
 ### 2026-11-21 — Phase 58: per-line TDS sections
 

@@ -875,6 +875,12 @@ kbd {
   background: #f9fbfd;
 }
 
+.instrument-row + .instrument-row {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--line);
+}
+
 .instrument-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

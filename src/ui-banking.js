@@ -292,10 +292,10 @@ export function postDatedScreen() {
             : ''}
           ${canWrite
             ? `<div class="row-actions">${row.manualStatus
-                ? `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="" data-id="${esc(row.voucherId)}">Restore automatic</button>`
-                : `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cleared" data-id="${esc(row.voucherId)}">Mark cleared</button>
-                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Stopped" data-id="${esc(row.voucherId)}">Stop</button>
-                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cancelled" data-id="${esc(row.voucherId)}">Cancel</button>`}</div>`
+                ? `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="" data-id="${esc(row.voucherId)}" data-instrument-index="${row.instrumentIndex}">Restore automatic</button>`
+                : `<button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cleared" data-id="${esc(row.voucherId)}" data-instrument-index="${row.instrumentIndex}">Mark cleared</button>
+                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Stopped" data-id="${esc(row.voucherId)}" data-instrument-index="${row.instrumentIndex}">Stop</button>
+                   <button class="btn small ghost" type="button" data-action="set-instrument-status" data-status="Cancelled" data-id="${esc(row.voucherId)}" data-instrument-index="${row.instrumentIndex}">Cancel</button>`}</div>`
             : ''}
         </td>
         <td class="num">${money(row.amount)}</td>

@@ -1261,6 +1261,18 @@ export function budgetVsActual(company, filters = {}) {
               ? credit - debit
               : debit - credit),
       );
+      const phases = Array.isArray(budget.phases) && budget.phases.length === 4
+        ? budget.phases.map((value) => round2(value))
+        : null;
+      let phaseBudgetToDate = null;
+      if (phases) {
+        const monthOffset =
+          (Number(asOn.slice(0, 4)) - Number(year.start.slice(0, 4))) * 12 +
+          Number(asOn.slice(5, 7)) -
+          Number(year.start.slice(5, 7));
+        const quarter = Math.min(3, Math.max(0, Math.floor(monthOffset / 3)));
+        phaseBudgetToDate = round2(phases.slice(0, quarter + 1).reduce((sum, value) => sum + value, 0));
+      }
       return {
         budgetId: budget.id,
         name: budget.name,
@@ -1269,6 +1281,8 @@ export function budgetVsActual(company, filters = {}) {
         target: target.name,
         nature,
         amount: round2(budget.amount),
+        phases,
+        phaseBudgetToDate,
         actual,
         variance: round2(budget.amount - actual),
         usedPercent: budget.amount > 0 ? round2((actual / budget.amount) * 100) : null,

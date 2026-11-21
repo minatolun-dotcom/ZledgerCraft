@@ -195,11 +195,22 @@ export function backupScreen() {
     ${can('data.restore')
       ? panel(
           'Restore backup',
-          `<p class="muted">Paste a plain or encrypted backup below. Restoring replaces all companies currently stored in this browser.</p>
+          `<p class="muted">Paste a plain or encrypted backup below. You can replace every company or restore one company by its exact backup name and keep the rest of the current workspace.</p>
           <form id="restore-form" novalidate>
             <label class="field">
               <span>Backup JSON</span>
               <textarea name="payload" class="backup-box" rows="10" placeholder='{ "companies": [ ... ] }' aria-label="Restore JSON payload"></textarea>
+            </label>
+            <label class="field">
+              <span>Restore mode</span>
+              <select name="restoreMode">
+                <option value="all">Replace all companies</option>
+                <option value="company">Restore one company by name</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Company name (single-company mode)</span>
+              <input name="companyName" maxlength="80" placeholder="Exact company name in the backup" aria-label="Company name to restore">
             </label>
             <label class="field">
               <span>Passphrase for encrypted backups</span>

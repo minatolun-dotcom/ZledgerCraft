@@ -5332,6 +5332,14 @@ function normalizeBudgets(company) {
         targetId: target.id,
         yearId: year.id,
         amount,
+        ...(Array.isArray(budget.phases) &&
+        budget.phases.length === 4 &&
+        budget.phases.every((value) => parseAmount(value) !== null && parseAmount(value) >= 0) &&
+        Math.abs(
+          budget.phases.reduce((sum, value) => sum + (parseAmount(value) ?? 0), 0) - amount,
+        ) < 0.01
+          ? { phases: budget.phases.map((value) => parseAmount(value)) }
+          : {}),
         createdAt: budget.createdAt ? String(budget.createdAt) : new Date().toISOString(),
         ...(Array.isArray(budget.history) && budget.history.length
           ? {
@@ -5360,6 +5368,22 @@ function normalizeBudgets(company) {
   return company;
 }
 
+function normaliseBudgetPhases(input, amount) {
+  const supplied = input.phases ?? [input.q1, input.q2, input.q3, input.q4];
+  const raw = Array.isArray(supplied) ? supplied : [];
+  if (raw.every((value) => String(value ?? '').trim() === '')) return { ok: true, phases: null };
+  if (raw.length !== 4) return { ok: false, error: 'Budget phasing needs all four quarterly amounts.' };
+  const phases = raw.map((value) => parseAmount(value));
+  if (phases.some((value) => value === null || value < 0)) {
+    return { ok: false, error: 'Quarterly budget amounts must be zero or more.' };
+  }
+  const total = round2(phases.reduce((sum, value) => sum + value, 0));
+  if (Math.abs(total - amount) >= 0.01) {
+    return { ok: false, error: `Quarterly phasing totals ${total}, not the budget amount ${amount}.` };
+  }
+  return { ok: true, phases };
+}
+
 function addBudget(company, input = {}) {
   const targetType = normaliseBudgetTargetType(input.targetType);
   if (!targetType) return { ok: false, error: 'Choose a ledger, group, cost centre or cost category for the budget.' };
@@ -5371,6 +5395,8 @@ function addBudget(company, input = {}) {
   if (amount === null || amount < 0) return { ok: false, error: 'Budget amount must be zero or more.' };
   const name = String(input.name ?? '').trim() || `${target.name} ${year.start.slice(0, 4)}`;
   if (name.length > 80) return { ok: false, error: 'Budget name must be 80 characters or fewer.' };
+  const phased = normaliseBudgetPhases(input, amount);
+  if (!phased.ok) return phased;
   company.budgets = company.budgets ?? [];
   if (company.budgets.some((budget) => budget.name.toLowerCase() === name.toLowerCase())) {
     return { ok: false, error: `A budget named "${name}" already exists.` };
@@ -5385,6 +5411,7 @@ function addBudget(company, input = {}) {
     targetId: target.id,
     yearId: year.id,
     amount,
+    ...(phased.phases ? { phases: phased.phases } : {}),
     createdAt: new Date().toISOString(),
   };
   company.budgets.push(budget);
@@ -5405,6 +5432,12 @@ function updateBudget(company, budgetId, input = {}) {
   if (amount === null || amount < 0) return { ok: false, error: 'Budget amount must be zero or more.' };
   const name = String(input.name ?? '').trim() || budget.name;
   if (name.length > 80) return { ok: false, error: 'Budget name must be 80 characters or fewer.' };
+  const phasesSupplied =
+    input.phases !== undefined || [input.q1, input.q2, input.q3, input.q4].some((value) => value !== undefined);
+  const phased = phasesSupplied
+    ? normaliseBudgetPhases(input, amount)
+    : { ok: true, phases: budget.phases ?? null };
+  if (!phased.ok) return phased;
   if (
     (company.budgets ?? []).some(
       (entry) => entry.id !== budgetId && entry.name.toLowerCase() === name.toLowerCase(),
@@ -5435,6 +5468,8 @@ function updateBudget(company, budgetId, input = {}) {
   budget.targetId = target.id;
   budget.yearId = year.id;
   budget.amount = amount;
+  if (phased.phases) budget.phases = phased.phases;
+  else delete budget.phases;
   budget.updatedAt = new Date().toISOString();
   return { ok: true, budget };
 }
@@ -5483,6 +5518,7 @@ function duplicateBudget(company, budgetId, input = {}) {
     targetId: source.targetId,
     yearId: targetYear.id,
     amount: source.amount,
+    ...(source.phases ? { phases: [...source.phases] } : {}),
     createdAt: new Date().toISOString(),
   };
   company.budgets = company.budgets ?? [];
@@ -5688,6 +5724,7 @@ function seedInventoryMasters(company) {
   if (!Array.isArray(company.orders)) company.orders = [];
   if (!Array.isArray(company.boms)) company.boms = [];
   if (!Array.isArray(company.manufactures)) company.manufactures = [];
+  if (!Array.isArray(company.chequeBooks)) company.chequeBooks = [];
   company.counters = company.counters ?? {};
   company.counters.__stockTransfer = Math.max(
     Number(company.counters.__stockTransfer) || 0,
@@ -7415,6 +7452,153 @@ function stockItemUsage(company, itemId) {
   return voucherUse + transferUse + bomUse + manufactureUse;
 }
 
+function chequeBookNumber(raw, label) {
+  const text = String(raw ?? '').trim();
+  if (!/^\d{1,12}$/.test(text)) return { error: `${label} must be 1 to 12 digits.` };
+  return { value: Number(text), text };
+}
+
+function validateChequeBook(company, input, ignoreId) {
+  const name = String(input.name ?? '').trim();
+  if (!name) return { ok: false, error: 'Cheque book name is required.' };
+  if (name.length > 60) return { ok: false, error: 'Cheque book name must be 60 characters or fewer.' };
+  if (
+    (company.chequeBooks ?? []).some(
+      (book) => book.id !== ignoreId && book.name.toLowerCase() === name.toLowerCase(),
+    )
+  ) {
+    return { ok: false, error: `A cheque book named "${name}" already exists.` };
+  }
+  const bank = (company.ledgers ?? []).find(
+    (ledger) => ledger.id === input.bankLedgerId && isBankLedger(company, ledger.id),
+  );
+  if (!bank) return { ok: false, error: 'Choose a bank ledger for the cheque book.' };
+  const prefix = String(input.prefix ?? '').trim().slice(0, 10);
+  if (prefix && !/^[A-Za-z0-9/-]+$/.test(prefix)) {
+    return { ok: false, error: 'Cheque-number prefix may contain letters, digits, hyphen or slash.' };
+  }
+  const start = chequeBookNumber(input.startNo, 'First cheque number');
+  if (start.error) return { ok: false, error: start.error };
+  const end = chequeBookNumber(input.endNo, 'Last cheque number');
+  if (end.error) return { ok: false, error: end.error };
+  if (start.value > end.value) {
+    return { ok: false, error: 'First cheque number cannot be after the last number.' };
+  }
+  const next = chequeBookNumber(input.nextNo || input.startNo, 'Next cheque number');
+  if (next.error) return { ok: false, error: next.error };
+  if (next.value < start.value || next.value > end.value) {
+    return { ok: false, error: 'Next cheque number must sit inside the book range.' };
+  }
+  const overlap = (company.chequeBooks ?? []).find(
+    (book) =>
+      book.id !== ignoreId &&
+      book.bankLedgerId === bank.id &&
+      book.prefix === prefix &&
+      start.value <= book.endNo &&
+      end.value >= book.startNo,
+  );
+  if (overlap) {
+    return { ok: false, error: `This range overlaps cheque book "${overlap.name}".` };
+  }
+  return {
+    ok: true,
+    name,
+    bank,
+    prefix,
+    startNo: start.value,
+    endNo: end.value,
+    nextNo: next.value,
+  };
+}
+
+function addChequeBook(company, input = {}) {
+  company.chequeBooks = company.chequeBooks ?? [];
+  const checked = validateChequeBook(company, input);
+  if (!checked.ok) return checked;
+  const book = {
+    id: uid('chqbook'),
+    name: checked.name,
+    bankLedgerId: checked.bank.id,
+    prefix: checked.prefix,
+    startNo: checked.startNo,
+    endNo: checked.endNo,
+    nextNo: checked.nextNo,
+    createdAt: new Date().toISOString(),
+  };
+  company.chequeBooks.push(book);
+  return { ok: true, book };
+}
+
+function updateChequeBook(company, bookId, input = {}) {
+  const book = (company.chequeBooks ?? []).find((entry) => entry.id === bookId);
+  if (!book) return { ok: false, error: 'Cheque book not found.' };
+  const checked = validateChequeBook(
+    company,
+    {
+      name: input.name ?? book.name,
+      bankLedgerId: input.bankLedgerId ?? book.bankLedgerId,
+      prefix: input.prefix ?? book.prefix,
+      startNo: input.startNo ?? book.startNo,
+      endNo: input.endNo ?? book.endNo,
+      nextNo: input.nextNo ?? book.nextNo,
+    },
+    bookId,
+  );
+  if (!checked.ok) return checked;
+  book.name = checked.name;
+  book.bankLedgerId = checked.bank.id;
+  book.prefix = checked.prefix;
+  book.startNo = checked.startNo;
+  book.endNo = checked.endNo;
+  book.nextNo = checked.nextNo;
+  book.updatedAt = new Date().toISOString();
+  return { ok: true, book };
+}
+
+function chequeBookUsage(company, bookId) {
+  const book = (company.chequeBooks ?? []).find((entry) => entry.id === bookId);
+  if (!book) return 0;
+  return (company.vouchers ?? []).filter((voucher) => {
+    const instrument = voucher.instrument;
+    if (!instrument || instrument.bankLedgerId !== book.bankLedgerId) return false;
+    const raw = String(instrument.number ?? '').trim();
+    const prefix = book.prefix ?? '';
+    if (prefix && !raw.startsWith(prefix)) return false;
+    const digits = raw.slice(prefix.length);
+    if (!/^\d+$/.test(digits)) return false;
+    const number = Number(digits);
+    return number >= book.startNo && number <= book.endNo;
+  }).length;
+}
+
+function deleteChequeBook(company, bookId) {
+  const book = (company.chequeBooks ?? []).find((entry) => entry.id === bookId);
+  if (!book) return { ok: false, error: 'Cheque book not found.' };
+  const used = chequeBookUsage(company, bookId);
+  if (used > 0) {
+    return {
+      ok: false,
+      error: `Cheque book "${book.name}" contains ${used} recorded instrument(s). Rename or widen it instead.`,
+    };
+  }
+  company.chequeBooks = (company.chequeBooks ?? []).filter((entry) => entry.id !== bookId);
+  return { ok: true, book };
+}
+
+function nextChequeNumber(company, bookId) {
+  const book = (company.chequeBooks ?? []).find((entry) => entry.id === bookId);
+  if (!book) return { ok: false, error: 'Cheque book not found.' };
+  if (book.nextNo > book.endNo) return { ok: false, error: `Cheque book "${book.name}" is exhausted.` };
+  return { ok: true, number: `${book.prefix}${book.nextNo}`, book };
+}
+
+function advanceChequeBook(company, bookId) {
+  const book = (company.chequeBooks ?? []).find((entry) => entry.id === bookId);
+  if (!book) return { ok: false, error: 'Cheque book not found.' };
+  if (book.nextNo < book.endNo) book.nextNo += 1;
+  return { ok: true, book, number: `${book.prefix}${book.nextNo}` };
+}
+
 function addStockTransfer(company, input) {
   const date = String(input.date ?? '');
   if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid transfer date.' };
@@ -8168,6 +8352,14 @@ function addBom(company, input) {
     seen.add(component.id);
     components.push({ stockItemId: component.id, qty });
   }
+  for (const component of components) {
+    if (bomPathReaches(company, component.stockItemId, output.id)) {
+      return {
+        ok: false,
+        error: `Using "${(company.stockItems ?? []).find((item) => item.id === component.stockItemId)?.name ?? 'that item'}" here would make the BOM recurse into itself.`,
+      };
+    }
+  }
   const bom = {
     id: uid('bom'),
     name,
@@ -8180,8 +8372,67 @@ function addBom(company, input) {
   return { ok: true, bom };
 }
 
+function bomForOutput(company, itemId) {
+  return (company.boms ?? []).find(
+    (bom) => bom.outputItemId === itemId && Array.isArray(bom.components) && bom.components.length,
+  );
+}
+
+function bomPathReaches(company, itemId, targetItemId, seen = new Set()) {
+  if (itemId === targetItemId) return true;
+  if (seen.has(itemId)) return false;
+  seen.add(itemId);
+  const bom = bomForOutput(company, itemId);
+  if (!bom) return false;
+  return (bom.components ?? []).some((line) =>
+    bomPathReaches(company, line.stockItemId, targetItemId, seen),
+  );
+}
+
+function explodeBomComponents(company, bom, factor, stack = []) {
+  if (stack.includes(bom.outputItemId)) return { error: 'The BOM contains a recursive sub-assembly.' };
+  const totals = new Map();
+  const walk = (current, scale, trail) => {
+    if (trail.includes(current.outputItemId)) {
+      return 'The BOM contains a recursive sub-assembly.';
+    }
+    for (const line of current.components ?? []) {
+      const subBom = bomForOutput(company, line.stockItemId);
+      if (subBom) {
+        const message = walk(
+          subBom,
+          (scale * line.qty) / subBom.outputQty,
+          [...trail, current.outputItemId],
+        );
+        if (message) return message;
+      } else {
+        totals.set(line.stockItemId, (totals.get(line.stockItemId) ?? 0) + scale * line.qty);
+      }
+    }
+    return null;
+  };
+  const error = walk(bom, factor, []);
+  if (error) return { error };
+  return {
+    components: [...totals.entries()]
+      .map(([stockItemId, qty]) => ({ stockItemId, qty: round3(qty) }))
+      .filter((line) => line.qty > 0),
+  };
+}
+
 function bomUsage(company, bomId) {
-  return (company.manufactures ?? []).filter((manufacture) => manufacture.bomId === bomId).length;
+  const bom = (company.boms ?? []).find((entry) => entry.id === bomId);
+  const productions = (company.manufactures ?? []).filter(
+    (manufacture) => manufacture.bomId === bomId,
+  ).length;
+  const parents = bom
+    ? (company.boms ?? []).filter(
+        (entry) =>
+          entry.id !== bom.id &&
+          (entry.components ?? []).some((line) => line.stockItemId === bom.outputItemId),
+      ).length
+    : 0;
+  return productions + parents;
 }
 
 function deleteBom(company, bomId) {
@@ -8189,7 +8440,10 @@ function deleteBom(company, bomId) {
   if (!bom) return { ok: false, error: 'BOM not found.' };
   const used = bomUsage(company, bomId);
   if (used > 0) {
-    return { ok: false, error: `BOM "${bom.name}" is used by ${used} production entry(s). Delete those first.` };
+    return {
+      ok: false,
+      error: `BOM "${bom.name}" is used by ${used} production entry(s) or parent BOM(s). Remove those first.`,
+    };
   }
   company.boms = (company.boms ?? []).filter((entry) => entry.id !== bomId);
   return { ok: true, bom };
@@ -8229,11 +8483,19 @@ function addManufacture(company, input) {
   const expiryDate = String(input.expiryDate ?? '').trim();
   if (expiryDate && !isValidIsoDate(expiryDate)) return { ok: false, error: 'Enter a valid batch expiry date.' };
   const factor = (outputQty + wastageQty) / bom.outputQty;
+  const exploded = explodeBomComponents(company, bom, factor);
+  if (exploded.error) return { ok: false, error: exploded.error };
   const components = [];
-  for (const line of bom.components ?? []) {
+  for (const line of exploded.components) {
     const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
     if (!item) return { ok: false, error: 'A BOM component no longer exists.' };
-    const qty = round3(line.qty * factor);
+    if (item.batchTracking) {
+      return {
+        ok: false,
+        error: `Batch-tracked component "${item.name}" needs manual batch selection, which multi-level production does not support yet.`,
+      };
+    }
+    const qty = line.qty;
     if (qty <= 0) return { ok: false, error: `Consumption of "${item.name}" rounds to zero.` };
     const available = stockOnHand(company, item.id, date, { godownId: componentGodown.id });
     if (qty > available + 0.0005) {
@@ -9546,6 +9808,35 @@ function validateImportedCompany(company) {
     }
   }
 
+  const chequeBookIds = new Set();
+  const chequeBookNames = new Set();
+  for (const book of company.chequeBooks ?? []) {
+    if (!book || !book.id) return `Company "${name}" has an invalid cheque book.`;
+    if (chequeBookIds.has(book.id)) return `Company "${name}" has duplicate cheque book ids.`;
+    chequeBookIds.add(book.id);
+    const bookName = String(book.name ?? '').trim();
+    if (!bookName) return `Company "${name}" has a cheque book without a name.`;
+    if (chequeBookNames.has(bookName.toLowerCase())) {
+      return `Company "${name}" has duplicate cheque book names.`;
+    }
+    chequeBookNames.add(bookName.toLowerCase());
+    if (!ledgerIds.has(book.bankLedgerId) || !isBankLedger(company, book.bankLedgerId)) {
+      return `Company "${name}": cheque book "${bookName}" points at a non-bank ledger.`;
+    }
+    const start = chequeBookNumber(book.startNo, 'First cheque number');
+    const end = chequeBookNumber(book.endNo, 'Last cheque number');
+    const next = chequeBookNumber(book.nextNo, 'Next cheque number');
+    if (start.error || end.error || next.error || start.value > end.value) {
+      return `Company "${name}": cheque book "${bookName}" has an invalid number range.`;
+    }
+    if (next.value < start.value || next.value > end.value) {
+      return `Company "${name}": cheque book "${bookName}" has an out-of-range next number.`;
+    }
+    if (book.prefix && !/^[A-Za-z0-9/-]+$/.test(String(book.prefix))) {
+      return `Company "${name}": cheque book "${bookName}" has an invalid prefix.`;
+    }
+  }
+
   const bomIds = new Set();
   for (const bom of company.boms ?? []) {
     if (!bom || !bom.id || !String(bom.name ?? '').trim()) {
@@ -9580,6 +9871,11 @@ function validateImportedCompany(company) {
         return `Company "${name}": BOM "${bom.name}" has an invalid component quantity.`;
       }
       componentIds.add(line.stockItemId);
+    }
+    for (const line of bom.components ?? []) {
+      if (bomPathReaches(company, line.stockItemId, bom.outputItemId)) {
+        return `Company "${name}": BOM "${bom.name}" recurses into itself.`;
+      }
     }
   }
 
@@ -9616,8 +9912,12 @@ function validateImportedCompany(company) {
       return `Company "${name}": production ${manufacture.no ?? ''} has an invalid batch expiry date.`;
     }
     const factor = (outputQty + wastageQty) / parseQty(bom.outputQty);
+    const exploded = explodeBomComponents(company, bom, factor);
+    if (exploded.error) {
+      return `Company "${name}": production ${manufacture.no ?? ''} has ${exploded.error.toLowerCase()}`;
+    }
     const expected = new Map(
-      (bom.components ?? []).map((line) => [line.stockItemId, round3((parseQty(line.qty) ?? 0) * factor)]),
+      exploded.components.map((line) => [line.stockItemId, line.qty]),
     );
     if (!Array.isArray(manufacture.components) || manufacture.components.length !== expected.size) {
       return `Company "${name}": production ${manufacture.no ?? ''} does not match its BOM components.`;
@@ -11055,6 +11355,18 @@ function budgetVsActual(company, filters = {}) {
               ? credit - debit
               : debit - credit),
       );
+      const phases = Array.isArray(budget.phases) && budget.phases.length === 4
+        ? budget.phases.map((value) => round2(value))
+        : null;
+      let phaseBudgetToDate = null;
+      if (phases) {
+        const monthOffset =
+          (Number(asOn.slice(0, 4)) - Number(year.start.slice(0, 4))) * 12 +
+          Number(asOn.slice(5, 7)) -
+          Number(year.start.slice(5, 7));
+        const quarter = Math.min(3, Math.max(0, Math.floor(monthOffset / 3)));
+        phaseBudgetToDate = round2(phases.slice(0, quarter + 1).reduce((sum, value) => sum + value, 0));
+      }
       return {
         budgetId: budget.id,
         name: budget.name,
@@ -11063,6 +11375,8 @@ function budgetVsActual(company, filters = {}) {
         target: target.name,
         nature,
         amount: round2(budget.amount),
+        phases,
+        phaseBudgetToDate,
         actual,
         variance: round2(budget.amount - actual),
         usedPercent: budget.amount > 0 ? round2((actual / budget.amount) * 100) : null,
@@ -16275,7 +16589,7 @@ function budgetMastersPanel(active) {
         <td><strong>${esc(budget.name)}</strong></td>
         <td>${esc(target?.name ?? 'Missing target')}</td>
         <td class="muted">${budget.targetType === 'group' ? 'Group' : budget.targetType === 'costCentre' ? 'Cost centre' : budget.targetType === 'costCategory' ? 'Cost category' : 'Ledger'} · ${esc(year ? dateLabel(year.start) : 'Missing year')}</td>
-        <td class="num">${money(budget.amount)}</td>
+        <td class="num">${money(budget.amount)}${budget.phases ? `<div class="muted small">${budget.phases.map((value) => money(value)).join(' · ')}</div>` : ''}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-budget" data-id="${esc(budget.id)}">Edit</button>
           <button class="btn small ghost" type="button" data-action="duplicate-budget" data-id="${esc(budget.id)}">Duplicate next year</button>
@@ -16306,6 +16620,14 @@ function budgetMastersPanel(active) {
         <span>Amount</span>
         <input name="amount" inputmode="decimal" placeholder="0.00" value="${esc(editing?.amount ?? '')}" required>
       </label>
+      <div class="field"><span>Quarterly phasing (optional)</span>
+        <div class="inline-form">
+          <input name="q1" inputmode="decimal" placeholder="Q1" aria-label="Q1 budget" value="${esc(editing?.phases?.[0] ?? '')}">
+          <input name="q2" inputmode="decimal" placeholder="Q2" aria-label="Q2 budget" value="${esc(editing?.phases?.[1] ?? '')}">
+          <input name="q3" inputmode="decimal" placeholder="Q3" aria-label="Q3 budget" value="${esc(editing?.phases?.[2] ?? '')}">
+          <input name="q4" inputmode="decimal" placeholder="Q4" aria-label="Q4 budget" value="${esc(editing?.phases?.[3] ?? '')}">
+        </div>
+      </div>
       <div class="field form-actions">
         <button class="btn primary" type="submit">${editing ? 'Save budget' : 'Add budget'}</button>
         ${editing ? '<button class="btn ghost" type="button" data-action="cancel-budget-edit">Cancel</button>' : ''}
@@ -19762,11 +20084,22 @@ function backupScreen() {
     ${can('data.restore')
       ? panel(
           'Restore backup',
-          `<p class="muted">Paste a plain or encrypted backup below. Restoring replaces all companies currently stored in this browser.</p>
+          `<p class="muted">Paste a plain or encrypted backup below. You can replace every company or restore one company by its exact backup name and keep the rest of the current workspace.</p>
           <form id="restore-form" novalidate>
             <label class="field">
               <span>Backup JSON</span>
               <textarea name="payload" class="backup-box" rows="10" placeholder='{ "companies": [ ... ] }' aria-label="Restore JSON payload"></textarea>
+            </label>
+            <label class="field">
+              <span>Restore mode</span>
+              <select name="restoreMode">
+                <option value="all">Replace all companies</option>
+                <option value="company">Restore one company by name</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Company name (single-company mode)</span>
+              <input name="companyName" maxlength="80" placeholder="Exact company name in the backup" aria-label="Company name to restore">
             </label>
             <label class="field">
               <span>Passphrase for encrypted backups</span>
@@ -22237,6 +22570,44 @@ function postDatedScreen() {
       (ledger) => `<option value="${esc(ledger.id)}"${current.partyLedgerId === ledger.id ? ' selected' : ''}>${esc(ledger.name)} · ${esc(ledger.groupName)}</option>`,
     ),
   ].join('');
+  const books = [...(active.chequeBooks ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const editingBook = books.find((book) => book.id === view.chequeBookId);
+  const bankBooks = active.ledgers
+    .filter((ledger) => groupChainKeys(active, ledger.groupId).includes('bank'))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const bookRows = books
+    .map((book) => {
+      const bank = active.ledgers.find((ledger) => ledger.id === book.bankLedgerId);
+      return `<tr>
+        <td><strong>${esc(book.name)}</strong><div class="muted small">${esc(bank?.name ?? 'Missing bank')}</div></td>
+        <td>${esc(book.prefix)}${book.startNo} – ${esc(book.prefix)}${book.endNo}</td>
+        <td class="num">${book.nextNo > book.endNo ? 'Exhausted' : `${esc(book.prefix)}${book.nextNo}`}</td>
+        <td class="num">${chequeBookUsage(active, book.id)}</td>
+        <td class="row-actions"><button class="btn small ghost" type="button" data-action="edit-cheque-book" data-id="${esc(book.id)}">Edit</button>
+          <button class="btn small danger" type="button" data-action="delete-cheque-book" data-id="${esc(book.id)}">Delete</button></td>
+      </tr>`;
+    })
+    .join('');
+  const chequeBookPanel = panel(
+    'Cheque books',
+    `<form id="cheque-book-form" class="form-grid" novalidate>
+      <label class="field"><span>Book name</span><input name="name" maxlength="60" placeholder="e.g. HDFC current account 2026" value="${esc(editingBook?.name ?? '')}" required></label>
+      <label class="field"><span>Bank ledger</span><select name="bankLedgerId">${bankBooks
+        .map((ledger) => `<option value="${esc(ledger.id)}"${(editingBook?.bankLedgerId ?? bankBooks[0]?.id) === ledger.id ? ' selected' : ''}>${esc(ledger.name)}</option>`)
+        .join('')}</select></label>
+      <label class="field"><span>Prefix</span><input name="prefix" maxlength="10" placeholder="e.g. 00" value="${esc(editingBook?.prefix ?? '')}"></label>
+      <label class="field"><span>First number</span><input name="startNo" inputmode="numeric" maxlength="12" value="${esc(editingBook?.startNo ?? '')}" required></label>
+      <label class="field"><span>Last number</span><input name="endNo" inputmode="numeric" maxlength="12" value="${esc(editingBook?.endNo ?? '')}" required></label>
+      <label class="field"><span>Next number</span><input name="nextNo" inputmode="numeric" maxlength="12" placeholder="Defaults to first" value="${esc(editingBook?.nextNo ?? '')}"></label>
+      <div class="field form-actions"><button class="btn primary" type="submit">${editingBook ? 'Save book' : 'Create book'}</button>${editingBook ? '<button class="btn ghost" type="button" data-action="cancel-cheque-book">Cancel</button>' : ''}</div>
+      <p id="cheque-book-error" class="form-error" role="alert"></p>
+    </form>
+    ${books.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact"><thead><tr><th>Book</th><th>Range</th><th class="num">Next</th><th class="num">Used</th><th></th></tr></thead><tbody>${bookRows}</tbody></table></div>`
+      : '<p class="muted">No cheque books recorded. A book tracks a bank, number range and next number; it does not print or issue cheques.</p>'}`,
+    'A cheque book is a local numbering aid. Deleting is blocked while recorded instruments fall inside its bank and number range.',
+  );
+
   const rows = report.rows
     .map((row) => {
       const timing = row.manualStatus
@@ -22275,7 +22646,7 @@ function postDatedScreen() {
     })
     .join('');
 
-  return panel(
+  return `${chequeBookPanel}${panel(
     'Cheque / DD register',
     `<form id="postdated-form" class="filter-bar">
       <label class="field inline-field"><span>From</span><input name="from" type="date" value="${esc(from)}" data-period></label>
@@ -22302,7 +22673,7 @@ function postDatedScreen() {
         </table></div>`
       : '<p class="muted">No cheque or DD instruments in this period. Add instrument details on a payment, receipt or contra voucher.</p>'}`,
     'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation unless the instrument was marked cleared, stopped or cancelled manually. Bank, party text, exact party account and cheque-number range filters narrow the same register without changing status logic; manual status changes keep a short history.',
-  );
+  )}`;
 }
 
 function chequePrintScreen() {
@@ -24889,7 +25260,7 @@ async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    if (!window.confirm('Replace all current companies with this backup?')) return;
+    const companyOnly = data.get('restoreMode') === 'company';
     const payload = String(data.get('payload') ?? '').trim();
     let plaintext = payload;
     if (isEncryptedBackup(payload)) {
@@ -24905,12 +25276,42 @@ async function handleSubmit(event) {
       showFormError(result.error);
       return;
     }
+    let nextState = result.state;
+    let summary = `Restored backup with ${result.state.companies.length} company${result.state.companies.length === 1 ? '' : 'ies'}.`;
+    if (companyOnly) {
+      const wanted = String(data.get('companyName') ?? '').trim().toLowerCase();
+      const imported = result.state.companies.find(
+        (entry) => entry.name.trim().toLowerCase() === wanted,
+      );
+      if (!imported) {
+        showFormError(`The backup has no company named "${String(data.get('companyName') ?? '').trim()}".`);
+        return;
+      }
+      if (
+        !window.confirm(
+          `Restore "${imported.name}" and keep the other current companies? A company with the same name or id is replaced.`,
+        )
+      ) {
+        return;
+      }
+      const companies = state.companies.filter(
+        (entry) => entry.id !== imported.id && entry.name.toLowerCase() !== imported.name.toLowerCase(),
+      );
+      nextState = {
+        ...state,
+        companies: [...companies, imported],
+        activeCompanyId: imported.id,
+        audit: result.state.audit,
+        users: result.state.users,
+        currentUserId: result.state.currentUserId,
+      };
+      summary = `Restored company "${imported.name}" and kept ${companies.length} other company${companies.length === 1 ? '' : 'ies'}.`;
+    } else if (!window.confirm('Replace all current companies with this backup?')) {
+      return;
+    }
     saveSnapshot(state, 'pre-restore');
-    applyRestoredState(
-      result.state,
-      `Restored backup with ${result.state.companies.length} company${result.state.companies.length === 1 ? '' : 'ies'}.`,
-    );
-    setFlash(`Backup restored: ${state.companies.length} company${state.companies.length === 1 ? '' : 'ies'}.`);
+    applyRestoredState(nextState, summary);
+    setFlash(summary);
     navigate('gateway');
     return;
   }
@@ -24918,6 +25319,40 @@ async function handleSubmit(event) {
   const active = company();
   if (!active) {
     showFormError('Create a company first.');
+    return;
+  }
+
+  if (form.id === 'cheque-book-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const payload = {
+      name: data.get('name'),
+      bankLedgerId: data.get('bankLedgerId'),
+      prefix: data.get('prefix'),
+      startNo: data.get('startNo'),
+      endNo: data.get('endNo'),
+      nextNo: data.get('nextNo'),
+    };
+    const result = view.chequeBookId
+      ? updateChequeBook(active, view.chequeBookId, payload)
+      : addChequeBook(active, payload);
+    if (!result.ok) {
+      showFormError(result.error, 'cheque-book-error');
+      return;
+    }
+    logAudit(
+      view.chequeBookId ? 'chequeBook.update' : 'chequeBook.create',
+      `${view.chequeBookId ? 'Updated' : 'Created'} cheque book "${result.book.name}".`,
+      active,
+      result.book.name,
+    );
+    view.chequeBookId = null;
+    persist();
+    setFlash(`Cheque book "${result.book.name}" saved.`);
+    render();
     return;
   }
 
@@ -25442,12 +25877,14 @@ async function handleSubmit(event) {
     }
     const data = new FormData(form);
     const [targetType, ...targetParts] = String(data.get('target') ?? '').split(':');
+    const phases = ['q1', 'q2', 'q3', 'q4'].map((key) => data.get(key));
     const payload = {
       name: data.get('name'),
       targetType,
       targetId: targetParts.join(':'),
       yearId: data.get('yearId'),
       amount: data.get('amount'),
+      ...(phases.some((value) => String(value ?? '').trim()) ? { phases } : {}),
     };
     const editingBudgetId = view.editingBudgetId;
     const result = editingBudgetId
@@ -26540,6 +26977,36 @@ async function handleClick(event) {
         result.ok
           ? `${dateLabel(result.year.start)} to ${dateLabel(result.year.end)} reopened.`
           : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
+      break;
+    }
+    case 'edit-cheque-book':
+      navigate('postDated', { chequeBookId: trigger.dataset.id });
+      break;
+    case 'cancel-cheque-book':
+      navigate('postDated', { chequeBookId: null });
+      break;
+    case 'delete-cheque-book': {
+      if (!can('master.delete')) {
+        requirePermission('master.delete');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Delete this cheque book?')) break;
+      const result = deleteChequeBook(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'chequeBook.delete',
+          `Deleted cheque book "${result.book.name}".`,
+          active,
+          result.book.name,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok ? `Cheque book "${result.book.name}" deleted.` : result.error,
         result.ok ? 'ok' : 'warn',
       );
       render();

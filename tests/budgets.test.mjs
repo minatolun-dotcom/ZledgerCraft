@@ -84,6 +84,34 @@ test('budgets validate targets, years, amounts and duplicates', () => {
   assert.equal(duplicateTarget.ok, false);
   assert.match(duplicateTarget.error, /already exists/i);
 
+  const phased = addBudget(company, {
+    name: 'Quarterly rent',
+    targetType: 'ledger',
+    targetId: findLedgerByName(company, 'Salaries').id,
+    yearId: yearId(company),
+    amount: 1200,
+    phases: [300, 300, 300, 300],
+  });
+  assert.equal(phased.ok, true, phased.error);
+  assert.deepEqual(phased.budget.phases, [300, 300, 300, 300]);
+  const report = budgetVsActual(company, {
+    yearId: yearId(company),
+    asOn: '2026-07-01',
+  });
+  const phasedRow = report.rows.find((row) => row.name === 'Quarterly rent');
+  assert.deepEqual(phasedRow.phases, [300, 300, 300, 300]);
+  assert.equal(phasedRow.phaseBudgetToDate, 600);
+  const badPhases = addBudget(company, {
+    name: 'Bad phasing',
+    targetType: 'ledger',
+    targetId: findLedgerByName(company, 'Bank').id,
+    yearId: yearId(company),
+    amount: 100,
+    phases: [10, 10, 10, 10],
+  });
+  assert.equal(badPhases.ok, false);
+  assert.match(badPhases.error, /totals/i);
+
   const duplicateName = addBudget(company, {
     name: 'rent plan',
     targetType: 'ledger',

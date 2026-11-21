@@ -674,7 +674,7 @@ export function budgetMastersPanel(active) {
         <td><strong>${esc(budget.name)}</strong></td>
         <td>${esc(target?.name ?? 'Missing target')}</td>
         <td class="muted">${budget.targetType === 'group' ? 'Group' : budget.targetType === 'costCentre' ? 'Cost centre' : budget.targetType === 'costCategory' ? 'Cost category' : 'Ledger'} · ${esc(year ? dateLabel(year.start) : 'Missing year')}</td>
-        <td class="num">${money(budget.amount)}</td>
+        <td class="num">${money(budget.amount)}${budget.phases ? `<div class="muted small">${budget.phases.map((value) => money(value)).join(' · ')}</div>` : ''}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-budget" data-id="${esc(budget.id)}">Edit</button>
           <button class="btn small ghost" type="button" data-action="duplicate-budget" data-id="${esc(budget.id)}">Duplicate next year</button>
@@ -705,6 +705,14 @@ export function budgetMastersPanel(active) {
         <span>Amount</span>
         <input name="amount" inputmode="decimal" placeholder="0.00" value="${esc(editing?.amount ?? '')}" required>
       </label>
+      <div class="field"><span>Quarterly phasing (optional)</span>
+        <div class="inline-form">
+          <input name="q1" inputmode="decimal" placeholder="Q1" aria-label="Q1 budget" value="${esc(editing?.phases?.[0] ?? '')}">
+          <input name="q2" inputmode="decimal" placeholder="Q2" aria-label="Q2 budget" value="${esc(editing?.phases?.[1] ?? '')}">
+          <input name="q3" inputmode="decimal" placeholder="Q3" aria-label="Q3 budget" value="${esc(editing?.phases?.[2] ?? '')}">
+          <input name="q4" inputmode="decimal" placeholder="Q4" aria-label="Q4 budget" value="${esc(editing?.phases?.[3] ?? '')}">
+        </div>
+      </div>
       <div class="field form-actions">
         <button class="btn primary" type="submit">${editing ? 'Save budget' : 'Add budget'}</button>
         ${editing ? '<button class="btn ghost" type="button" data-action="cancel-budget-edit">Cancel</button>' : ''}

@@ -1,16 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  addChequeBook,
   addLedger,
   addVoucher,
   autoMatchBank,
   clearBankStatement,
   createCompany,
+  deleteChequeBook,
   deleteVoucher,
   emptyState,
   exportState,
   findLedgerByName,
   importState,
+  nextChequeNumber,
+  advanceChequeBook,
+  updateChequeBook,
   postBankAdjustment,
   saveBankStatement,
   setBankMatch,
@@ -321,4 +326,50 @@ test('bank reconciliation reports book balance and unmatched values', () => {
   assert.equal(report.unmatchedBookAmount, 200);
   assert.equal(report.unmatchedEntries.length, 1);
   assert.equal(report.unmatchedEntries[0].amount, -200);
+});
+
+test('cheque books track ranges, next numbers and recorded instruments', () => {
+  const { company, bank, rent } = bankFixture();
+  const created = addChequeBook(company, {
+    name: 'Current account 2026',
+    bankLedgerId: bank.id,
+    prefix: '00',
+    startNo: 1001,
+    endNo: 1050,
+    nextNo: 1001,
+  });
+  assert.equal(created.ok, true, created.error);
+  assert.equal(nextChequeNumber(company, created.book.id).number, '001001');
+  const overlap = addChequeBook(company, {
+    name: 'Overlapping book',
+    bankLedgerId: bank.id,
+    prefix: '00',
+    startNo: 1050,
+    endNo: 1100,
+  });
+  assert.equal(overlap.ok, false);
+  assert.match(overlap.error, /overlaps/i);
+
+  const issued = addVoucher(company, {
+    type: 'Payment',
+    date: '2026-05-10',
+    instrument: {
+      kind: 'Cheque',
+      number: '001001',
+      date: '2026-05-12',
+      bankLedgerId: bank.id,
+    },
+    lines: [
+      { ledgerId: rent.id, side: 'Dr', amount: 100 },
+      { ledgerId: bank.id, side: 'Cr', amount: 100 },
+    ],
+  });
+  assert.equal(issued.ok, true, issued.error);
+  assert.equal(deleteChequeBook(company, created.book.id).ok, false);
+  assert.equal(advanceChequeBook(company, created.book.id).number, '001002');
+  assert.equal(
+    updateChequeBook(company, created.book.id, { name: 'Renamed book', nextNo: 1003 }).ok,
+    true,
+  );
+  assert.equal(nextChequeNumber(company, created.book.id).number, '001003');
 });

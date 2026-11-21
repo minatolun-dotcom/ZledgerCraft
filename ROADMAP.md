@@ -344,6 +344,20 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-21 — Phase 54: architectural backlog pass
+
+- BOMs now explode nested sub-assemblies into raw components, merge repeated
+  components, reject recursive recipes and protect a sub-assembly BOM while a
+  parent uses it.
+- Cheque books store a bank, prefix, range and next number, reject overlapping
+  ranges and block deletion while recorded instruments fall inside the range.
+- Backup restore can replace one named company and keep the other current
+  companies, while still snapshotting before the restore.
+- Budgets can carry an optional four-quarter phasing that must equal the annual
+  amount; Budget vs Actual exposes the phases and elapsed-quarter budget.
+- Verification: full suite 341 tests (340 pass, 1 skipped); focused inventory,
+  bank and budget suites (66 tests); 1,224.3 kB build.
+
 ### 2026-11-21 — Phase 53: cumulative local-backlog pass
 
 - GST registration and party ledgers now carry optional phone/email, exported

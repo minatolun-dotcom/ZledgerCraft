@@ -10,6 +10,7 @@ import {
   activeUser,
   addBom,
   addBudget,
+  addChequeBook,
   addCurrency,
   addCurrencyRate,
   addUser,
@@ -150,6 +151,8 @@ import {
   updateVoucher,
   withdrawPendingVoucher,
   unsetBankMatch,
+  updateChequeBook,
+  deleteChequeBook,
   withholdingTaxLedgers,
 } from './store.js';
 import {
@@ -2602,7 +2605,7 @@ export async function handleSubmit(event) {
       return;
     }
     const data = new FormData(form);
-    if (!window.confirm('Replace all current companies with this backup?')) return;
+    const companyOnly = data.get('restoreMode') === 'company';
     const payload = String(data.get('payload') ?? '').trim();
     let plaintext = payload;
     if (isEncryptedBackup(payload)) {
@@ -2618,12 +2621,42 @@ export async function handleSubmit(event) {
       showFormError(result.error);
       return;
     }
+    let nextState = result.state;
+    let summary = `Restored backup with ${result.state.companies.length} company${result.state.companies.length === 1 ? '' : 'ies'}.`;
+    if (companyOnly) {
+      const wanted = String(data.get('companyName') ?? '').trim().toLowerCase();
+      const imported = result.state.companies.find(
+        (entry) => entry.name.trim().toLowerCase() === wanted,
+      );
+      if (!imported) {
+        showFormError(`The backup has no company named "${String(data.get('companyName') ?? '').trim()}".`);
+        return;
+      }
+      if (
+        !window.confirm(
+          `Restore "${imported.name}" and keep the other current companies? A company with the same name or id is replaced.`,
+        )
+      ) {
+        return;
+      }
+      const companies = state.companies.filter(
+        (entry) => entry.id !== imported.id && entry.name.toLowerCase() !== imported.name.toLowerCase(),
+      );
+      nextState = {
+        ...state,
+        companies: [...companies, imported],
+        activeCompanyId: imported.id,
+        audit: result.state.audit,
+        users: result.state.users,
+        currentUserId: result.state.currentUserId,
+      };
+      summary = `Restored company "${imported.name}" and kept ${companies.length} other company${companies.length === 1 ? '' : 'ies'}.`;
+    } else if (!window.confirm('Replace all current companies with this backup?')) {
+      return;
+    }
     saveSnapshot(state, 'pre-restore');
-    applyRestoredState(
-      result.state,
-      `Restored backup with ${result.state.companies.length} company${result.state.companies.length === 1 ? '' : 'ies'}.`,
-    );
-    setFlash(`Backup restored: ${state.companies.length} company${state.companies.length === 1 ? '' : 'ies'}.`);
+    applyRestoredState(nextState, summary);
+    setFlash(summary);
     navigate('gateway');
     return;
   }
@@ -2631,6 +2664,40 @@ export async function handleSubmit(event) {
   const active = company();
   if (!active) {
     showFormError('Create a company first.');
+    return;
+  }
+
+  if (form.id === 'cheque-book-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const payload = {
+      name: data.get('name'),
+      bankLedgerId: data.get('bankLedgerId'),
+      prefix: data.get('prefix'),
+      startNo: data.get('startNo'),
+      endNo: data.get('endNo'),
+      nextNo: data.get('nextNo'),
+    };
+    const result = view.chequeBookId
+      ? updateChequeBook(active, view.chequeBookId, payload)
+      : addChequeBook(active, payload);
+    if (!result.ok) {
+      showFormError(result.error, 'cheque-book-error');
+      return;
+    }
+    logAudit(
+      view.chequeBookId ? 'chequeBook.update' : 'chequeBook.create',
+      `${view.chequeBookId ? 'Updated' : 'Created'} cheque book "${result.book.name}".`,
+      active,
+      result.book.name,
+    );
+    view.chequeBookId = null;
+    persist();
+    setFlash(`Cheque book "${result.book.name}" saved.`);
+    render();
     return;
   }
 
@@ -3155,12 +3222,14 @@ export async function handleSubmit(event) {
     }
     const data = new FormData(form);
     const [targetType, ...targetParts] = String(data.get('target') ?? '').split(':');
+    const phases = ['q1', 'q2', 'q3', 'q4'].map((key) => data.get(key));
     const payload = {
       name: data.get('name'),
       targetType,
       targetId: targetParts.join(':'),
       yearId: data.get('yearId'),
       amount: data.get('amount'),
+      ...(phases.some((value) => String(value ?? '').trim()) ? { phases } : {}),
     };
     const editingBudgetId = view.editingBudgetId;
     const result = editingBudgetId
@@ -4253,6 +4322,36 @@ async function handleClick(event) {
         result.ok
           ? `${dateLabel(result.year.start)} to ${dateLabel(result.year.end)} reopened.`
           : result.error,
+        result.ok ? 'ok' : 'warn',
+      );
+      render();
+      break;
+    }
+    case 'edit-cheque-book':
+      navigate('postDated', { chequeBookId: trigger.dataset.id });
+      break;
+    case 'cancel-cheque-book':
+      navigate('postDated', { chequeBookId: null });
+      break;
+    case 'delete-cheque-book': {
+      if (!can('master.delete')) {
+        requirePermission('master.delete');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Delete this cheque book?')) break;
+      const result = deleteChequeBook(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'chequeBook.delete',
+          `Deleted cheque book "${result.book.name}".`,
+          active,
+          result.book.name,
+        );
+        persist();
+      }
+      setFlash(
+        result.ok ? `Cheque book "${result.book.name}" deleted.` : result.error,
         result.ok ? 'ok' : 'warn',
       );
       render();

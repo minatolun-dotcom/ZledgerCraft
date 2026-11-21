@@ -2906,6 +2906,14 @@ export function normalizeBudgets(company) {
         targetId: target.id,
         yearId: year.id,
         amount,
+        ...(Array.isArray(budget.phases) &&
+        budget.phases.length === 4 &&
+        budget.phases.every((value) => parseAmount(value) !== null && parseAmount(value) >= 0) &&
+        Math.abs(
+          budget.phases.reduce((sum, value) => sum + (parseAmount(value) ?? 0), 0) - amount,
+        ) < 0.01
+          ? { phases: budget.phases.map((value) => parseAmount(value)) }
+          : {}),
         createdAt: budget.createdAt ? String(budget.createdAt) : new Date().toISOString(),
         ...(Array.isArray(budget.history) && budget.history.length
           ? {
@@ -2934,6 +2942,22 @@ export function normalizeBudgets(company) {
   return company;
 }
 
+function normaliseBudgetPhases(input, amount) {
+  const supplied = input.phases ?? [input.q1, input.q2, input.q3, input.q4];
+  const raw = Array.isArray(supplied) ? supplied : [];
+  if (raw.every((value) => String(value ?? '').trim() === '')) return { ok: true, phases: null };
+  if (raw.length !== 4) return { ok: false, error: 'Budget phasing needs all four quarterly amounts.' };
+  const phases = raw.map((value) => parseAmount(value));
+  if (phases.some((value) => value === null || value < 0)) {
+    return { ok: false, error: 'Quarterly budget amounts must be zero or more.' };
+  }
+  const total = round2(phases.reduce((sum, value) => sum + value, 0));
+  if (Math.abs(total - amount) >= 0.01) {
+    return { ok: false, error: `Quarterly phasing totals ${total}, not the budget amount ${amount}.` };
+  }
+  return { ok: true, phases };
+}
+
 export function addBudget(company, input = {}) {
   const targetType = normaliseBudgetTargetType(input.targetType);
   if (!targetType) return { ok: false, error: 'Choose a ledger, group, cost centre or cost category for the budget.' };
@@ -2945,6 +2969,8 @@ export function addBudget(company, input = {}) {
   if (amount === null || amount < 0) return { ok: false, error: 'Budget amount must be zero or more.' };
   const name = String(input.name ?? '').trim() || `${target.name} ${year.start.slice(0, 4)}`;
   if (name.length > 80) return { ok: false, error: 'Budget name must be 80 characters or fewer.' };
+  const phased = normaliseBudgetPhases(input, amount);
+  if (!phased.ok) return phased;
   company.budgets = company.budgets ?? [];
   if (company.budgets.some((budget) => budget.name.toLowerCase() === name.toLowerCase())) {
     return { ok: false, error: `A budget named "${name}" already exists.` };
@@ -2959,6 +2985,7 @@ export function addBudget(company, input = {}) {
     targetId: target.id,
     yearId: year.id,
     amount,
+    ...(phased.phases ? { phases: phased.phases } : {}),
     createdAt: new Date().toISOString(),
   };
   company.budgets.push(budget);
@@ -2979,6 +3006,12 @@ export function updateBudget(company, budgetId, input = {}) {
   if (amount === null || amount < 0) return { ok: false, error: 'Budget amount must be zero or more.' };
   const name = String(input.name ?? '').trim() || budget.name;
   if (name.length > 80) return { ok: false, error: 'Budget name must be 80 characters or fewer.' };
+  const phasesSupplied =
+    input.phases !== undefined || [input.q1, input.q2, input.q3, input.q4].some((value) => value !== undefined);
+  const phased = phasesSupplied
+    ? normaliseBudgetPhases(input, amount)
+    : { ok: true, phases: budget.phases ?? null };
+  if (!phased.ok) return phased;
   if (
     (company.budgets ?? []).some(
       (entry) => entry.id !== budgetId && entry.name.toLowerCase() === name.toLowerCase(),
@@ -3009,6 +3042,8 @@ export function updateBudget(company, budgetId, input = {}) {
   budget.targetId = target.id;
   budget.yearId = year.id;
   budget.amount = amount;
+  if (phased.phases) budget.phases = phased.phases;
+  else delete budget.phases;
   budget.updatedAt = new Date().toISOString();
   return { ok: true, budget };
 }
@@ -3057,6 +3092,7 @@ export function duplicateBudget(company, budgetId, input = {}) {
     targetId: source.targetId,
     yearId: targetYear.id,
     amount: source.amount,
+    ...(source.phases ? { phases: [...source.phases] } : {}),
     createdAt: new Date().toISOString(),
   };
   company.budgets = company.budgets ?? [];
@@ -3262,6 +3298,7 @@ function seedInventoryMasters(company) {
   if (!Array.isArray(company.orders)) company.orders = [];
   if (!Array.isArray(company.boms)) company.boms = [];
   if (!Array.isArray(company.manufactures)) company.manufactures = [];
+  if (!Array.isArray(company.chequeBooks)) company.chequeBooks = [];
   company.counters = company.counters ?? {};
   company.counters.__stockTransfer = Math.max(
     Number(company.counters.__stockTransfer) || 0,
@@ -4989,6 +5026,153 @@ export function stockItemUsage(company, itemId) {
   return voucherUse + transferUse + bomUse + manufactureUse;
 }
 
+function chequeBookNumber(raw, label) {
+  const text = String(raw ?? '').trim();
+  if (!/^\d{1,12}$/.test(text)) return { error: `${label} must be 1 to 12 digits.` };
+  return { value: Number(text), text };
+}
+
+function validateChequeBook(company, input, ignoreId) {
+  const name = String(input.name ?? '').trim();
+  if (!name) return { ok: false, error: 'Cheque book name is required.' };
+  if (name.length > 60) return { ok: false, error: 'Cheque book name must be 60 characters or fewer.' };
+  if (
+    (company.chequeBooks ?? []).some(
+      (book) => book.id !== ignoreId && book.name.toLowerCase() === name.toLowerCase(),
+    )
+  ) {
+    return { ok: false, error: `A cheque book named "${name}" already exists.` };
+  }
+  const bank = (company.ledgers ?? []).find(
+    (ledger) => ledger.id === input.bankLedgerId && isBankLedger(company, ledger.id),
+  );
+  if (!bank) return { ok: false, error: 'Choose a bank ledger for the cheque book.' };
+  const prefix = String(input.prefix ?? '').trim().slice(0, 10);
+  if (prefix && !/^[A-Za-z0-9/-]+$/.test(prefix)) {
+    return { ok: false, error: 'Cheque-number prefix may contain letters, digits, hyphen or slash.' };
+  }
+  const start = chequeBookNumber(input.startNo, 'First cheque number');
+  if (start.error) return { ok: false, error: start.error };
+  const end = chequeBookNumber(input.endNo, 'Last cheque number');
+  if (end.error) return { ok: false, error: end.error };
+  if (start.value > end.value) {
+    return { ok: false, error: 'First cheque number cannot be after the last number.' };
+  }
+  const next = chequeBookNumber(input.nextNo || input.startNo, 'Next cheque number');
+  if (next.error) return { ok: false, error: next.error };
+  if (next.value < start.value || next.value > end.value) {
+    return { ok: false, error: 'Next cheque number must sit inside the book range.' };
+  }
+  const overlap = (company.chequeBooks ?? []).find(
+    (book) =>
+      book.id !== ignoreId &&
+      book.bankLedgerId === bank.id &&
+      book.prefix === prefix &&
+      start.value <= book.endNo &&
+      end.value >= book.startNo,
+  );
+  if (overlap) {
+    return { ok: false, error: `This range overlaps cheque book "${overlap.name}".` };
+  }
+  return {
+    ok: true,
+    name,
+    bank,
+    prefix,
+    startNo: start.value,
+    endNo: end.value,
+    nextNo: next.value,
+  };
+}
+
+export function addChequeBook(company, input = {}) {
+  company.chequeBooks = company.chequeBooks ?? [];
+  const checked = validateChequeBook(company, input);
+  if (!checked.ok) return checked;
+  const book = {
+    id: uid('chqbook'),
+    name: checked.name,
+    bankLedgerId: checked.bank.id,
+    prefix: checked.prefix,
+    startNo: checked.startNo,
+    endNo: checked.endNo,
+    nextNo: checked.nextNo,
+    createdAt: new Date().toISOString(),
+  };
+  company.chequeBooks.push(book);
+  return { ok: true, book };
+}
+
+export function updateChequeBook(company, bookId, input = {}) {
+  const book = (company.chequeBooks ?? []).find((entry) => entry.id === bookId);
+  if (!book) return { ok: false, error: 'Cheque book not found.' };
+  const checked = validateChequeBook(
+    company,
+    {
+      name: input.name ?? book.name,
+      bankLedgerId: input.bankLedgerId ?? book.bankLedgerId,
+      prefix: input.prefix ?? book.prefix,
+      startNo: input.startNo ?? book.startNo,
+      endNo: input.endNo ?? book.endNo,
+      nextNo: input.nextNo ?? book.nextNo,
+    },
+    bookId,
+  );
+  if (!checked.ok) return checked;
+  book.name = checked.name;
+  book.bankLedgerId = checked.bank.id;
+  book.prefix = checked.prefix;
+  book.startNo = checked.startNo;
+  book.endNo = checked.endNo;
+  book.nextNo = checked.nextNo;
+  book.updatedAt = new Date().toISOString();
+  return { ok: true, book };
+}
+
+export function chequeBookUsage(company, bookId) {
+  const book = (company.chequeBooks ?? []).find((entry) => entry.id === bookId);
+  if (!book) return 0;
+  return (company.vouchers ?? []).filter((voucher) => {
+    const instrument = voucher.instrument;
+    if (!instrument || instrument.bankLedgerId !== book.bankLedgerId) return false;
+    const raw = String(instrument.number ?? '').trim();
+    const prefix = book.prefix ?? '';
+    if (prefix && !raw.startsWith(prefix)) return false;
+    const digits = raw.slice(prefix.length);
+    if (!/^\d+$/.test(digits)) return false;
+    const number = Number(digits);
+    return number >= book.startNo && number <= book.endNo;
+  }).length;
+}
+
+export function deleteChequeBook(company, bookId) {
+  const book = (company.chequeBooks ?? []).find((entry) => entry.id === bookId);
+  if (!book) return { ok: false, error: 'Cheque book not found.' };
+  const used = chequeBookUsage(company, bookId);
+  if (used > 0) {
+    return {
+      ok: false,
+      error: `Cheque book "${book.name}" contains ${used} recorded instrument(s). Rename or widen it instead.`,
+    };
+  }
+  company.chequeBooks = (company.chequeBooks ?? []).filter((entry) => entry.id !== bookId);
+  return { ok: true, book };
+}
+
+export function nextChequeNumber(company, bookId) {
+  const book = (company.chequeBooks ?? []).find((entry) => entry.id === bookId);
+  if (!book) return { ok: false, error: 'Cheque book not found.' };
+  if (book.nextNo > book.endNo) return { ok: false, error: `Cheque book "${book.name}" is exhausted.` };
+  return { ok: true, number: `${book.prefix}${book.nextNo}`, book };
+}
+
+export function advanceChequeBook(company, bookId) {
+  const book = (company.chequeBooks ?? []).find((entry) => entry.id === bookId);
+  if (!book) return { ok: false, error: 'Cheque book not found.' };
+  if (book.nextNo < book.endNo) book.nextNo += 1;
+  return { ok: true, book, number: `${book.prefix}${book.nextNo}` };
+}
+
 export function addStockTransfer(company, input) {
   const date = String(input.date ?? '');
   if (!isValidIsoDate(date)) return { ok: false, error: 'Enter a valid transfer date.' };
@@ -5742,6 +5926,14 @@ export function addBom(company, input) {
     seen.add(component.id);
     components.push({ stockItemId: component.id, qty });
   }
+  for (const component of components) {
+    if (bomPathReaches(company, component.stockItemId, output.id)) {
+      return {
+        ok: false,
+        error: `Using "${(company.stockItems ?? []).find((item) => item.id === component.stockItemId)?.name ?? 'that item'}" here would make the BOM recurse into itself.`,
+      };
+    }
+  }
   const bom = {
     id: uid('bom'),
     name,
@@ -5754,8 +5946,67 @@ export function addBom(company, input) {
   return { ok: true, bom };
 }
 
+function bomForOutput(company, itemId) {
+  return (company.boms ?? []).find(
+    (bom) => bom.outputItemId === itemId && Array.isArray(bom.components) && bom.components.length,
+  );
+}
+
+function bomPathReaches(company, itemId, targetItemId, seen = new Set()) {
+  if (itemId === targetItemId) return true;
+  if (seen.has(itemId)) return false;
+  seen.add(itemId);
+  const bom = bomForOutput(company, itemId);
+  if (!bom) return false;
+  return (bom.components ?? []).some((line) =>
+    bomPathReaches(company, line.stockItemId, targetItemId, seen),
+  );
+}
+
+function explodeBomComponents(company, bom, factor, stack = []) {
+  if (stack.includes(bom.outputItemId)) return { error: 'The BOM contains a recursive sub-assembly.' };
+  const totals = new Map();
+  const walk = (current, scale, trail) => {
+    if (trail.includes(current.outputItemId)) {
+      return 'The BOM contains a recursive sub-assembly.';
+    }
+    for (const line of current.components ?? []) {
+      const subBom = bomForOutput(company, line.stockItemId);
+      if (subBom) {
+        const message = walk(
+          subBom,
+          (scale * line.qty) / subBom.outputQty,
+          [...trail, current.outputItemId],
+        );
+        if (message) return message;
+      } else {
+        totals.set(line.stockItemId, (totals.get(line.stockItemId) ?? 0) + scale * line.qty);
+      }
+    }
+    return null;
+  };
+  const error = walk(bom, factor, []);
+  if (error) return { error };
+  return {
+    components: [...totals.entries()]
+      .map(([stockItemId, qty]) => ({ stockItemId, qty: round3(qty) }))
+      .filter((line) => line.qty > 0),
+  };
+}
+
 export function bomUsage(company, bomId) {
-  return (company.manufactures ?? []).filter((manufacture) => manufacture.bomId === bomId).length;
+  const bom = (company.boms ?? []).find((entry) => entry.id === bomId);
+  const productions = (company.manufactures ?? []).filter(
+    (manufacture) => manufacture.bomId === bomId,
+  ).length;
+  const parents = bom
+    ? (company.boms ?? []).filter(
+        (entry) =>
+          entry.id !== bom.id &&
+          (entry.components ?? []).some((line) => line.stockItemId === bom.outputItemId),
+      ).length
+    : 0;
+  return productions + parents;
 }
 
 export function deleteBom(company, bomId) {
@@ -5763,7 +6014,10 @@ export function deleteBom(company, bomId) {
   if (!bom) return { ok: false, error: 'BOM not found.' };
   const used = bomUsage(company, bomId);
   if (used > 0) {
-    return { ok: false, error: `BOM "${bom.name}" is used by ${used} production entry(s). Delete those first.` };
+    return {
+      ok: false,
+      error: `BOM "${bom.name}" is used by ${used} production entry(s) or parent BOM(s). Remove those first.`,
+    };
   }
   company.boms = (company.boms ?? []).filter((entry) => entry.id !== bomId);
   return { ok: true, bom };
@@ -5803,11 +6057,19 @@ export function addManufacture(company, input) {
   const expiryDate = String(input.expiryDate ?? '').trim();
   if (expiryDate && !isValidIsoDate(expiryDate)) return { ok: false, error: 'Enter a valid batch expiry date.' };
   const factor = (outputQty + wastageQty) / bom.outputQty;
+  const exploded = explodeBomComponents(company, bom, factor);
+  if (exploded.error) return { ok: false, error: exploded.error };
   const components = [];
-  for (const line of bom.components ?? []) {
+  for (const line of exploded.components) {
     const item = (company.stockItems ?? []).find((entry) => entry.id === line.stockItemId);
     if (!item) return { ok: false, error: 'A BOM component no longer exists.' };
-    const qty = round3(line.qty * factor);
+    if (item.batchTracking) {
+      return {
+        ok: false,
+        error: `Batch-tracked component "${item.name}" needs manual batch selection, which multi-level production does not support yet.`,
+      };
+    }
+    const qty = line.qty;
     if (qty <= 0) return { ok: false, error: `Consumption of "${item.name}" rounds to zero.` };
     const available = stockOnHand(company, item.id, date, { godownId: componentGodown.id });
     if (qty > available + 0.0005) {
@@ -7120,6 +7382,35 @@ function validateImportedCompany(company) {
     }
   }
 
+  const chequeBookIds = new Set();
+  const chequeBookNames = new Set();
+  for (const book of company.chequeBooks ?? []) {
+    if (!book || !book.id) return `Company "${name}" has an invalid cheque book.`;
+    if (chequeBookIds.has(book.id)) return `Company "${name}" has duplicate cheque book ids.`;
+    chequeBookIds.add(book.id);
+    const bookName = String(book.name ?? '').trim();
+    if (!bookName) return `Company "${name}" has a cheque book without a name.`;
+    if (chequeBookNames.has(bookName.toLowerCase())) {
+      return `Company "${name}" has duplicate cheque book names.`;
+    }
+    chequeBookNames.add(bookName.toLowerCase());
+    if (!ledgerIds.has(book.bankLedgerId) || !isBankLedger(company, book.bankLedgerId)) {
+      return `Company "${name}": cheque book "${bookName}" points at a non-bank ledger.`;
+    }
+    const start = chequeBookNumber(book.startNo, 'First cheque number');
+    const end = chequeBookNumber(book.endNo, 'Last cheque number');
+    const next = chequeBookNumber(book.nextNo, 'Next cheque number');
+    if (start.error || end.error || next.error || start.value > end.value) {
+      return `Company "${name}": cheque book "${bookName}" has an invalid number range.`;
+    }
+    if (next.value < start.value || next.value > end.value) {
+      return `Company "${name}": cheque book "${bookName}" has an out-of-range next number.`;
+    }
+    if (book.prefix && !/^[A-Za-z0-9/-]+$/.test(String(book.prefix))) {
+      return `Company "${name}": cheque book "${bookName}" has an invalid prefix.`;
+    }
+  }
+
   const bomIds = new Set();
   for (const bom of company.boms ?? []) {
     if (!bom || !bom.id || !String(bom.name ?? '').trim()) {
@@ -7154,6 +7445,11 @@ function validateImportedCompany(company) {
         return `Company "${name}": BOM "${bom.name}" has an invalid component quantity.`;
       }
       componentIds.add(line.stockItemId);
+    }
+    for (const line of bom.components ?? []) {
+      if (bomPathReaches(company, line.stockItemId, bom.outputItemId)) {
+        return `Company "${name}": BOM "${bom.name}" recurses into itself.`;
+      }
     }
   }
 
@@ -7190,8 +7486,12 @@ function validateImportedCompany(company) {
       return `Company "${name}": production ${manufacture.no ?? ''} has an invalid batch expiry date.`;
     }
     const factor = (outputQty + wastageQty) / parseQty(bom.outputQty);
+    const exploded = explodeBomComponents(company, bom, factor);
+    if (exploded.error) {
+      return `Company "${name}": production ${manufacture.no ?? ''} has ${exploded.error.toLowerCase()}`;
+    }
     const expected = new Map(
-      (bom.components ?? []).map((line) => [line.stockItemId, round3((parseQty(line.qty) ?? 0) * factor)]),
+      exploded.components.map((line) => [line.stockItemId, line.qty]),
     );
     if (!Array.isArray(manufacture.components) || manufacture.components.length !== expected.size) {
       return `Company "${name}": production ${manufacture.no ?? ''} does not match its BOM components.`;

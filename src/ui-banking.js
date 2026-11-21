@@ -1,6 +1,7 @@
 // ZledgerCraft - Cost centres, instruments, bank reconciliation and import screens.
 // Screen functions read the live UI state exported by ui.js.
 import {
+  chequeBookUsage,
   dateLabel,
   ledgerOptions,
   todayIso,
@@ -226,6 +227,44 @@ export function postDatedScreen() {
       (ledger) => `<option value="${esc(ledger.id)}"${current.partyLedgerId === ledger.id ? ' selected' : ''}>${esc(ledger.name)} · ${esc(ledger.groupName)}</option>`,
     ),
   ].join('');
+  const books = [...(active.chequeBooks ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const editingBook = books.find((book) => book.id === view.chequeBookId);
+  const bankBooks = active.ledgers
+    .filter((ledger) => groupChainKeys(active, ledger.groupId).includes('bank'))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const bookRows = books
+    .map((book) => {
+      const bank = active.ledgers.find((ledger) => ledger.id === book.bankLedgerId);
+      return `<tr>
+        <td><strong>${esc(book.name)}</strong><div class="muted small">${esc(bank?.name ?? 'Missing bank')}</div></td>
+        <td>${esc(book.prefix)}${book.startNo} – ${esc(book.prefix)}${book.endNo}</td>
+        <td class="num">${book.nextNo > book.endNo ? 'Exhausted' : `${esc(book.prefix)}${book.nextNo}`}</td>
+        <td class="num">${chequeBookUsage(active, book.id)}</td>
+        <td class="row-actions"><button class="btn small ghost" type="button" data-action="edit-cheque-book" data-id="${esc(book.id)}">Edit</button>
+          <button class="btn small danger" type="button" data-action="delete-cheque-book" data-id="${esc(book.id)}">Delete</button></td>
+      </tr>`;
+    })
+    .join('');
+  const chequeBookPanel = panel(
+    'Cheque books',
+    `<form id="cheque-book-form" class="form-grid" novalidate>
+      <label class="field"><span>Book name</span><input name="name" maxlength="60" placeholder="e.g. HDFC current account 2026" value="${esc(editingBook?.name ?? '')}" required></label>
+      <label class="field"><span>Bank ledger</span><select name="bankLedgerId">${bankBooks
+        .map((ledger) => `<option value="${esc(ledger.id)}"${(editingBook?.bankLedgerId ?? bankBooks[0]?.id) === ledger.id ? ' selected' : ''}>${esc(ledger.name)}</option>`)
+        .join('')}</select></label>
+      <label class="field"><span>Prefix</span><input name="prefix" maxlength="10" placeholder="e.g. 00" value="${esc(editingBook?.prefix ?? '')}"></label>
+      <label class="field"><span>First number</span><input name="startNo" inputmode="numeric" maxlength="12" value="${esc(editingBook?.startNo ?? '')}" required></label>
+      <label class="field"><span>Last number</span><input name="endNo" inputmode="numeric" maxlength="12" value="${esc(editingBook?.endNo ?? '')}" required></label>
+      <label class="field"><span>Next number</span><input name="nextNo" inputmode="numeric" maxlength="12" placeholder="Defaults to first" value="${esc(editingBook?.nextNo ?? '')}"></label>
+      <div class="field form-actions"><button class="btn primary" type="submit">${editingBook ? 'Save book' : 'Create book'}</button>${editingBook ? '<button class="btn ghost" type="button" data-action="cancel-cheque-book">Cancel</button>' : ''}</div>
+      <p id="cheque-book-error" class="form-error" role="alert"></p>
+    </form>
+    ${books.length
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table compact"><thead><tr><th>Book</th><th>Range</th><th class="num">Next</th><th class="num">Used</th><th></th></tr></thead><tbody>${bookRows}</tbody></table></div>`
+      : '<p class="muted">No cheque books recorded. A book tracks a bank, number range and next number; it does not print or issue cheques.</p>'}`,
+    'A cheque book is a local numbering aid. Deleting is blocked while recorded instruments fall inside its bank and number range.',
+  );
+
   const rows = report.rows
     .map((row) => {
       const timing = row.manualStatus
@@ -264,7 +303,7 @@ export function postDatedScreen() {
     })
     .join('');
 
-  return panel(
+  return `${chequeBookPanel}${panel(
     'Cheque / DD register',
     `<form id="postdated-form" class="filter-bar">
       <label class="field inline-field"><span>From</span><input name="from" type="date" value="${esc(from)}" data-period></label>
@@ -291,7 +330,7 @@ export function postDatedScreen() {
         </table></div>`
       : '<p class="muted">No cheque or DD instruments in this period. Add instrument details on a payment, receipt or contra voucher.</p>'}`,
     'Post-dated means the instrument date is after the as-on date. Cleared means the voucher is matched in Bank Reconciliation unless the instrument was marked cleared, stopped or cancelled manually. Bank, party text, exact party account and cheque-number range filters narrow the same register without changing status logic; manual status changes keep a short history.',
-  );
+  )}`;
 }
 
 export function chequePrintScreen() {

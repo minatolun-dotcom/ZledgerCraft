@@ -1414,6 +1414,69 @@ test('a BOM and production consume components and preserve stock value', () => {
   assert.equal(summary.totals.closingValue, 2000);
 });
 
+test('a multi-level BOM explodes sub-assemblies into raw components', () => {
+  const { company, unit, group } = inventoryFixture();
+  const raw = addStockItem(company, {
+    name: 'Multi Fabric',
+    stockGroupId: group.id,
+    unitId: unit.id,
+    openingQty: 30,
+    openingRate: 10,
+  }).item;
+  const sub = addStockItem(company, {
+    name: 'Multi Sleeve',
+    stockGroupId: group.id,
+    unitId: unit.id,
+    openingQty: 0,
+    openingRate: 0,
+  }).item;
+  const finished = addStockItem(company, {
+    name: 'Multi Shirt',
+    stockGroupId: group.id,
+    unitId: unit.id,
+    openingQty: 0,
+    openingRate: 0,
+  }).item;
+  const subBom = addBom(company, {
+    name: 'Sleeve recipe',
+    outputItemId: sub.id,
+    outputQty: 2,
+    components: [{ stockItemId: raw.id, qty: 3 }],
+  });
+  assert.equal(subBom.ok, true, subBom.error);
+  const parentBom = addBom(company, {
+    name: 'Shirt recipe with sleeves',
+    outputItemId: finished.id,
+    outputQty: 1,
+    components: [{ stockItemId: sub.id, qty: 2 }],
+  });
+  assert.equal(parentBom.ok, true, parentBom.error);
+
+  const production = addManufacture(company, {
+    date: '2026-04-10',
+    bomId: parentBom.bom.id,
+    outputQty: 3,
+    componentGodownId: defaultGodownId(company),
+    outputGodownId: defaultGodownId(company),
+  });
+  assert.equal(production.ok, true, production.error);
+  assert.equal(production.manufacture.components.length, 1);
+  assert.equal(production.manufacture.components[0].stockItemId, raw.id);
+  assert.equal(production.manufacture.components[0].qty, 9);
+  assert.equal(stockOnHand(company, raw.id, '2026-04-10'), 21);
+  assert.equal(stockOnHand(company, finished.id, '2026-04-10'), 3);
+
+  assert.equal(deleteBom(company, subBom.bom.id).ok, false, 'a parent BOM protects a sub-assembly');
+  const cycle = addBom(company, {
+    name: 'Recursive fabric',
+    outputItemId: raw.id,
+    outputQty: 1,
+    components: [{ stockItemId: finished.id, qty: 1 }],
+  });
+  assert.equal(cycle.ok, false);
+  assert.match(cycle.error, /recurse into itself/i);
+});
+
 test('deleting production is refused when later stock would go negative', () => {
   const { company, unit, group, cash, sales } = inventoryFixture();
   const raw = addStockItem(company, {

@@ -199,7 +199,7 @@ Status: **Done**, **Partial**, **Missing**.
 | --- | --- |
 | GST registration, tax ledgers, HSN/SAC and rate setup | Done (Stage 3; GSTIN, home state, rate master, tax ledgers and HSN on stock items; no SAC master) |
 | GST on vouchers: CGST/SGST/IGST, cess, reverse charge, exempt/nil | Partial — one rate per invoice, cess, RCM flag and Nil/Exempt; no per-item rates, exports/SEZ or ITC reversal |
-| GSTR-1, GSTR-3B, GSTR-2B reconciliation and annual returns | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary; no filing, GSTR-1 JSON export, 2B reconciliation or annual return |
+| GSTR-1, GSTR-3B, GSTR-2B reconciliation and annual returns | Partial — GSTR-1 outward working papers, HSN summary, GSTR-3B liability/ITC summary and a monthly GSTR-1 JSON export for manual upload; no portal filing, GSTN API submission, 2B reconciliation or annual return |
 | E-invoice and e-way bill generation | Partial — B2B e-invoice readiness and draft NIC-style JSON; e-way Part A working papers and draft JSON at a configurable threshold; no IRP/e-way portal submission, IRN/QR, Part B, transporter/vehicle, cancellation or amendment |
 | TDS/TCS sections, thresholds, challans, returns and certificates | Partial — TAN, section/rate/threshold master, TDS on purchases, TCS on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns, certificates, threshold enforcement, higher-rate/no-PAN logic or journal deductions |
 | Tax audit, reconciliation and statutory registers | Partial — turnover, output-tax/ITC and TDS/TCS reconciliations plus a Form 3CD-style checklist and a user-managed compliance calendar; no Form 3CD, audit opinion, statutory registers or consolidation |
@@ -344,6 +344,14 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
+
+### 2026-11-21 — Phase 64: GSTR-1 manual JSON export
+
+- A single-month GSTR-1 JSON export emits GSTN-style b2b (grouped by GSTIN with
+  rate-wise item details), b2cs, cdnr/cdnur and HSN sections.
+- The exporter validates GST enablement, GSTIN and a single-month period, and
+  returns a download payload without calling any portal.
+- Verification: 363 tests (362 pass, 1 skipped); 1,316.2 kB build.
 
 ### 2026-11-21 — Phase 63: supplementary and adjustment payroll runs
 

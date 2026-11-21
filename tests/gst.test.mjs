@@ -19,7 +19,7 @@ import {
   saveGstSettings,
   updateVoucher,
 } from '../src/store.js';
-import { gstReturns, trialBalance } from '../src/accounting.js';
+import { gstr1Json, gstReturns, trialBalance } from '../src/accounting.js';
 
 function groupId(company, key) {
   return company.groups.find((group) => group.key === key).id;
@@ -718,4 +718,46 @@ test('per-line GST rates aggregate into rate breakup and return buckets', () => 
   assert.equal(returns.gstr1.rateRows.length, 2);
   assert.equal(returns.gstr1.rateRows.find((row) => row.rate === 5).taxable, 1000);
   assert.equal(returns.gstr1.rateRows.find((row) => row.rate === 18).taxable, 500);
+});
+
+test('GSTR-1 JSON exports B2B, B2C and period validation without transmitting', () => {
+  const { company, customer, sales } = fixture();
+  sale(company, {
+    customer,
+    sales,
+    taxable: 1000,
+    gst: { rateId: rateId(company, 18), placeOfSupply: '29', partyGstin: '29ABCDE1234F1Z5' },
+  });
+  sale(company, { customer, sales, taxable: 500, date: '2026-04-15' });
+
+  const exported = gstr1Json(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(exported.ok, true, exported.error);
+  assert.equal(exported.filename, 'GSTR-1-27ABCDE1234F1Z5-042026.json');
+  assert.equal(exported.payload.gstin, '27ABCDE1234F1Z5');
+  assert.equal(exported.payload.fp, '042026');
+  assert.equal(exported.payload.gt, 1770);
+  assert.equal(exported.payload.b2b.length, 1);
+  assert.equal(exported.payload.b2b[0].ctin, '29ABCDE1234F1Z5');
+  assert.equal(exported.payload.b2b[0].inv[0].idt, '10-04-2026');
+  assert.equal(exported.payload.b2b[0].inv[0].pos, '29');
+  assert.deepEqual(exported.payload.b2b[0].inv[0].itms[0].itm_det, {
+    rt: 18,
+    txval: 1000,
+    iamt: 180,
+    camt: 0,
+    samt: 0,
+    csamt: 0,
+  });
+  assert.equal(exported.payload.b2cs.length, 1);
+  assert.equal(exported.payload.b2cs[0].sply_ty, 'INTRA');
+  assert.equal(exported.payload.b2cs[0].txval, 500);
+  assert.equal(exported.payload.b2cs[0].camt, 45);
+  assert.equal(exported.payload.b2cs[0].samt, 45);
+
+  const multiMonth = gstr1Json(company, { from: '2026-04-01', to: '2026-05-31' });
+  assert.equal(multiMonth.ok, false);
+  assert.match(multiMonth.error, /monthly/i);
+
+  company.gst.gstin = '';
+  assert.equal(gstr1Json(company, { from: '2026-04-01', to: '2026-04-30' }).ok, false);
 });

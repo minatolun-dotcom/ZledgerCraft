@@ -3499,7 +3499,18 @@ export function gstReturns(company, filters = {}) {
           const key = `${hsn}|${unit}`;
           let bucket = hsnMap.get(key);
           if (!bucket) {
-            bucket = { hsn, unit, description: item?.name ?? '', qty: 0, taxable: 0, tax: 0 };
+            bucket = {
+              hsn,
+              unit,
+              description: item?.name ?? '',
+              qty: 0,
+              taxable: 0,
+              tax: 0,
+              cgst: 0,
+              sgst: 0,
+              igst: 0,
+              cess: 0,
+            };
             hsnMap.set(key, bucket);
           } else if (!bucket.description && item?.name) {
             bucket.description = item.name;
@@ -3509,6 +3520,9 @@ export function gstReturns(company, filters = {}) {
           bucket.qty = round3(bucket.qty + direction * (line.qty ?? 0));
           bucket.taxable = round2(bucket.taxable + direction * lineAmount);
           bucket.tax = round2(bucket.tax + direction * round2(taxTotal * share));
+          for (const role of ['cgst', 'sgst', 'igst', 'cess']) {
+            bucket[role] = round2(bucket[role] + direction * round2(gst[role] * share));
+          }
         }
       } else {
         const serviceEntry = (voucher.lines ?? [])
@@ -3519,12 +3533,26 @@ export function gstReturns(company, filters = {}) {
           const key = `${hsn}|OTH`;
           let bucket = hsnMap.get(key);
           if (!bucket) {
-            bucket = { hsn, unit: 'OTH', description: serviceEntry.ledger.name, qty: 0, taxable: 0, tax: 0 };
+            bucket = {
+              hsn,
+              unit: 'OTH',
+              description: serviceEntry.ledger.name,
+              qty: 0,
+              taxable: 0,
+              tax: 0,
+              cgst: 0,
+              sgst: 0,
+              igst: 0,
+              cess: 0,
+            };
             hsnMap.set(key, bucket);
           }
           bucket.qty = round3(bucket.qty + direction);
           bucket.taxable = round2(bucket.taxable + direction * gst.taxable);
           bucket.tax = round2(bucket.tax + direction * taxTotal);
+          for (const role of ['cgst', 'sgst', 'igst', 'cess']) {
+            bucket[role] = round2(bucket[role] + direction * gst[role]);
+          }
         }
       }
     }
@@ -3604,6 +3632,141 @@ export function gstReturns(company, filters = {}) {
       tax: sumHeads(outwardTax),
       gross: round2(outward.taxable + sumHeads(outwardTax)),
     },
+  };
+}
+
+function gstr1Date(isoDate) {
+  const [year, month, day] = String(isoDate ?? '').split('-');
+  return year && month && day ? `${day}-${month}-${year}` : '';
+}
+
+function gstr1RateItems(document) {
+  const rates = document.rateBreakup?.length ? document.rateBreakup : [document];
+  return rates.map((rate, index) => ({
+    num: index + 1,
+    itm_det: {
+      rt: Number(rate.rate) || 0,
+      txval: round2(rate.taxable),
+      iamt: round2(rate.igst),
+      camt: round2(rate.cgst),
+      samt: round2(rate.sgst),
+      csamt: round2(rate.cess),
+    },
+  }));
+}
+
+/**
+ * Build a manual GSTR-1 JSON payload from the local working papers. This is an
+ * export for the GST portal or a filing utility; it never calls GSTN.
+ */
+export function gstr1Json(company, filters = {}) {
+  const report = gstReturns(company, filters);
+  if (!company.gst?.enabled) return { ok: false, error: 'Enable GST before exporting GSTR-1.' };
+  const gstin = String(company.gst.gstin ?? '').trim().toUpperCase();
+  if (!gstin || gstin.length !== 15) {
+    return { ok: false, error: 'Save a 15-character GSTIN before exporting GSTR-1.' };
+  }
+  if (report.from.slice(0, 7) !== report.to.slice(0, 7)) {
+    return { ok: false, error: 'GSTR-1 is monthly. Select a from and to date in the same month.' };
+  }
+
+  const b2bGroups = new Map();
+  for (const document of report.gstr1.b2b) {
+    const ctin = String(document.partyGstin ?? '').trim().toUpperCase();
+    if (!ctin) continue;
+    if (!b2bGroups.has(ctin)) b2bGroups.set(ctin, { ctin, cfs: 'N', inv: [] });
+    b2bGroups.get(ctin).inv.push({
+      inum: String(document.no),
+      idt: gstr1Date(document.date),
+      val: round2(document.total),
+      pos: String(document.placeOfSupply),
+      rchrg: document.reverseCharge ? 'Y' : 'N',
+      inv_typ: 'R',
+      itms: gstr1RateItems(document),
+    });
+  }
+
+  const b2cMap = new Map();
+  for (const document of report.documents) {
+    if (document.type !== 'Sales' || document.partyGstin) continue;
+    const rates = document.rateBreakup?.length ? document.rateBreakup : [document];
+    for (const rate of rates) {
+      const key = `${document.placeOfSupply}|${document.supplyType}|${rate.rate}|${rate.cessRate}`;
+      let bucket = b2cMap.get(key);
+      if (!bucket) {
+        bucket = {
+          sply_ty: document.supplyType === 'Intra' ? 'INTRA' : 'INTER',
+          pos: String(document.placeOfSupply),
+          typ: 'OE',
+          rt: Number(rate.rate) || 0,
+          txval: 0,
+          iamt: 0,
+          camt: 0,
+          samt: 0,
+          csamt: 0,
+        };
+        b2cMap.set(key, bucket);
+      }
+      bucket.txval = round2(bucket.txval + rate.taxable);
+      bucket.iamt = round2(bucket.iamt + rate.igst);
+      bucket.camt = round2(bucket.camt + rate.cgst);
+      bucket.samt = round2(bucket.samt + rate.sgst);
+      bucket.csamt = round2(bucket.csamt + rate.cess);
+    }
+  }
+
+  const cdnrGroups = new Map();
+  const cdnur = [];
+  for (const document of report.documents) {
+    if (document.type !== 'CreditNote' && document.type !== 'DebitNote') continue;
+    const note = {
+      nt_num: String(document.no),
+      nt_dt: gstr1Date(document.date),
+      ntty: document.type === 'CreditNote' ? 'C' : 'D',
+      val: round2(document.total),
+      pos: String(document.placeOfSupply),
+      rchrg: document.reverseCharge ? 'Y' : 'N',
+      inv_typ: 'R',
+      itms: gstr1RateItems(document),
+    };
+    const ctin = String(document.partyGstin ?? '').trim().toUpperCase();
+    if (!ctin) {
+      cdnur.push(note);
+      continue;
+    }
+    if (!cdnrGroups.has(ctin)) cdnrGroups.set(ctin, { ctin, nt: [] });
+    cdnrGroups.get(ctin).nt.push(note);
+  }
+
+  const payload = {
+    gstin,
+    fp: `${report.to.slice(5, 7)}${report.to.slice(0, 4)}`,
+    gt: report.totals.gross,
+    cur_gt: report.totals.gross,
+    b2b: [...b2bGroups.values()],
+    b2cs: [...b2cMap.values()],
+    cdnr: [...cdnrGroups.values()],
+    ...(cdnur.length ? { cdnur } : {}),
+    hsn: {
+      data: report.gstr1.hsn.map((row, index) => ({
+        num: index + 1,
+        hsn_sc: row.hsn,
+        uqc: row.unit || 'OTH',
+        qty: round3(row.qty),
+        txval: round2(row.taxable),
+        iamt: round2(row.igst),
+        camt: round2(row.cgst),
+        samt: round2(row.sgst),
+        csamt: round2(row.cess),
+      })),
+    },
+  };
+  return {
+    ok: true,
+    from: report.from,
+    to: report.to,
+    filename: `GSTR-1-${gstin}-${payload.fp}.json`,
+    payload,
   };
 }
 

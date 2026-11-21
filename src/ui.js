@@ -181,6 +181,7 @@ import {
   godownStockSummary,
   groupSummary,
   gstReturns,
+  gstr1Json,
   groupVouchers,
   groupChainKeys,
   inGroupKey,
@@ -5913,6 +5914,21 @@ async function handleClick(event) {
       const filename = `ZledgerCraft-Bill-${String(row.ref).replace(/[^a-z0-9]+/gi, '-')}-timeline-${todayIso()}.csv`;
       downloadCsvRows(filename, rows);
       setFlash(`Downloaded the movement timeline for ${row.ref}.`);
+      break;
+    }
+    case 'download-gstr1': {
+      const active = company();
+      if (!active) break;
+      const result = gstr1Json(active, {
+        from: filters.gst?.from || active.fyStart,
+        to: filters.gst?.to || active.fyEnd,
+      });
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      downloadJsonFile(result.filename, result.payload);
+      setFlash(`Downloaded GSTR-1 JSON for ${result.from} to ${result.to}. Nothing was transmitted.`);
       break;
     }
     case 'download-einvoice': {

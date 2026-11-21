@@ -305,6 +305,7 @@ export function gstScreen() {
         <label class="field inline-field"><span>From</span><input name="from" type="date" value="${esc(from)}" data-period></label>
         <label class="field inline-field"><span>To</span><input name="to" type="date" value="${esc(to)}" data-period></label>
         <button class="btn small" type="submit">Apply</button>
+        <button class="btn small ghost" type="button" data-action="download-gstr1">Download GSTR-1 JSON</button>
       </form>
       <div class="ratio-grid">
         <div class="ratio-card"><span class="ratio-label">Outward taxable</span><strong>${money(report.outward.taxable)}</strong><span class="muted small">${report.outward.count} document${report.outward.count === 1 ? '' : 's'} net of credit notes</span></div>

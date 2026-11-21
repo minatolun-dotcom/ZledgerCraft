@@ -14,7 +14,8 @@ import {
 import {
   eInvoiceRegister,
   ewayBillRegister,
-  gstAnnualSummary,
+  gstr2bReconciliation,
+  gstr9Summary,
   gstReturns,
   ledgerTotals,
   outstanding,
@@ -52,11 +53,33 @@ export function gstScreen() {
   const from = current.from || active.fyStart;
   const to = current.to || active.fyEnd;
   const report = gstReturns(active, { from, to });
-  const annual = gstAnnualSummary(active, { from: active.fyStart, to: active.fyEnd });
+  const gstr9 = gstr9Summary(active, { from: active.fyStart, to: active.fyEnd });
   const totals = ledgerTotals(active, { to });
   const filings = [...(gst.filings ?? [])].sort(
     (a, b) => b.period.localeCompare(a.period) || a.returnType.localeCompare(b.returnType),
   );
+  const gstr2b = gstr2bReconciliation(active, { period: to.slice(0, 7) });
+  const gstr2bSummary = gstr2b.summary ?? {};
+  const gstr2bStatusBadge = (status) => {
+    const kind = status === 'Matched' ? '' : status === 'Missing in books' ? ' overdue' : ' attention';
+    return `<span class="badge${kind}">${esc(status)}</span>`;
+  };
+  const gstr2bRows = (gstr2b.rows ?? []).map((row) => `<tr>
+    <td><span class="mono small">${esc(row.ctin)}</span></td>
+    <td><strong>${esc(row.inum)}</strong><div class="muted small">${esc(dateLabel(row.idt))}</div></td>
+    <td class="num">${money(row.taxable)}<div class="muted small">${money(row.taxTotal)} tax</div></td>
+    <td>${row.book ? `<strong>${esc(row.book.ref)}</strong><div class="muted small">${esc(dateLabel(row.book.date))}</div>` : '<span class="muted">Not found</span>'}</td>
+    <td class="num">${row.book ? money(row.book.taxTotal) : '—'}</td>
+    <td class="num ${row.difference && Math.abs(row.difference.taxTotal) > 1 ? 'neg' : ''}">${row.difference ? money(row.difference.taxTotal) : '—'}</td>
+    <td>${gstr2bStatusBadge(row.status)}</td>
+  </tr>`).join('');
+  const gstr2bMissingRows = (gstr2b.missingIn2b ?? []).map((row) => `<tr>
+    <td><strong>${esc(row.ref)}</strong><div class="muted small">${esc(voucherLabel(row.type))} ${esc(row.no)}</div></td>
+    <td>${esc(dateLabel(row.date))}</td>
+    <td>${esc(row.party)}<div class="muted small mono">${esc(row.partyGstin)}</div></td>
+    <td class="num">${money(row.taxable)}</td>
+    <td class="num">${money(row.taxTotal)}</td>
+  </tr>`).join('');
   const filingRows = filings
     .map(
       (filing) => `<tr>
@@ -361,6 +384,42 @@ export function gstScreen() {
       'A negative head is input credit carried forward. Reverse-charge tax appears in both liability and ITC so it nets to zero on the return.',
     )}
     ${panel(
+      'GSTR-2B reconciliation',
+      `<form id="gstr2b-form" novalidate>
+        <div class="inline-form">
+          <label class="field inline-field"><span>GSTR-2B JSON</span><input type="file" accept=".json,application/json" data-csv-target="gstr2b-json"></label>
+          <button class="btn small" type="submit"${can('master.write') ? '' : ' disabled'}>Import and reconcile</button>
+        </div>
+        <label class="field"><span>Or paste the downloaded JSON</span><textarea id="gstr2b-json" name="json" rows="3" placeholder='{"gstin":"…","rtnprd":"042026","docdata":{"b2b":[…]}}'></textarea></label>
+        <p id="gstr2b-error" class="form-error" role="alert"></p>
+      </form>
+      <p class="muted small">Choose the JSON downloaded from the GST portal. The app reads B2B invoices locally and compares supplier GSTIN, invoice number, taxable value and tax with purchase and inward debit-note vouchers. It does not claim supplier acceptance.</p>
+      ${gstr2b.available
+        ? `<div class="ratio-grid">
+            <div class="ratio-card"><span class="ratio-label">2B invoices</span><strong>${gstr2bSummary.invoiceCount}</strong><span class="muted small">${gstr2bSummary.matchedCount} matched · ${gstr2bSummary.mismatchCount} differ</span></div>
+            <div class="ratio-card"><span class="ratio-label">Missing in books</span><strong>${gstr2bSummary.missingInBooksCount}</strong><span class="muted small">No purchase voucher found</span></div>
+            <div class="ratio-card"><span class="ratio-label">Missing in 2B</span><strong>${gstr2bSummary.missingIn2bCount}</strong><span class="muted small">Book purchase not in this statement</span></div>
+            <div class="ratio-card"><span class="ratio-label">Tax at risk</span><strong class="${gstr2bSummary.atRisk ? 'neg' : ''}">${money(gstr2bSummary.atRisk)}</strong><span class="muted small">2B tax unconfirmed by books</span></div>
+          </div>
+          <p class="muted small">Period ${esc(gstr2b.period)}${gstr2b.sourceName ? ` · ${esc(gstr2b.sourceName)}` : ''} · imported ${esc(dateLabel(String(gstr2b.importedAt).slice(0, 10)))}. Tax in 2B ${money(gstr2bSummary.tax2b)}; tax in books ${money(gstr2bSummary.taxBooks)}.</p>
+          ${gstr2b.rows.length
+            ? `<div class="table-scroll" tabindex="0"><table class="data-table compact gst-report-table">
+                <thead><tr><th>Supplier GSTIN</th><th>Invoice</th><th class="num">2B taxable / tax</th><th>Book voucher</th><th class="num">Book tax</th><th class="num">Tax difference</th><th>Status</th></tr></thead>
+                <tbody>${gstr2bRows}</tbody>
+              </table></div>`
+            : '<p class="muted">This statement has no B2B invoices.</p>'}
+          ${gstr2b.missingIn2b.length
+            ? `<h3 class="section-title">Book purchases not in GSTR-2B <span class="count">${gstr2b.missingIn2b.length}</span></h3>
+              <div class="table-scroll" tabindex="0"><table class="data-table compact gst-report-table">
+                <thead><tr><th>Voucher</th><th>Date</th><th>Supplier</th><th class="num">Taxable</th><th class="num">Tax</th></tr></thead>
+                <tbody>${gstr2bMissingRows}</tbody>
+              </table></div>`
+            : ''}
+          <button class="btn small danger" type="button" data-action="delete-gstr2b" data-id="${esc((gstr2b.imports ?? []).find((entry) => entry.period === gstr2b.period)?.id ?? '')}"${can('master.write') ? '' : ' disabled'}>Remove this import</button>`
+        : '<p class="muted">No GSTR-2B statement imported yet.</p>'}`,
+      'A local reconciliation against vouchers. Differences are for review; the app does not alter purchase vouchers or claim ITC eligibility.',
+    )}
+    ${panel(
       'Filing acknowledgements',
       `<form id="gst-filing-form" class="inline-form" novalidate>
         <select name="returnType" aria-label="Return type">
@@ -409,13 +468,51 @@ export function gstScreen() {
 
   return `${setupPanel}${taxLedgerPanel}${ratesPanel}${gst.enabled || report.count ? reportPanels : ''}
     ${panel(
-      'GST annual working paper',
-      `<table class="data-table compact">
+      'Late fee and interest calculator',
+      `<form id="gst-late-fee-form" class="inline-form" novalidate>
+        <select name="returnType" aria-label="Return type">
+          <option value="GSTR-1">GSTR-1</option>
+          <option value="GSTR-3B" selected>GSTR-3B</option>
+          <option value="GSTR-9">GSTR-9</option>
+        </select>
+        <label class="field inline-field"><span>Period</span><input name="period" type="month" value="${esc(to.slice(0, 7))}" required></label>
+        <label class="field inline-field"><span>Due date</span><input name="dueDate" type="date" aria-label="Due date"></label>
+        <label class="field inline-field"><span>Filed / as-on</span><input name="filedDate" type="date" value="${esc(todayIso())}"></label>
+        <input name="taxAmount" inputmode="decimal" placeholder="Net tax payable" aria-label="Net tax payable">
+        <label class="check-item"><input name="nil" type="checkbox"> Nil return</label>
+        <input name="annualTurnover" inputmode="decimal" placeholder="Annual turnover (GSTR-9)" aria-label="Annual turnover for GSTR-9">
+        <button class="btn small" type="submit">Calculate</button>
+        <p id="gst-late-fee-error" class="form-error" role="alert"></p>
+      </form>
+      <p class="muted small">Leave the due date blank to use the 11th for GSTR-1, 20th for GSTR-3B or 31 December after the financial year for GSTR-9. The estimate uses ₹50/day (₹20 nil) capped at ₹5,000 (₹2,000 nil), or ₹200/day capped at 0.5% of turnover for GSTR-9, plus 18% simple interest on net tax. It does not create a challan.</p>
+      ${view.gstLateFee
+        ? `<div class="ratio-grid">
+            <div class="ratio-card"><span class="ratio-label">Days late</span><strong>${view.gstLateFee.daysLate}</strong><span class="muted small">Due ${esc(dateLabel(view.gstLateFee.dueDate))} · as on ${esc(dateLabel(view.gstLateFee.asOn))}</span></div>
+            <div class="ratio-card"><span class="ratio-label">Late fee</span><strong>${money(view.gstLateFee.lateFee)}</strong><span class="muted small">${money(view.gstLateFee.ratePerDay)}/day · cap ${money(view.gstLateFee.cap)}</span></div>
+            <div class="ratio-card"><span class="ratio-label">Interest</span><strong>${money(view.gstLateFee.interest)}</strong><span class="muted small">18% on ${money(view.gstLateFee.taxAmount)}</span></div>
+            <div class="ratio-card"><span class="ratio-label">Estimated total</span><strong>${money(view.gstLateFee.total)}</strong><span class="muted small">${esc(view.gstLateFee.returnType)} · ${esc(view.gstLateFee.period || 'no period')}</span></div>
+          </div>`
+        : '<p class="muted">Enter a period and click Calculate to see an estimate.</p>'}`,
+      'A local estimate for review. Statutory caps and notifications can change; confirm the amount before paying.',
+    )}
+    ${panel(
+      'GSTR-9 · annual working paper',
+      `<div class="inline-form">
+        <button class="btn small ghost" type="button" data-action="download-gstr9">Download working-paper JSON</button>
+      </div>
+      <div class="ratio-grid">
+        <div class="ratio-card"><span class="ratio-label">Outward taxable</span><strong>${money(gstr9.summary.outward.taxable)}</strong><span class="muted small">${gstr9.summary.outward.b2bInvoices} B2B · ${gstr9.summary.outward.b2cInvoices} B2C rate rows</span></div>
+        <div class="ratio-card"><span class="ratio-label">Output tax</span><strong>${money(gstr9.summary.outward.total)}</strong><span class="muted small">Sales less credit notes</span></div>
+        <div class="ratio-card"><span class="ratio-label">ITC</span><strong>${money(gstr9.summary.inward.total)}</strong><span class="muted small">${money(gstr9.summary.inward.reverseChargeTax)} reverse-charge tax</span></div>
+        <div class="ratio-card"><span class="ratio-label">Net tax payable</span><strong class="${gstr9.summary.netTotal < 0 ? 'pos' : ''}">${money(gstr9.summary.netTotal)}</strong><span class="muted small">Liability less ITC</span></div>
+      </div>
+      <div class="table-scroll" tabindex="0"><table class="data-table compact">
         <thead><tr><th>Month</th><th class="num">Outward taxable</th><th class="num">Output tax</th><th class="num">ITC</th><th class="num">Net tax</th></tr></thead>
-        <tbody>${annual.rows.map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${money(row.outwardTaxable)}</td><td class="num">${money(row.outwardTax)}</td><td class="num">${money(row.itc)}</td><td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td></tr>`).join('')}</tbody>
-        <tfoot><tr><td>Financial year</td><td class="num">${money(annual.totals.outwardTaxable)}</td><td class="num">${money(annual.totals.outwardTax)}</td><td class="num">${money(annual.totals.itc)}</td><td class="num">${money(annual.totals.net)}</td></tr></tfoot>
-      </table>`,
-      `Monthly GSTR-1/GSTR-3B working totals for ${esc(dateLabel(annual.from))} to ${esc(dateLabel(annual.to))}. This is not GSTR-9, an annual return or a filing.`,
+        <tbody>${gstr9.months.map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${money(row.outwardTaxable)}</td><td class="num">${money(row.outwardTax)}</td><td class="num">${money(row.itc)}</td><td class="num ${row.net < 0 ? 'neg' : ''}">${money(row.net)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td>Financial year</td><td class="num">${money(gstr9.monthlyTotals.outwardTaxable)}</td><td class="num">${money(gstr9.monthlyTotals.outwardTax)}</td><td class="num">${money(gstr9.monthlyTotals.itc)}</td><td class="num">${money(gstr9.monthlyTotals.net)}</td></tr></tfoot>
+      </table></div>
+      <p class="muted small">Annual totals for ${esc(dateLabel(gstr9.from))} to ${esc(dateLabel(gstr9.to))}. The download contains the summary, monthly totals, rate summary and HSN rows. It is a local working paper, not a filed annual return.</p>`,
+      'Built from voucher tax detail for the financial year. It does not compare against previously filed returns or claim GSTR-9 acceptance.',
     )}`;
 }
 
@@ -801,6 +898,8 @@ export function tdsScreen() {
   const totals = ledgerTotals(active, { to });
   const ledgers = withholdingTaxLedgers(active);
   const kindNoun = kind === 'TDS' ? 'deducted' : 'collected';
+  const returnMonth = Number(to.slice(5, 7));
+  const returnQuarter = returnMonth >= 4 && returnMonth <= 6 ? 'Q1' : returnMonth >= 7 && returnMonth <= 9 ? 'Q2' : returnMonth >= 10 && returnMonth <= 12 ? 'Q3' : 'Q4';
   const sections = tds.sections ?? [];
   const kindSections = sections.filter((section) => section.kind === kind);
 
@@ -1073,6 +1172,24 @@ export function tdsScreen() {
     )}`;
 
   return `${setupPanel}${sectionsPanel}${challanPanel}${tds.enabled || report.count ? reportPanels : ''}
+    ${panel(
+      'Quarterly return working papers',
+      `<form id="tds-return-form" class="inline-form" novalidate>
+        <select name="form" aria-label="Return form">
+          <option value="26Q"${kind === 'TDS' ? ' selected' : ''}>26Q · non-salary TDS</option>
+          <option value="27Q">27Q · non-resident TDS</option>
+          <option value="27EQ"${kind === 'TCS' ? ' selected' : ''}>27EQ · TCS</option>
+        </select>
+        <select name="quarter" aria-label="Quarter">
+          ${['Q1', 'Q2', 'Q3', 'Q4'].map((quarter) => `<option value="${quarter}"${quarter === returnQuarter ? ' selected' : ''}>${quarter}</option>`).join('')}
+        </select>
+        <button class="btn small ghost" type="submit" name="format" value="csv">Download CSV</button>
+        <button class="btn small ghost" type="submit" name="format" value="json">Download JSON</button>
+        <p id="tds-return-error" class="form-error" role="alert"></p>
+      </form>
+      <p class="muted small">Builds a quarter working paper from local deductions. 26Q excludes salary and non-resident sections; 27Q includes 195/196-series sections; 27EQ covers TCS. Download files are for review and are not filed.</p>`,
+      'The return form and quarter select the rows; challans and outstanding totals are shown in the JSON. No return, certificate or acknowledgement is generated.',
+    )}
     ${panel(
       `${kind} certificate working paper`,
       certificates.rows.length

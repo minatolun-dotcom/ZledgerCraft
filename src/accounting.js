@@ -8,6 +8,7 @@ import {
   gstinChecksumValid,
   isValidIsoDate,
   orderRemainingItems,
+  parseAmount,
   primaryGroupOf,
   rateForCurrency,
   round2,
@@ -3813,6 +3814,341 @@ export function gstAnnualSummary(company, filters = {}) {
   };
 }
 
+/**
+ * Annual GSTR-9 working paper built from the same local voucher tax detail as
+ * GSTR-1 and GSTR-3B. It does not compare filed returns or produce a
+ * portal-ready annual return.
+ */
+export function gstr9Summary(company, filters = {}) {
+  const from = filters.from || company.fyStart;
+  const to = filters.to || company.fyEnd;
+  const report = gstReturns(company, { from, to });
+  const months = gstAnnualSummary(company, { from, to });
+  const summary = {
+    outward: {
+      taxable: report.gstr3b.outwardTaxable,
+      ...report.gstr3b.outwardTax,
+      total: report.gstr3b.outwardTaxTotal,
+      b2bInvoices: report.gstr1.b2b.length,
+      b2cInvoices: report.gstr1.b2c.reduce((sum, row) => sum + row.count, 0),
+      creditNotes: report.creditNotes.count,
+      creditNoteTaxable: report.creditNotes.taxable,
+    },
+    inward: {
+      taxable: report.gstr3b.itcTaxable,
+      ...report.gstr3b.itc,
+      total: report.gstr3b.itcTotal,
+      reverseChargeTaxable: report.gstr3b.rcmTaxable,
+      reverseChargeTax: report.gstr3b.rcmTaxTotal,
+      debitNotes: report.debitNotes.count,
+    },
+    itc: report.gstr3b.itc,
+    liability: report.gstr3b.liability,
+    netTax: report.gstr3b.net,
+    taxTotal: report.gstr3b.liabilityTotal,
+    liabilityTotal: report.gstr3b.liabilityTotal,
+    netTotal: report.gstr3b.netTotal,
+  };
+  return {
+    from,
+    to,
+    gstin: report.gstin,
+    legalName: company.gst?.legalName || company.name,
+    stateName: report.stateName,
+    months: months.rows,
+    monthlyTotals: months.totals,
+    summary,
+    rateRows: report.gstr1.rateRows,
+    hsn: report.gstr1.hsn,
+    documents: report.documents.length,
+  };
+}
+
+/** Build a local annual working-paper JSON download from gstr9Summary. */
+export function gstr9Json(company, filters = {}) {
+  if (!company.gst?.enabled) return { ok: false, error: 'Enable GST before exporting the annual working paper.' };
+  const gstin = String(company.gst.gstin ?? '').trim().toUpperCase();
+  if (!gstin || gstin.length !== 15) {
+    return { ok: false, error: 'Save a 15-character GSTIN before exporting the annual working paper.' };
+  }
+  const report = gstr9Summary(company, filters);
+  const fyLabel = `${report.from.slice(0, 4)}-${report.to.slice(2, 4)}`;
+  const payload = {
+    form: 'GSTR-9 working paper',
+    gstin,
+    legalName: report.legalName,
+    period: { from: report.from, to: report.to },
+    generatedAt: new Date().toISOString(),
+    note: 'Local working paper generated from voucher tax detail. It is not a filed return or a department acknowledgement.',
+    summary: report.summary,
+    monthly: report.months,
+    rateSummary: report.rateRows.map((row) => ({
+      rate: row.rate,
+      cessRate: row.cessRate,
+      taxable: row.taxable,
+      igst: row.igst,
+      cgst: row.cgst,
+      sgst: row.sgst,
+      cess: row.cess,
+    })),
+    hsn: report.hsn.map((row) => ({
+      hsn: row.hsn,
+      unit: row.unit,
+      qty: row.qty,
+      taxable: row.taxable,
+      tax: row.tax,
+    })),
+  };
+  return {
+    ok: true,
+    from: report.from,
+    to: report.to,
+    filename: `GSTR-9-working-paper-${gstin}-${fyLabel}.json`,
+    payload,
+  };
+}
+
+/** Suggested statutory due date for a monthly or annual GST return. */
+export function gstReturnDueDate(returnType, period) {
+  const match = /^([0-9]{4})-(0[1-9]|1[0-2])$/.exec(String(period ?? '').trim());
+  if (!match) return '';
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (returnType === 'GSTR-9') {
+    return `${month >= 4 ? year + 1 : year}-12-31`;
+  }
+  if (returnType !== 'GSTR-1' && returnType !== 'GSTR-3B') return '';
+  const day = returnType === 'GSTR-1' ? 11 : 20;
+  return new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
+}
+
+/**
+ * Calculate GST late fee and simple interest for a late return. The result is
+ * a working estimate: caps and rates are configuration here, not fetched from
+ * a portal, and no challan is created.
+ */
+export function gstLateFee(input = {}) {
+  const returnType = ['GSTR-1', 'GSTR-3B', 'GSTR-9'].includes(input.returnType)
+    ? input.returnType
+    : 'GSTR-3B';
+  const period = String(input.period ?? '').trim();
+  const dueDate = String(input.dueDate ?? '').trim() || gstReturnDueDate(returnType, period);
+  if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(dueDate)) {
+    return { ok: false, error: 'Choose a return period or enter a valid due date.' };
+  }
+  const filedDate = String(input.filedDate ?? '').trim();
+  const asOn = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(filedDate)
+    ? filedDate
+    : new Date().toISOString().slice(0, 10);
+  const dueTime = Date.parse(`${dueDate}T00:00:00Z`);
+  const asOnTime = Date.parse(`${asOn}T00:00:00Z`);
+  if (!Number.isFinite(dueTime) || !Number.isFinite(asOnTime)) {
+    return { ok: false, error: 'Enter valid due and filed dates.' };
+  }
+  const daysLate = Math.max(0, Math.floor((asOnTime - dueTime) / 86400000));
+  const nil = input.nil === true || input.nil === 'true' || input.nil === 'on';
+  const ratePerDay = returnType === 'GSTR-9' ? 200 : nil ? 20 : 50;
+  let cap = returnType === 'GSTR-9' ? 0 : nil ? 2000 : 5000;
+  if (returnType === 'GSTR-9') {
+    const turnover = parseAmount(input.annualTurnover);
+    if (turnover === null || turnover <= 0) {
+      return { ok: false, error: 'Enter annual turnover to calculate the GSTR-9 late-fee cap.' };
+    }
+    cap = round2(turnover * 0.005);
+  }
+  const lateFee = daysLate ? Math.min(round2(daysLate * ratePerDay), cap) : 0;
+  const taxAmount = returnType === 'GSTR-1' || nil ? 0 : Math.max(0, parseAmount(input.taxAmount) ?? 0);
+  const interest = daysLate ? round2((taxAmount * 18 * daysLate) / (100 * 365)) : 0;
+  return {
+    ok: true,
+    returnType,
+    period,
+    dueDate,
+    filedDate: filedDate || '',
+    asOn,
+    daysLate,
+    nil,
+    ratePerDay,
+    cap: round2(cap),
+    taxAmount,
+    lateFee: round2(lateFee),
+    interest,
+    total: round2(lateFee + interest),
+  };
+}
+
+function gstr2bNumberKey(value) {
+  return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function gstr2bMonthRange(period) {
+  const year = Number(period.slice(0, 4));
+  const month = Number(period.slice(5, 7));
+  if (!year || month < 1 || month > 12) return null;
+  return {
+    from: `${period}-01`,
+    to: new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10),
+  };
+}
+
+/**
+ * Reconcile a locally imported GSTR-2B against purchase and inward debit-note
+ * vouchers. Exact invoice matches are compared by value; unmatched documents
+ * are listed on both sides. No statement status is changed by the report.
+ */
+export function gstr2bReconciliation(company, filters = {}) {
+  const imports = company.gst?.gstr2bImports ?? [];
+  const requested = String(filters.period ?? '').trim();
+  const record = filters.importId
+    ? imports.find((entry) => entry.id === filters.importId)
+    : (requested ? imports.find((entry) => entry.period === requested) : null) ?? imports[0];
+  if (!record) {
+    return {
+      available: false,
+      period: requested,
+      imports,
+      rows: [],
+      missingIn2b: [],
+      summary: {
+        invoiceCount: 0,
+        bookCount: 0,
+        matchedCount: 0,
+        mismatchCount: 0,
+        missingInBooksCount: 0,
+        missingIn2bCount: 0,
+        tax2b: 0,
+        taxBooks: 0,
+        matchedTax: 0,
+        atRisk: 0,
+      },
+    };
+  }
+  const range = gstr2bMonthRange(record.period);
+  if (!range) {
+    return { available: false, error: 'The imported GSTR-2B period is invalid.', imports, rows: [], missingIn2b: [], summary: null };
+  }
+  const report = gstReturns(company, range);
+  const books = report.documents.filter(
+    (document) =>
+      (document.type === 'Purchase' || document.type === 'DebitNote') &&
+      document.partyGstin,
+  );
+  const usedBooks = new Set();
+  const tolerance = 1;
+  const differences = (left, right) => ({
+    taxable: round2(left.taxable - right.taxable),
+    igst: round2(left.igst - right.igst),
+    cgst: round2(left.cgst - right.cgst),
+    sgst: round2(left.sgst - right.sgst),
+    cess: round2(left.cess - right.cess),
+    taxTotal: round2(left.taxTotal - right.taxTotal),
+  });
+  const significant = (diff) =>
+    ['taxable', 'igst', 'cgst', 'sgst', 'cess'].some((key) => Math.abs(diff[key]) > tolerance);
+
+  const rows = record.invoices.map((invoice) => {
+    const number = gstr2bNumberKey(invoice.inum);
+    let book = books.find(
+      (entry) =>
+        !usedBooks.has(entry.id) &&
+        entry.partyGstin === invoice.ctin &&
+        (gstr2bNumberKey(entry.ref) === number || gstr2bNumberKey(entry.no) === number),
+    );
+    let matchKind = book ? 'number' : '';
+    if (!book) {
+      book = books.find((entry) => {
+        if (usedBooks.has(entry.id) || entry.partyGstin !== invoice.ctin) return false;
+        const diff = differences(invoice, entry);
+        return Math.abs(diff.taxable) <= tolerance && Math.abs(diff.taxTotal) <= tolerance;
+      });
+      if (book) matchKind = 'value';
+    }
+    if (book) usedBooks.add(book.id);
+    const diff = book ? differences(invoice, book) : null;
+    const changed = diff ? significant(diff) : false;
+    const status = !book
+      ? 'Missing in books'
+      : changed
+        ? matchKind === 'value'
+          ? 'Invoice number differs'
+          : 'Value differs'
+        : 'Matched';
+    const atRisk = !book
+      ? invoice.taxTotal
+      : Math.max(0, round2(invoice.taxTotal - book.taxTotal));
+    return {
+      key: `${invoice.ctin}|${invoice.inum}|${invoice.idt}`,
+      ...invoice,
+      status,
+      book: book
+        ? {
+            id: book.id,
+            ref: book.ref,
+            no: book.no,
+            date: book.date,
+            taxable: book.taxable,
+            igst: book.igst,
+            cgst: book.cgst,
+            sgst: book.sgst,
+            cess: book.cess,
+            taxTotal: book.taxTotal,
+          }
+        : null,
+      difference: diff,
+      atRisk: round2(atRisk),
+    };
+  });
+
+  const missingIn2b = books
+    .filter((book) => !usedBooks.has(book.id))
+    .map((book) => ({
+      id: book.id,
+      ref: book.ref,
+      no: book.no,
+      date: book.date,
+      type: book.type,
+      party: book.party,
+      partyGstin: book.partyGstin,
+      taxable: book.taxable,
+      igst: book.igst,
+      cgst: book.cgst,
+      sgst: book.sgst,
+      cess: book.cess,
+      taxTotal: book.taxTotal,
+    }));
+
+  const matched = rows.filter((row) => row.status === 'Matched');
+  const tax2b = round2(rows.reduce((sum, row) => sum + row.taxTotal, 0));
+  const taxBooks = round2(books.reduce((sum, book) => sum + book.taxTotal, 0));
+  return {
+    available: true,
+    period: record.period,
+    importedAt: record.importedAt,
+    sourceName: record.sourceName ?? '',
+    imports,
+    rows,
+    missingIn2b,
+    summary: {
+      invoiceCount: rows.length,
+      bookCount: books.length,
+      matchedCount: matched.length,
+      mismatchCount: rows.filter((row) => ['Value differs', 'Invoice number differs'].includes(row.status)).length,
+      missingInBooksCount: rows.filter((row) => row.status === 'Missing in books').length,
+      missingIn2bCount: missingIn2b.length,
+      tax2b,
+      taxBooks,
+      matchedTax: round2(matched.reduce((sum, row) => sum + row.taxTotal, 0)),
+      atRisk: round2(
+        rows.reduce((sum, row) => sum + row.atRisk, 0) +
+          missingIn2b.reduce((sum, book) => sum + book.taxTotal, 0),
+      ),
+    },
+    gstr3b: report.gstr3b,
+    from: range.from,
+    to: range.to,
+  };
+}
+
 function withholdingQuarter(date) {
   const month = Number(String(date).slice(5, 7));
   if (month >= 4 && month <= 6) return { key: 'Q1', label: 'Q1 · Apr–Jun' };
@@ -3983,6 +4319,92 @@ export function withholdingSummary(company, filters = {}) {
       challans.reduce((sum, challan) => sum + challan.amount + challan.lateFee + challan.interest, 0),
     ),
     thresholdRows,
+  };
+}
+
+function withholdingQuarterRange(quarter, referenceDate) {
+  const date = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(String(referenceDate ?? ''))
+    ? String(referenceDate)
+    : new Date().toISOString().slice(0, 10);
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  const fyStart = month >= 4 ? year : year - 1;
+  if (quarter === 'Q1') return { from: `${fyStart}-04-01`, to: `${fyStart}-06-30` };
+  if (quarter === 'Q2') return { from: `${fyStart}-07-01`, to: `${fyStart}-09-30` };
+  if (quarter === 'Q3') return { from: `${fyStart}-10-01`, to: `${fyStart}-12-31` };
+  return { from: `${fyStart + 1}-01-01`, to: `${fyStart + 1}-03-31` };
+}
+
+const NON_RESIDENT_TDS_CODES = new Set(['195', '196', '196A', '196B', '196C', '196D', '197', '198']);
+
+/** Build a 26Q, 27Q or 27EQ working paper for one quarter. Nothing is filed. */
+export function withholdingReturnWorkingPaper(company, filters = {}) {
+  const form = ['26Q', '27Q', '27EQ'].includes(filters.form) ? filters.form : '26Q';
+  const kind = form === '27EQ' ? 'TCS' : 'TDS';
+  const referenceDate = filters.to || filters.referenceDate || company.fyEnd;
+  const quarter = ['Q1', 'Q2', 'Q3', 'Q4'].includes(filters.quarter)
+    ? filters.quarter
+    : withholdingQuarter(referenceDate).key;
+  const range = withholdingQuarterRange(quarter, referenceDate);
+  const summary = withholdingSummary(company, { kind, from: range.from, to: range.to });
+  const documents = summary.documents.filter((document) => {
+    const code = String(document.code ?? '').toUpperCase();
+    if (form === '27EQ') return true;
+    if (code === '192') return false;
+    if (form === '27Q') return NON_RESIDENT_TDS_CODES.has(code);
+    return !NON_RESIDENT_TDS_CODES.has(code);
+  });
+  const rows = documents.map((document) => ({
+    id: document.id,
+    date: document.date,
+    ref: document.ref,
+    party: document.party || 'Unassigned',
+    pan: document.pan || '',
+    section: document.code,
+    sectionLabel: document.label,
+    rate: document.rate,
+    base: document.base,
+    tax: document.amount,
+    quarter,
+  }));
+  const bySection = new Map();
+  for (const row of rows) {
+    let entry = bySection.get(row.section);
+    if (!entry) {
+      entry = { section: row.section, label: row.sectionLabel, rate: row.rate, count: 0, base: 0, tax: 0 };
+      bySection.set(row.section, entry);
+    }
+    entry.count += 1;
+    entry.base = round2(entry.base + row.base);
+    entry.tax = round2(entry.tax + row.tax);
+  }
+  const tax = round2(rows.reduce((sum, row) => sum + row.tax, 0));
+  const base = round2(rows.reduce((sum, row) => sum + row.base, 0));
+  const missingPan = rows.filter((row) => !row.pan).length;
+  return {
+    ok: true,
+    form,
+    kind,
+    quarter,
+    from: range.from,
+    to: range.to,
+    tan: summary.tan,
+    deductor: company.gst?.legalName || company.name,
+    rows,
+    sections: [...bySection.values()].sort((a, b) => a.section.localeCompare(b.section)),
+    summary: {
+      count: rows.length,
+      base,
+      tax,
+      missingPan,
+      sectionCount: bySection.size,
+      challanTax: summary.challanTotal,
+      challanLateFee: summary.challanLateFee,
+      challanInterest: summary.challanInterest,
+      outstanding: round2(tax - summary.paidToDate),
+    },
+    challans: summary.challans,
+    note: 'Local quarterly working paper. It is not a filed TDS/TCS return or a department acknowledgement.',
   };
 }
 

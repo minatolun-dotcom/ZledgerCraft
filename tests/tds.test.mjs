@@ -19,7 +19,7 @@ import {
   updateVoucher,
   withholdingTaxLedgers,
 } from '../src/store.js';
-import { trialBalance, withholdingSummary } from '../src/accounting.js';
+import { trialBalance, withholdingReturnWorkingPaper, withholdingSummary } from '../src/accounting.js';
 
 function groupId(company, key) {
   return company.groups.find((group) => group.key === key).id;
@@ -525,4 +525,84 @@ test('per-line TDS sections aggregate deductions and exempt lines', () => {
   const summary = withholdingSummary(company, { from: '2026-04-01', to: '2026-04-30' });
   assert.equal(summary.periodAmount, 70);
   assert.equal(summary.sections.length, 2);
+});
+
+test('TDS return working papers split 26Q, 27Q and 27EQ by section and quarter', () => {
+  const { company, supplier, customer, purchases, sales } = fixture();
+  const nonResident = addTdsSection(company, {
+    kind: 'TDS',
+    code: '195',
+    label: 'Non-resident payments',
+    rate: 20,
+    threshold: 0,
+  });
+  assert.equal(nonResident.ok, true, nonResident.error);
+
+  tdsPurchase(company, { supplier, purchases, base: 10000, pan: 'ABCDE1234F' });
+  addVoucher(company, {
+    type: 'Purchase',
+    date: '2026-05-10',
+    lines: [
+      { ledgerId: purchases.id, side: 'Dr', amount: 5000 },
+      { ledgerId: supplier.id, side: 'Cr', amount: 5000 },
+    ],
+    tds: { sectionId: nonResident.section.id, pan: 'ABCDE1234F' },
+  });
+  tcsSale(company, { customer, sales, base: 20000 });
+
+  const form26 = withholdingReturnWorkingPaper(company, {
+    form: '26Q',
+    quarter: 'Q1',
+    to: '2026-06-30',
+  });
+  assert.equal(form26.ok, true);
+  assert.equal(form26.kind, 'TDS');
+  assert.equal(form26.quarter, 'Q1');
+  assert.equal(form26.from, '2026-04-01');
+  assert.equal(form26.to, '2026-06-30');
+  assert.equal(form26.rows.length, 1);
+  assert.equal(form26.rows[0].section, '194J');
+  assert.equal(form26.summary.base, 10000);
+  assert.equal(form26.summary.tax, 1000);
+  assert.equal(form26.summary.missingPan, 0);
+
+  const form27 = withholdingReturnWorkingPaper(company, {
+    form: '27Q',
+    quarter: 'Q1',
+    to: '2026-06-30',
+  });
+  assert.equal(form27.rows.length, 1);
+  assert.equal(form27.rows[0].section, '195');
+  assert.equal(form27.summary.tax, 1000);
+
+  const form27eq = withholdingReturnWorkingPaper(company, {
+    form: '27EQ',
+    quarter: 'Q1',
+    to: '2026-06-30',
+  });
+  assert.equal(form27eq.kind, 'TCS');
+  assert.equal(form27eq.rows.length, 1);
+  assert.equal(form27eq.rows[0].section, '206C(1H)');
+  assert.equal(form27eq.summary.base, 20000);
+  assert.equal(form27eq.summary.tax, 20);
+
+  const noPanVendor = party(company, 'No PAN Vendor', 'sundryCreditors');
+  const missingPan = addVoucher(company, {
+    type: 'Purchase',
+    date: '2026-06-01',
+    lines: [
+      { ledgerId: purchases.id, side: 'Dr', amount: 2000 },
+      { ledgerId: noPanVendor.id, side: 'Cr', amount: 2000 },
+    ],
+    tds: { sectionId: section(company, '194J').id, pan: '' },
+  });
+  assert.equal(missingPan.ok, true, missingPan.error);
+  const withMissingPan = withholdingReturnWorkingPaper(company, {
+    form: '26Q',
+    quarter: 'Q1',
+    to: '2026-06-30',
+  });
+  assert.equal(withMissingPan.summary.missingPan, 1);
+  assert.equal(withMissingPan.rows.length, 2);
+  assert.match(withMissingPan.note, /not a filed/i);
 });

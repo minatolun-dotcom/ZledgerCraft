@@ -1325,6 +1325,199 @@ function ensureGstLedger(company, role) {
   return { ledger: result.ledger, created: true };
 }
 
+const GSTR2B_MAX_IMPORTS = 12;
+const GSTR2B_MAX_INVOICES = 5000;
+
+function normalizeGstr2bPeriod(value) {
+  const raw = String(value ?? '').trim();
+  if (/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(raw)) return raw;
+  const compact = /^(0[1-9]|1[0-2])([0-9]{4})$/.exec(raw);
+  return compact ? `${compact[2]}-${compact[1]}` : '';
+}
+
+function normalizeGstr2bDate(value) {
+  const raw = String(value ?? '').trim();
+  const match = /^(\d{1,2})[-/](\d{1,2})[-/]([0-9]{4})$/.exec(raw);
+  if (match) {
+    const iso = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+    return isValidIsoDate(iso) ? iso : '';
+  }
+  return isValidIsoDate(raw) ? raw : '';
+}
+
+function gstr2bAmount(value) {
+  const amount = parseAmount(value);
+  return amount === null || amount < 0 ? 0 : round2(amount);
+}
+
+function normalizeGstr2bLine(line) {
+  const detail = line?.itm_det ?? line ?? {};
+  return {
+    num: Math.max(1, Math.round(Number(detail.num ?? line?.num ?? 1) || 1)),
+    rate: gstr2bAmount(detail.rt),
+    taxable: gstr2bAmount(detail.txval),
+    igst: gstr2bAmount(detail.iamt),
+    cgst: gstr2bAmount(detail.camt),
+    sgst: gstr2bAmount(detail.samt),
+    cess: gstr2bAmount(detail.csamt),
+  };
+}
+
+function normalizeGstr2bInvoice(raw, ctin) {
+  if (!raw || typeof raw !== 'object') return null;
+  const supplierGstin = String(ctin ?? raw.ctin ?? '').trim().toUpperCase();
+  if (!isValidGstin(supplierGstin)) return null;
+  const inum = String(raw.inum ?? '').trim().slice(0, 80);
+  const idt = normalizeGstr2bDate(raw.idt);
+  if (!inum || !idt) return null;
+
+  let items = Array.isArray(raw.itms)
+    ? raw.itms.map(normalizeGstr2bLine)
+    : Array.isArray(raw.items)
+      ? raw.items.map(normalizeGstr2bLine)
+      : [];
+  if (!items.length) {
+    const taxable = gstr2bAmount(raw.txval ?? raw.taxable);
+    const totalTax =
+      gstr2bAmount(raw.iamt ?? raw.igst) +
+      gstr2bAmount(raw.camt ?? raw.cgst) +
+      gstr2bAmount(raw.samt ?? raw.sgst) +
+      gstr2bAmount(raw.csamt ?? raw.cess);
+    if (!taxable && !totalTax && !gstr2bAmount(raw.val ?? raw.value)) return null;
+    items = [{
+      num: 1,
+      rate: gstr2bAmount(raw.rt),
+      taxable,
+      igst: gstr2bAmount(raw.iamt ?? raw.igst),
+      cgst: gstr2bAmount(raw.camt ?? raw.cgst),
+      sgst: gstr2bAmount(raw.samt ?? raw.sgst),
+      cess: gstr2bAmount(raw.csamt ?? raw.cess),
+    }];
+  }
+
+  const taxable = round2(items.reduce((sum, item) => sum + item.taxable, 0));
+  const igst = round2(items.reduce((sum, item) => sum + item.igst, 0));
+  const cgst = round2(items.reduce((sum, item) => sum + item.cgst, 0));
+  const sgst = round2(items.reduce((sum, item) => sum + item.sgst, 0));
+  const cess = round2(items.reduce((sum, item) => sum + item.cess, 0));
+  const taxTotal = round2(igst + cgst + sgst + cess);
+  const invoiceValue = parseAmount(raw.val ?? raw.value);
+  const pos = GST_STATES.some(([code]) => code === String(raw.pos)) ? String(raw.pos) : '';
+
+  return {
+    ctin: supplierGstin,
+    inum,
+    idt,
+    ...(pos ? { pos } : {}),
+    reverseCharge: raw.rchrg === 'Y' || raw.rchrg === true,
+    taxable,
+    igst,
+    cgst,
+    sgst,
+    cess,
+    taxTotal,
+    value: invoiceValue === null ? round2(taxable + taxTotal) : round2(invoiceValue),
+    items,
+  };
+}
+
+function normalizeGstr2bImports(source) {
+  const rawImports = Array.isArray(source) ? source : [];
+  const byPeriod = new Map();
+  for (const raw of rawImports) {
+    if (!raw || typeof raw !== 'object') continue;
+    const period = normalizeGstr2bPeriod(raw.period);
+    const gstin = isValidGstin(raw.gstin) ? String(raw.gstin).trim().toUpperCase() : '';
+    if (!period || !gstin) continue;
+    const invoices = (Array.isArray(raw.invoices) ? raw.invoices : [])
+      .map((invoice) => normalizeGstr2bInvoice(invoice, invoice?.ctin))
+      .filter(Boolean)
+      .slice(0, GSTR2B_MAX_INVOICES);
+    const importedAt = Number.isFinite(Date.parse(raw.importedAt))
+      ? String(raw.importedAt)
+      : new Date().toISOString();
+    const entry = {
+      id: String(raw.id || uid('gstr2b')).slice(0, 80),
+      period,
+      gstin,
+      importedAt,
+      ...(raw.sourceName ? { sourceName: String(raw.sourceName).trim().slice(0, 80) } : {}),
+      invoices,
+    };
+    const existing = byPeriod.get(period);
+    if (!existing || entry.importedAt > existing.importedAt) byPeriod.set(period, entry);
+  }
+  return [...byPeriod.values()]
+    .sort((a, b) => b.period.localeCompare(a.period) || b.importedAt.localeCompare(a.importedAt))
+    .slice(0, GSTR2B_MAX_IMPORTS);
+}
+
+/**
+ * Import a GSTR-2B JSON download and keep its B2B invoices for local
+ * reconciliation. The payload is parsed locally; no department API is called.
+ */
+export function importGstr2b(company, input = {}) {
+  if (!company.gst?.enabled) return { ok: false, error: 'Enable GST before importing GSTR-2B.' };
+  let payload = input.json;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return { ok: false, error: 'That GSTR-2B file is not valid JSON.' };
+    }
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, error: 'Paste or choose a GSTR-2B JSON file first.' };
+  }
+  const data = payload.docdata && typeof payload.docdata === 'object' ? payload.docdata : payload;
+  const period = normalizeGstr2bPeriod(data.rtnprd ?? payload.rtnprd ?? input.period);
+  if (!period) return { ok: false, error: 'The GSTR-2B file has no valid return period.' };
+  const gstin = String(data.gstin ?? payload.gstin ?? company.gst.gstin ?? '').trim().toUpperCase();
+  if (!isValidGstin(gstin)) return { ok: false, error: 'The GSTR-2B file has no valid recipient GSTIN.' };
+  if (company.gst.gstin && gstin !== company.gst.gstin) {
+    return { ok: false, error: `This GSTR-2B belongs to ${gstin}, not ${company.gst.gstin}.` };
+  }
+  const b2b = Array.isArray(data.b2b) ? data.b2b : [];
+  const invoices = [];
+  const seen = new Set();
+  for (const group of b2b) {
+    const ctin = String(group?.ctin ?? '').trim().toUpperCase();
+    for (const raw of Array.isArray(group?.inv) ? group.inv : []) {
+      const invoice = normalizeGstr2bInvoice(raw, ctin);
+      if (!invoice) continue;
+      const key = `${invoice.ctin}|${invoice.inum.toUpperCase()}|${invoice.idt}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      invoices.push(invoice);
+      if (invoices.length > GSTR2B_MAX_INVOICES) {
+        return { ok: false, error: `GSTR-2B import is limited to ${GSTR2B_MAX_INVOICES} B2B invoices.` };
+      }
+    }
+  }
+  const record = {
+    id: uid('gstr2b'),
+    period,
+    gstin,
+    importedAt: new Date().toISOString(),
+    ...(input.sourceName ? { sourceName: String(input.sourceName).trim().slice(0, 80) } : {}),
+    invoices,
+  };
+  company.gst.gstr2bImports = [
+    record,
+    ...(company.gst.gstr2bImports ?? []).filter((entry) => entry.period !== period),
+  ]
+    .sort((a, b) => b.period.localeCompare(a.period) || b.importedAt.localeCompare(a.importedAt))
+    .slice(0, GSTR2B_MAX_IMPORTS);
+  return { ok: true, import: record };
+}
+
+export function deleteGstr2bImport(company, importId) {
+  const entry = (company.gst?.gstr2bImports ?? []).find((item) => item.id === importId);
+  if (!entry) return { ok: false, error: 'GSTR-2B import not found.' };
+  company.gst.gstr2bImports = company.gst.gstr2bImports.filter((item) => item.id !== importId);
+  return { ok: true, import: entry };
+}
+
 /** Normalises the GST registration, rate master, ledger tags and voucher tax detail. */
 export function normalizeGst(company) {
   const source = company.gst && typeof company.gst === 'object' ? company.gst : {};
@@ -1396,6 +1589,7 @@ export function normalizeGst(company) {
     stateCode: stateCode || (gstin ? gstin.slice(0, 2) : ''),
     rates: rates.length ? rates : seedGstRates(),
     filings,
+    gstr2bImports: normalizeGstr2bImports(source.gstr2bImports),
   };
 
   const seenRoles = new Set();

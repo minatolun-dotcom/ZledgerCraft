@@ -69,6 +69,7 @@ import {
   deleteEmployee,
   deleteGodown,
   deleteGstFiling,
+  deleteGstr2bImport,
   deleteGstRate,
   deleteOrder,
   deletePendingVoucher,
@@ -124,6 +125,7 @@ import {
   round2,
   runPayroll,
   saveBankStatement,
+  importGstr2b,
   recordGstFiling,
   saveGstSettings,
   saveGstTaxLedger,
@@ -182,8 +184,10 @@ import {
   forexSettlementMatching,
   godownStockSummary,
   groupSummary,
+  gstLateFee,
   gstReturns,
   gstr1Json,
+  gstr9Json,
   groupVouchers,
   groupChainKeys,
   inGroupKey,
@@ -205,6 +209,7 @@ import {
   trialBalance,
   voucherRegister,
   voucherSummary,
+  withholdingReturnWorkingPaper,
   withholdingSummary,
 } from './accounting.js';
 import { decryptBackup, encryptBackup, isEncryptedBackup } from './backup-crypto.js';
@@ -3386,6 +3391,103 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'gst-late-fee-form') {
+    const data = new FormData(form);
+    const result = gstLateFee({
+      returnType: data.get('returnType'),
+      period: data.get('period'),
+      dueDate: data.get('dueDate'),
+      filedDate: data.get('filedDate'),
+      taxAmount: data.get('taxAmount'),
+      annualTurnover: data.get('annualTurnover'),
+      nil: data.get('nil') === 'on',
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'gst-late-fee-error');
+      return;
+    }
+    view = { ...view, gstLateFee: result };
+    setFlash(
+      result.daysLate
+        ? `Estimated late fee ${fmtMoney(result.lateFee)} and interest ${fmtMoney(result.interest)} for ${result.daysLate} day${result.daysLate === 1 ? '' : 's'}.`
+        : 'The return is not late for the selected dates.',
+    );
+    render();
+    return;
+  }
+
+  if (form.id === 'gstr2b-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = importGstr2b(active, { json: data.get('json') });
+    if (!result.ok) {
+      showFormError(result.error, 'gstr2b-error');
+      return;
+    }
+    logAudit(
+      'gst.gstr2b.import',
+      `Imported GSTR-2B for ${result.import.period} with ${result.import.invoices.length} B2B invoice${result.import.invoices.length === 1 ? '' : 's'}.`,
+      active,
+      `GSTR-2B ${result.import.period}`,
+    );
+    persist();
+    setFlash(`Imported GSTR-2B for ${result.import.period}. Review the reconciliation before claiming ITC.`);
+    render();
+    return;
+  }
+
+  if (form.id === 'tds-return-form') {
+    const data = new FormData(form);
+    const active = company();
+    if (!active) return;
+    const result = withholdingReturnWorkingPaper(active, {
+      form: data.get('form'),
+      quarter: data.get('quarter'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'tds-return-error');
+      return;
+    }
+    if (!result.rows.length) {
+      showFormError(`No ${result.form} rows for ${result.quarter}. Change the quarter or add deductions first.`, 'tds-return-error');
+      return;
+    }
+    const filename = `Form-${result.form}-${result.quarter}-${result.tan || 'TAN'}`;
+    if (data.get('format') === 'json') {
+      downloadJsonFile(`${filename}.json`, {
+        form: result.form,
+        quarter: result.quarter,
+        period: { from: result.from, to: result.to },
+        tan: result.tan,
+        deductor: result.deductor,
+        rows: result.rows,
+        sections: result.sections,
+        summary: result.summary,
+        challans: result.challans,
+        note: result.note,
+      });
+    } else {
+      downloadCsvRows(`${filename}.csv`, [
+        ['Date', 'Voucher', 'Deductee', 'PAN', 'Section', 'Rate', 'Base', 'Tax'],
+        ...result.rows.map((row) => [
+          row.date,
+          row.ref,
+          row.party,
+          row.pan,
+          row.section,
+          row.rate,
+          row.base,
+          row.tax,
+        ]),
+      ]);
+    }
+    setFlash(`Downloaded ${result.form} ${result.quarter} working paper. Nothing was filed.`);
+    break;
+  }
+
   if (form.id === 'gst-filing-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -4917,6 +5019,27 @@ async function handleClick(event) {
       render();
       break;
     }
+    case 'delete-gstr2b': {
+      if (!can('master.delete')) {
+        requirePermission('master.delete');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Remove this GSTR-2B import? Purchase vouchers are not changed.')) break;
+      const result = deleteGstr2bImport(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'gst.gstr2b.delete',
+          `Removed the GSTR-2B import for ${result.import.period}.`,
+          active,
+          `GSTR-2B ${result.import.period}`,
+        );
+        persist();
+      }
+      setFlash(result.ok ? 'GSTR-2B import removed.' : result.error, result.ok ? 'ok' : 'warn');
+      render();
+      break;
+    }
     case 'edit-cost-category':
       navigate('costCentres', { editingCostCategoryId: trigger.dataset.id });
       break;
@@ -5981,6 +6104,18 @@ async function handleClick(event) {
       }
       downloadJsonFile(result.filename, result.payload);
       setFlash(`Downloaded GSTR-1 JSON for ${result.from} to ${result.to}. Nothing was transmitted.`);
+      break;
+    }
+    case 'download-gstr9': {
+      const active = company();
+      if (!active) break;
+      const result = gstr9Json(active, { from: active.fyStart, to: active.fyEnd });
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        break;
+      }
+      downloadJsonFile(result.filename, result.payload);
+      setFlash(`Downloaded the GSTR-9 working paper for ${result.from} to ${result.to}. Nothing was filed.`);
       break;
     }
     case 'download-einvoice': {

@@ -54,6 +54,21 @@ export function gstScreen() {
   const report = gstReturns(active, { from, to });
   const annual = gstAnnualSummary(active, { from: active.fyStart, to: active.fyEnd });
   const totals = ledgerTotals(active, { to });
+  const filings = [...(gst.filings ?? [])].sort(
+    (a, b) => b.period.localeCompare(a.period) || a.returnType.localeCompare(b.returnType),
+  );
+  const filingRows = filings
+    .map(
+      (filing) => `<tr>
+        <td><strong>${esc(filing.returnType)}</strong>${filing.status === 'Pending' ? ' <span class="badge attention">Pending</span>' : ''}</td>
+        <td>${esc(filing.period)}</td>
+        <td>${esc(dateLabel(filing.filedDate))}</td>
+        <td>${filing.arn ? `<span class="mono">${esc(filing.arn)}</span>` : '<span class="muted">Not recorded</span>'}</td>
+        <td class="muted small">${esc(filing.notes || '—')}</td>
+        <td class="row-actions"><button class="btn small danger" type="button" data-action="delete-gst-filing" data-id="${esc(filing.id)}"${can('master.write') ? '' : ' disabled'}>Remove</button></td>
+      </tr>`,
+    )
+    .join('');
 
   const stateOptions = [
     `<option value=""${gst.stateCode ? '' : ' selected'}>Choose a state…</option>`,
@@ -344,6 +359,30 @@ export function gstScreen() {
         </tfoot>
       </table></div>`,
       'A negative head is input credit carried forward. Reverse-charge tax appears in both liability and ITC so it nets to zero on the return.',
+    )}
+    ${panel(
+      'Filing acknowledgements',
+      `<form id="gst-filing-form" class="inline-form" novalidate>
+        <select name="returnType" aria-label="Return type">
+          <option value="GSTR-1">GSTR-1</option>
+          <option value="GSTR-3B">GSTR-3B</option>
+          <option value="GSTR-9">GSTR-9</option>
+        </select>
+        <label class="field inline-field"><span>Period</span><input name="period" type="month" value="${esc(to.slice(0, 7))}" required></label>
+        <label class="field inline-field"><span>Filed on</span><input name="filedDate" type="date" value="${esc(todayIso())}" required></label>
+        <input name="arn" maxlength="40" placeholder="ARN / acknowledgement no." aria-label="ARN or acknowledgement number">
+        <input name="notes" maxlength="200" placeholder="Notes (optional)" aria-label="Filing notes">
+        <button class="btn small" type="submit"${can('master.write') ? '' : ' disabled'}>Record manual filing</button>
+        <p id="gst-filing-error" class="form-error" role="alert"></p>
+      </form>
+      <p class="muted small">Record this only after uploading the return on the GST portal yourself. The ARN and date are your acknowledgement; the app does not call GSTN or verify the filing.</p>
+      ${filings.length
+        ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+            <thead><tr><th>Return</th><th>Period</th><th>Filed</th><th>ARN</th><th>Notes</th><th></th></tr></thead>
+            <tbody>${filingRows}</tbody>
+          </table></div>`
+        : '<p class="muted">No filing acknowledgements recorded yet.</p>'}`,
+      'A local filing history for manual portal submissions. It does not create a return, transmit data or claim that a return was accepted by GSTN.',
     )}
     ${panel(
       `GST vouchers <span class="count">${report.count}</span>`,

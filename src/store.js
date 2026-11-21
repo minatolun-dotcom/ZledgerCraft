@@ -1358,6 +1358,31 @@ export function normalizeGst(company) {
     : '';
   const gstin = isValidGstin(source.gstin) ? String(source.gstin).trim().toUpperCase() : '';
   const clean = (value, limit) => String(value ?? '').trim().slice(0, limit);
+  const seenFilings = new Set();
+  const filings = (Array.isArray(source.filings) ? source.filings : [])
+    .filter((filing) => filing && typeof filing === 'object')
+    .map((filing) => {
+      const returnType = ['GSTR-1', 'GSTR-3B', 'GSTR-9'].includes(filing.returnType)
+        ? filing.returnType
+        : null;
+      const period = String(filing.period ?? '');
+      if (!returnType || !/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(period)) return null;
+      if (!isValidIsoDate(String(filing.filedDate ?? ''))) return null;
+      const key = `${returnType}|${period}`;
+      if (seenFilings.has(key)) return null;
+      seenFilings.add(key);
+      return {
+        id: String(filing.id || uid('gstfiling')).slice(0, 80),
+        returnType,
+        period,
+        filedDate: String(filing.filedDate),
+        status: filing.status === 'Pending' ? 'Pending' : 'Filed',
+        ...(filing.arn ? { arn: String(filing.arn).trim().toUpperCase().slice(0, 40) } : {}),
+        ...(filing.notes ? { notes: String(filing.notes).trim().slice(0, 200) } : {}),
+        ...(filing.createdAt ? { createdAt: String(filing.createdAt) } : {}),
+      };
+    })
+    .filter(Boolean);
   company.gst = {
     enabled: Boolean(source.enabled),
     gstin,
@@ -1370,6 +1395,7 @@ export function normalizeGst(company) {
     email: clean(source.email, 120).toLowerCase(),
     stateCode: stateCode || (gstin ? gstin.slice(0, 2) : ''),
     rates: rates.length ? rates : seedGstRates(),
+    filings,
   };
 
   const seenRoles = new Set();
@@ -1506,6 +1532,50 @@ export function saveGstSettings(company, input = {}) {
     }
   }
   return { ok: true, gst: company.gst, created };
+}
+
+/** Record a manual GST filing acknowledgement after uploading on the portal. */
+export function recordGstFiling(company, input = {}) {
+  if (!company.gst?.enabled) return { ok: false, error: 'Enable GST before recording a filing.' };
+  const returnType = ['GSTR-1', 'GSTR-3B', 'GSTR-9'].includes(input.returnType)
+    ? input.returnType
+    : null;
+  if (!returnType) return { ok: false, error: 'Choose GSTR-1, GSTR-3B or GSTR-9.' };
+  const period = String(input.period ?? '').trim();
+  if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(period)) {
+    return { ok: false, error: 'Choose the return period as YYYY-MM.' };
+  }
+  const filedDate = String(input.filedDate ?? '').trim();
+  if (!isValidIsoDate(filedDate)) return { ok: false, error: 'Enter a valid filed date.' };
+  const existing = (company.gst.filings ?? []).find(
+    (filing) => filing.returnType === returnType && filing.period === period,
+  );
+  if (existing) {
+    return { ok: false, error: `${returnType} for ${period} is already recorded. Delete it before replacing the acknowledgement.` };
+  }
+  const arn = String(input.arn ?? '').trim().toUpperCase().slice(0, 40);
+  const notes = String(input.notes ?? '').trim().slice(0, 200);
+  const filing = {
+    id: uid('gstfiling'),
+    returnType,
+    period,
+    filedDate,
+    status: input.status === 'Pending' ? 'Pending' : 'Filed',
+    ...(arn ? { arn } : {}),
+    ...(notes ? { notes } : {}),
+    createdAt: new Date().toISOString(),
+  };
+  company.gst.filings = [...(company.gst.filings ?? []), filing].sort(
+    (a, b) => b.period.localeCompare(a.period) || a.returnType.localeCompare(b.returnType),
+  );
+  return { ok: true, filing };
+}
+
+export function deleteGstFiling(company, filingId) {
+  const filing = (company.gst?.filings ?? []).find((entry) => entry.id === filingId);
+  if (!filing) return { ok: false, error: 'Filing record not found.' };
+  company.gst.filings = company.gst.filings.filter((entry) => entry.id !== filingId);
+  return { ok: true, filing };
 }
 
 function normalizeEwayPartBEntry(entry) {

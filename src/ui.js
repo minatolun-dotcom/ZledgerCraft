@@ -68,6 +68,7 @@ import {
   deleteCostCentre,
   deleteEmployee,
   deleteGodown,
+  deleteGstFiling,
   deleteGstRate,
   deleteOrder,
   deletePendingVoucher,
@@ -123,6 +124,7 @@ import {
   round2,
   runPayroll,
   saveBankStatement,
+  recordGstFiling,
   saveGstSettings,
   saveGstTaxLedger,
   savePayrollSettings,
@@ -3384,6 +3386,35 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'gst-filing-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = recordGstFiling(active, {
+      returnType: data.get('returnType'),
+      period: data.get('period'),
+      filedDate: data.get('filedDate'),
+      arn: data.get('arn'),
+      notes: data.get('notes'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'gst-filing-error');
+      return;
+    }
+    logAudit(
+      'gst.filing.record',
+      `Recorded manual ${result.filing.returnType} acknowledgement for ${result.filing.period}${result.filing.arn ? ` (${result.filing.arn})` : ''}.`,
+      active,
+      `${result.filing.returnType} ${result.filing.period}`,
+    );
+    persist();
+    setFlash(`${result.filing.returnType} for ${result.filing.period} recorded as a manual filing.`);
+    render();
+    return;
+  }
+
   if (form.id === 'gst-rate-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -4862,6 +4893,27 @@ async function handleClick(event) {
       if (result.ok) logAudit('gst.rate.delete', `Deleted GST rate ${result.rate.label}.`, active, result.rate.label);
       persist();
       setFlash(result.ok ? `GST rate ${result.rate.label} deleted.` : result.error, result.ok ? 'ok' : 'warn');
+      render();
+      break;
+    }
+    case 'delete-gst-filing': {
+      if (!can('master.delete')) {
+        requirePermission('master.delete');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Remove this manual filing acknowledgement?')) break;
+      const result = deleteGstFiling(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'gst.filing.delete',
+          `Removed ${result.filing.returnType} filing record for ${result.filing.period}.`,
+          active,
+          `${result.filing.returnType} ${result.filing.period}`,
+        );
+        persist();
+      }
+      setFlash(result.ok ? 'Filing record removed.' : result.error, result.ok ? 'ok' : 'warn');
       render();
       break;
     }

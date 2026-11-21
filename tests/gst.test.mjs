@@ -7,6 +7,7 @@ import {
   addStockItem,
   addVoucher,
   createCompany,
+  deleteGstFiling,
   deleteGstRate,
   updateGstRate,
   emptyState,
@@ -16,6 +17,7 @@ import {
   gstTaxLedgers,
   importState,
   round2,
+  recordGstFiling,
   saveGstSettings,
   updateVoucher,
 } from '../src/store.js';
@@ -760,4 +762,40 @@ test('GSTR-1 JSON exports B2B, B2C and period validation without transmitting', 
 
   company.gst.gstin = '';
   assert.equal(gstr1Json(company, { from: '2026-04-01', to: '2026-04-30' }).ok, false);
+});
+
+test('manual GST filing acknowledgements are recorded, deduplicated and backed up', () => {
+  const { company } = fixture();
+  const recorded = recordGstFiling(company, {
+    returnType: 'GSTR-1',
+    period: '2026-04',
+    filedDate: '2026-05-11',
+    arn: ' AA270426000001 ',
+    notes: 'Uploaded manually',
+  });
+  assert.equal(recorded.ok, true, recorded.error);
+  assert.equal(recorded.filing.arn, 'AA270426000001');
+  assert.equal(company.gst.filings.length, 1);
+
+  const duplicate = recordGstFiling(company, {
+    returnType: 'GSTR-1',
+    period: '2026-04',
+    filedDate: '2026-05-12',
+  });
+  assert.equal(duplicate.ok, false);
+  assert.match(duplicate.error, /already recorded/);
+  assert.equal(recordGstFiling(company, {
+    returnType: 'GSTR-1',
+    period: '2026-13',
+    filedDate: '2026-05-12',
+  }).ok, false);
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  assert.equal(restored.state.companies[0].gst.filings[0].arn, 'AA270426000001');
+  assert.equal(deleteGstFiling(restored.state.companies[0], restored.state.companies[0].gst.filings[0].id).ok, true);
+  assert.equal(restored.state.companies[0].gst.filings.length, 0);
 });

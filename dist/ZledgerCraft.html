@@ -3806,6 +3806,31 @@ function normalizeGst(company) {
     : '';
   const gstin = isValidGstin(source.gstin) ? String(source.gstin).trim().toUpperCase() : '';
   const clean = (value, limit) => String(value ?? '').trim().slice(0, limit);
+  const seenFilings = new Set();
+  const filings = (Array.isArray(source.filings) ? source.filings : [])
+    .filter((filing) => filing && typeof filing === 'object')
+    .map((filing) => {
+      const returnType = ['GSTR-1', 'GSTR-3B', 'GSTR-9'].includes(filing.returnType)
+        ? filing.returnType
+        : null;
+      const period = String(filing.period ?? '');
+      if (!returnType || !/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(period)) return null;
+      if (!isValidIsoDate(String(filing.filedDate ?? ''))) return null;
+      const key = `${returnType}|${period}`;
+      if (seenFilings.has(key)) return null;
+      seenFilings.add(key);
+      return {
+        id: String(filing.id || uid('gstfiling')).slice(0, 80),
+        returnType,
+        period,
+        filedDate: String(filing.filedDate),
+        status: filing.status === 'Pending' ? 'Pending' : 'Filed',
+        ...(filing.arn ? { arn: String(filing.arn).trim().toUpperCase().slice(0, 40) } : {}),
+        ...(filing.notes ? { notes: String(filing.notes).trim().slice(0, 200) } : {}),
+        ...(filing.createdAt ? { createdAt: String(filing.createdAt) } : {}),
+      };
+    })
+    .filter(Boolean);
   company.gst = {
     enabled: Boolean(source.enabled),
     gstin,
@@ -3818,6 +3843,7 @@ function normalizeGst(company) {
     email: clean(source.email, 120).toLowerCase(),
     stateCode: stateCode || (gstin ? gstin.slice(0, 2) : ''),
     rates: rates.length ? rates : seedGstRates(),
+    filings,
   };
 
   const seenRoles = new Set();
@@ -3954,6 +3980,50 @@ function saveGstSettings(company, input = {}) {
     }
   }
   return { ok: true, gst: company.gst, created };
+}
+
+/** Record a manual GST filing acknowledgement after uploading on the portal. */
+function recordGstFiling(company, input = {}) {
+  if (!company.gst?.enabled) return { ok: false, error: 'Enable GST before recording a filing.' };
+  const returnType = ['GSTR-1', 'GSTR-3B', 'GSTR-9'].includes(input.returnType)
+    ? input.returnType
+    : null;
+  if (!returnType) return { ok: false, error: 'Choose GSTR-1, GSTR-3B or GSTR-9.' };
+  const period = String(input.period ?? '').trim();
+  if (!/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(period)) {
+    return { ok: false, error: 'Choose the return period as YYYY-MM.' };
+  }
+  const filedDate = String(input.filedDate ?? '').trim();
+  if (!isValidIsoDate(filedDate)) return { ok: false, error: 'Enter a valid filed date.' };
+  const existing = (company.gst.filings ?? []).find(
+    (filing) => filing.returnType === returnType && filing.period === period,
+  );
+  if (existing) {
+    return { ok: false, error: `${returnType} for ${period} is already recorded. Delete it before replacing the acknowledgement.` };
+  }
+  const arn = String(input.arn ?? '').trim().toUpperCase().slice(0, 40);
+  const notes = String(input.notes ?? '').trim().slice(0, 200);
+  const filing = {
+    id: uid('gstfiling'),
+    returnType,
+    period,
+    filedDate,
+    status: input.status === 'Pending' ? 'Pending' : 'Filed',
+    ...(arn ? { arn } : {}),
+    ...(notes ? { notes } : {}),
+    createdAt: new Date().toISOString(),
+  };
+  company.gst.filings = [...(company.gst.filings ?? []), filing].sort(
+    (a, b) => b.period.localeCompare(a.period) || a.returnType.localeCompare(b.returnType),
+  );
+  return { ok: true, filing };
+}
+
+function deleteGstFiling(company, filingId) {
+  const filing = (company.gst?.filings ?? []).find((entry) => entry.id === filingId);
+  if (!filing) return { ok: false, error: 'Filing record not found.' };
+  company.gst.filings = company.gst.filings.filter((entry) => entry.id !== filingId);
+  return { ok: true, filing };
 }
 
 function normalizeEwayPartBEntry(entry) {
@@ -22456,6 +22526,21 @@ function gstScreen() {
   const report = gstReturns(active, { from, to });
   const annual = gstAnnualSummary(active, { from: active.fyStart, to: active.fyEnd });
   const totals = ledgerTotals(active, { to });
+  const filings = [...(gst.filings ?? [])].sort(
+    (a, b) => b.period.localeCompare(a.period) || a.returnType.localeCompare(b.returnType),
+  );
+  const filingRows = filings
+    .map(
+      (filing) => `<tr>
+        <td><strong>${esc(filing.returnType)}</strong>${filing.status === 'Pending' ? ' <span class="badge attention">Pending</span>' : ''}</td>
+        <td>${esc(filing.period)}</td>
+        <td>${esc(dateLabel(filing.filedDate))}</td>
+        <td>${filing.arn ? `<span class="mono">${esc(filing.arn)}</span>` : '<span class="muted">Not recorded</span>'}</td>
+        <td class="muted small">${esc(filing.notes || '—')}</td>
+        <td class="row-actions"><button class="btn small danger" type="button" data-action="delete-gst-filing" data-id="${esc(filing.id)}"${can('master.write') ? '' : ' disabled'}>Remove</button></td>
+      </tr>`,
+    )
+    .join('');
 
   const stateOptions = [
     `<option value=""${gst.stateCode ? '' : ' selected'}>Choose a state…</option>`,
@@ -22746,6 +22831,30 @@ function gstScreen() {
         </tfoot>
       </table></div>`,
       'A negative head is input credit carried forward. Reverse-charge tax appears in both liability and ITC so it nets to zero on the return.',
+    )}
+    ${panel(
+      'Filing acknowledgements',
+      `<form id="gst-filing-form" class="inline-form" novalidate>
+        <select name="returnType" aria-label="Return type">
+          <option value="GSTR-1">GSTR-1</option>
+          <option value="GSTR-3B">GSTR-3B</option>
+          <option value="GSTR-9">GSTR-9</option>
+        </select>
+        <label class="field inline-field"><span>Period</span><input name="period" type="month" value="${esc(to.slice(0, 7))}" required></label>
+        <label class="field inline-field"><span>Filed on</span><input name="filedDate" type="date" value="${esc(todayIso())}" required></label>
+        <input name="arn" maxlength="40" placeholder="ARN / acknowledgement no." aria-label="ARN or acknowledgement number">
+        <input name="notes" maxlength="200" placeholder="Notes (optional)" aria-label="Filing notes">
+        <button class="btn small" type="submit"${can('master.write') ? '' : ' disabled'}>Record manual filing</button>
+        <p id="gst-filing-error" class="form-error" role="alert"></p>
+      </form>
+      <p class="muted small">Record this only after uploading the return on the GST portal yourself. The ARN and date are your acknowledgement; the app does not call GSTN or verify the filing.</p>
+      ${filings.length
+        ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
+            <thead><tr><th>Return</th><th>Period</th><th>Filed</th><th>ARN</th><th>Notes</th><th></th></tr></thead>
+            <tbody>${filingRows}</tbody>
+          </table></div>`
+        : '<p class="muted">No filing acknowledgements recorded yet.</p>'}`,
+      'A local filing history for manual portal submissions. It does not create a return, transmit data or claim that a return was accepted by GSTN.',
     )}
     ${panel(
       `GST vouchers <span class="count">${report.count}</span>`,
@@ -27753,6 +27862,35 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'gst-filing-form') {
+    if (!can('master.write')) {
+      requirePermission('master.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = recordGstFiling(active, {
+      returnType: data.get('returnType'),
+      period: data.get('period'),
+      filedDate: data.get('filedDate'),
+      arn: data.get('arn'),
+      notes: data.get('notes'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'gst-filing-error');
+      return;
+    }
+    logAudit(
+      'gst.filing.record',
+      `Recorded manual ${result.filing.returnType} acknowledgement for ${result.filing.period}${result.filing.arn ? ` (${result.filing.arn})` : ''}.`,
+      active,
+      `${result.filing.returnType} ${result.filing.period}`,
+    );
+    persist();
+    setFlash(`${result.filing.returnType} for ${result.filing.period} recorded as a manual filing.`);
+    render();
+    return;
+  }
+
   if (form.id === 'gst-rate-form') {
     if (!can('master.write')) {
       requirePermission('master.write');
@@ -29231,6 +29369,27 @@ async function handleClick(event) {
       if (result.ok) logAudit('gst.rate.delete', `Deleted GST rate ${result.rate.label}.`, active, result.rate.label);
       persist();
       setFlash(result.ok ? `GST rate ${result.rate.label} deleted.` : result.error, result.ok ? 'ok' : 'warn');
+      render();
+      break;
+    }
+    case 'delete-gst-filing': {
+      if (!can('master.delete')) {
+        requirePermission('master.delete');
+        break;
+      }
+      const active = company();
+      if (!active || !window.confirm('Remove this manual filing acknowledgement?')) break;
+      const result = deleteGstFiling(active, trigger.dataset.id);
+      if (result.ok) {
+        logAudit(
+          'gst.filing.delete',
+          `Removed ${result.filing.returnType} filing record for ${result.filing.period}.`,
+          active,
+          `${result.filing.returnType} ${result.filing.period}`,
+        );
+        persist();
+      }
+      setFlash(result.ok ? 'Filing record removed.' : result.error, result.ok ? 'ok' : 'warn');
       render();
       break;
     }

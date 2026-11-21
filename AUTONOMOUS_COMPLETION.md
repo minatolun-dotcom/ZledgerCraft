@@ -46,10 +46,15 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 - Full suite: 362 tests (361 pass, 1 skipped), 0 failures.
 - Build: 1,310.6 kB.
-- Targeted suites: inventory, bank, budgets, payroll.
+- Targeted suites: inventory, bank, budgets, currency, bulk vouchers, payroll.
+- Latest deployment: https://1c51254f.zledgercraft.pages.dev (HTTP 200).
+- Projects 1–7 are complete; no code project remains open.
 
-## Exact next action
+## Statutory filing boundary
 
-Continue with the remaining statutory filing boundary and final verification. Statutory filing
-cannot be completed without GSTN/IRP/TRACES credentials and authorization; do not
-simulate submission.
+Project 8 cannot be completed in this environment. Credentialed GSTN/GSP,
+IRP/e-invoice and TRACES/TAN access plus an authorised filing environment are
+required. The app keeps local returns, e-invoice/e-way drafts, challans and the
+compliance calendar, but no portal submission, acknowledgement or filing-status
+feed was simulated. A maintainer with those credentials can build the provider
+adapters without changing the existing local working papers.

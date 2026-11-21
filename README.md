@@ -597,10 +597,12 @@ disabled.
   transmit, verify or claim acceptance. Imported GSTR-2B statements are compared
   locally against purchase and debit-note vouchers.
 - E-invoice register for a period: seller profile from GST registration, every
-  outward sales invoice with buyer GSTIN/address, B2B eligibility, readiness
-  blockers and warnings for missing GSTIN, address, PIN, HSN/SAC or unit, and a
-  draft NIC-style JSON download per B2B invoice. No IRN, QR code or IRP response
-  is produced and the aggregate-turnover test is not applied.
+  outward sales invoice, credit note and debit note with buyer GSTIN/address,
+  B2B eligibility, readiness blockers and warnings for missing GSTIN, address,
+  PIN, HSN/SAC or unit, and a draft NIC-style JSON download per B2B document.
+  Mixed-rate invoices split their item lines by GST rate, and credit/debit notes
+  use CRN/DBN document types with the linked original invoice. No IRN, QR code
+  or IRP response is produced and the aggregate-turnover test is not applied.
 - E-way bill register for a period: outward invoices at or above a configurable
   minimum (₹50,000 by default), consignee, destination state, taxable and invoice
   value, Part A readiness notes, saved Part B transporter, vehicle and distance
@@ -829,7 +831,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | --- | --- |
 | Inventory | Partial — units, stock groups/items with reorder levels and low-stock flags, item lines on four voucher types, weighted-average stock summary and item movements, godowns, stock transfers, optional batch/expiry tracking, godown/batch balances, stock ageing, reorder watch, price list, dated stock counts with book/counted differences and batch-level count lines, partially fulfilled sales/purchase orders, multi-level phantom BOMs, production and wastage with automatic stock/WIP production journals; no alternative components/by-products, job work, FIFO/expiry batch costing, partial-completion WIP or automatic opening-stock journals |
 | GST registration, rates and tax on vouchers | Partial — GSTIN and home state, registration/party contacts, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and SAC on service ledgers, voucher- and line-level tax on four voucher types, credit/debit-note invoice links and GST with TDS/TCS on one voucher; no exports/SEZ, composition scheme, separate RCM payable, ITC reversal or GST on advances |
-| GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary, GSTR-3B liability/ITC summary with net payable, GSTR-2B B2B import/reconciliation, GSTR-9 working paper/JSON, a late-fee/interest estimator, monthly GSTR-1 JSON, an ARN/filing-history register, B2B e-invoice drafts, e-way drafts with Part B and distance-based validity, and tax-audit reconciliations; no CMP-08/GSTR-4, IRN/QR, consolidated e-way, per-item e-invoice rates/discounts, Form 16/16A or Form 3CD |
+| GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary, GSTR-3B liability/ITC summary with net payable, GSTR-2B B2B import/reconciliation, GSTR-9 working paper/JSON, a late-fee/interest estimator, monthly GSTR-1 JSON, an ARN/filing-history register, B2B e-invoice drafts for invoices and credit/debit notes with mixed-rate line splitting, e-way drafts with Part B and distance-based validity, and tax-audit reconciliations; no CMP-08/GSTR-4, IRN/QR, consolidated e-way, e-invoice discounts/charges, Form 16/16A or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, 26Q/27Q/27EQ working papers, and challan tracking with optional late fee/interest; no signed certificates, TRACES, threshold enforcement, higher-rate/no-PAN logic or journal deductions |
 | Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, PAN/UAN/ESIC and bank details, joining/exit and paid-days proration, casual/sick/earned leave balances and a leave register, one regular journal-posting run per month plus supplementary and signed adjustment runs, employee-wise salary register, printable payslips and a bank-transfer CSV, employee and optional employer PF/ESI, a fixed PT amount, and EPF ECR/ESI/24Q/16 CSV/JSON working papers; no automatic leave-to-paid-days link, overtime, general formula language, state PT slabs, portal filing or bank payment workflow |
 | Bank reconciliation and statement import | Covered — CSV, OFX, QIF and MT940 statement import, optional opening/closing balance validation, auto/manual matching, adjustment posting and book balance; no Excel or live bank feeds |

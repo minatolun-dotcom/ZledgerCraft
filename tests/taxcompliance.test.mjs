@@ -204,6 +204,63 @@ test('e-invoice register builds a ready NIC-style draft for a B2B intra-state sa
   assert.equal(row.payload.ValDtls.TotInvVal, 1180);
 });
 
+test('e-invoice drafts carry each line GST rate from a mixed-rate invoice', () => {
+  const { company, customer, item } = fixture();
+const mixed = addVoucher(company, {
+    type: 'Sales',
+    date: '2026-04-05',
+    lines: [
+      { ledgerId: customer.id, side: 'Dr', amount: 1705 },
+      { ledgerId: findLedgerByName(company, 'Sales').id, side: 'Cr', amount: 1000, gstRateId: rateId(company, 18) },
+      { ledgerId: findLedgerByName(company, 'Sales').id, side: 'Cr', amount: 500, gstRateId: rateId(company, 5) },
+    ],
+    items: [
+      { stockItemId: item.id, qty: 10, rate: 100 },
+      { stockItemId: item.id, qty: 5, rate: 100 },
+    ],
+    gst: { placeOfSupply: '27', partyGstin: '27AAACR1234F1Z2' },
+  });
+  assert.equal(mixed.ok, true, mixed.error);
+
+  const report = eInvoiceRegister(company, { from: '2026-04-01', to: '2026-04-30' });
+  const payload = report.rows.find((row) => row.id === mixed.voucher.id).payload;
+  assert.deepEqual(payload.ItemList.map((line) => [line.GstRt, line.AssAmt]), [[18, 1000], [5, 500]]);
+  assert.equal(payload.ValDtls.CgstVal, 102.5);
+  assert.equal(payload.ValDtls.SgstVal, 102.5);
+  assert.equal(payload.ValDtls.TotInvVal, 1705);
+});
+
+test('e-invoice drafts include credit notes with the original invoice reference', () => {
+  const { company, customer, item } = fixture();
+  const invoice = sale(company, { customer, item });
+  const note = addVoucher(company, {
+    type: 'CreditNote',
+    date: '2026-04-10',
+    lines: [
+      { ledgerId: findLedgerByName(company, 'Sales').id, side: 'Dr', amount: 1000 },
+      { ledgerId: customer.id, side: 'Cr', amount: 1180 },
+    ],
+    items: [{ stockItemId: item.id, qty: 10, rate: 100 }],
+    gst: {
+      rateId: rateId(company, 18),
+      placeOfSupply: '27',
+      partyGstin: '27AAACR1234F1Z2',
+      originalVoucherId: invoice.id,
+    },
+  });
+  assert.equal(note.ok, true, note.error);
+
+  const report = eInvoiceRegister(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(report.count, 2);
+  const row = report.rows.find((entry) => entry.id === note.voucher.id);
+  assert.equal(row.documentType, 'Credit note');
+  assert.equal(row.payload.DocDtls.Typ, 'CRN');
+  assert.equal(row.payload.RefDtls.InvNo, String(invoice.no));
+  assert.equal(row.payload.RefDtls.InvDt, '05/04/2026');
+  assert.equal(row.payload.ItemList[0].GstRt, 18);
+  assert.equal(row.payload.ValDtls.TotInvVal, 1180);
+});
+
 test('e-invoice readiness flags B2C invoices and missing buyer address fields', () => {
   const { company, customer, item, cash } = fixture();
   const b2c = addVoucher(company, {

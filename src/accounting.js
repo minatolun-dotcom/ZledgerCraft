@@ -5129,13 +5129,63 @@ function eInvoiceLineRows(company, voucher, document) {
   });
 }
 
+function eInvoiceRatedLines(document, lines) {
+  const buckets = (document.rateBreakup ?? [])
+    .filter((bucket) => Number(bucket.taxable) > 0)
+    .map((bucket) => ({ rate: bucket.rate, cessRate: bucket.cessRate, remaining: Number(bucket.taxable) }));
+  if (buckets.length <= 1) {
+    return lines.map((line) => ({
+      ...line,
+      rate: line.rate ?? buckets[0]?.rate ?? document.rate,
+      cessRate: line.cessRate ?? buckets[0]?.cessRate ?? document.cessRate,
+    }));
+  }
+  const rated = [];
+  let bucketIndex = 0;
+  for (const line of lines) {
+    let left = round2(line.taxable);
+    while (left > 0.005 && bucketIndex < buckets.length) {
+      const bucket = buckets[bucketIndex];
+      const take = round2(Math.min(left, bucket.remaining));
+      if (take <= 0) {
+        bucketIndex += 1;
+        continue;
+      }
+      const share = line.taxable > 0 ? take / line.taxable : 0;
+      rated.push({
+        ...line,
+        taxable: take,
+        qty: round3((Number(line.qty) || 0) * share),
+        rate: bucket.rate,
+        cessRate: bucket.cessRate,
+      });
+      left = round2(left - take);
+      bucket.remaining = round2(bucket.remaining - take);
+      if (bucket.remaining <= 0.005 && bucketIndex < buckets.length - 1) {
+        bucketIndex += 1;
+      }
+    }
+    if (left > 0.005) {
+      rated.push({ ...line, taxable: left, rate: document.rate, cessRate: document.cessRate });
+    }
+  }
+  return rated;
+}
+
 function eInvoicePayload(company, document, voucher, seller, buyer, lines) {
   const intra = document.supplyType === 'Intra';
+  const docType = document.type === 'CreditNote' ? 'CRN' : document.type === 'DebitNote' ? 'DBN' : 'INV';
+  const original = document.originalVoucherId
+    ? (company.vouchers ?? []).find((entry) => entry.id === document.originalVoucherId)
+    : null;
   const gstRate = Number(document.rate) || 0;
   const cessRate = Number(document.cessRate) || 0;
-  const itemList = lines.map((line, index) => {
-    const tax = round2((line.taxable * gstRate) / 100);
-    const cess = round2((line.taxable * cessRate) / 100);
+  const ratedLines = eInvoiceRatedLines(document, lines);
+  const itemList = ratedLines.map((line, index) => {
+    const lineRate = Number(line.rate ?? gstRate) || 0;
+    const lineCessRate = Number(line.cessRate ?? cessRate) || 0;
+    const tax = round2((line.taxable * lineRate) / 100);
+    const cess = round2((line.taxable * lineCessRate) / 100);
     return {
       SlNo: String(index + 1),
       PrdDesc: line.description,
@@ -5143,16 +5193,16 @@ function eInvoicePayload(company, document, voucher, seller, buyer, lines) {
       HsnCd: line.hsn,
       Qty: Number(line.qty) || 0,
       Unit: line.unit,
-      UnitPrice: round2(line.unitPrice),
+      UnitPrice: round2(line.qty ? line.taxable / line.qty : line.unitPrice),
       TotAmt: round2(line.taxable),
       Discount: 0,
       PreTaxVal: 0,
       AssAmt: round2(line.taxable),
-      GstRt: gstRate,
+      GstRt: lineRate,
       IgstAmt: intra ? 0 : tax,
       CgstAmt: intra ? round2(tax / 2) : 0,
       SgstAmt: intra ? round2(tax / 2) : 0,
-      CesRt: cessRate,
+      CesRt: lineCessRate,
       CesAmt: cess,
       CesNonAdvlAmt: 0,
       StateCesRt: 0,
@@ -5171,7 +5221,10 @@ function eInvoicePayload(company, document, voucher, seller, buyer, lines) {
       RegRev: document.reverseCharge ? 'Y' : 'N',
       IgstOnIntra: 'N',
     },
-    DocDtls: { Typ: 'INV', No: String(document.ref || document.no), Dt: gstDate(document.date) },
+    DocDtls: { Typ: docType, No: String(document.ref || document.no), Dt: gstDate(document.date) },
+    ...(docType !== 'INV' && original
+      ? { RefDtls: { InvNo: String(original.bill?.ref || original.no), InvDt: gstDate(original.date) } }
+      : {}),
     SellerDtls: {
       Gstin: seller.gstin,
       LglNm: seller.legalName,
@@ -5223,7 +5276,9 @@ export function eInvoiceRegister(company, filters = {}) {
   const to = filters.to || company.fyEnd;
   const returns = gstReturns(company, { from, to });
   const seller = sellerProfile(company);
-  const sales = returns.documents.filter((document) => document.type === 'Sales');
+  const sales = returns.documents.filter((document) =>
+    ['Sales', 'CreditNote', 'DebitNote'].includes(document.type),
+  );
   const rows = sales.map((document) => {
     const voucher = (company.vouchers ?? []).find((entry) => entry.id === document.id);
     const buyer = buyerProfile(company, voucher, document);
@@ -5247,6 +5302,7 @@ export function eInvoiceRegister(company, filters = {}) {
     return {
       ...document,
       voucherId: document.id,
+      documentType: document.type === 'CreditNote' ? 'Credit note' : document.type === 'DebitNote' ? 'Debit note' : 'Invoice',
       eligible: Boolean(document.partyGstin && company.gst?.enabled),
       seller,
       buyer,

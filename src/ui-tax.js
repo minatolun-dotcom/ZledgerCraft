@@ -552,7 +552,7 @@ export function eInvoiceScreen() {
           ? '<span class="badge">ready</span>'
           : `<span class="badge overdue">${row.blockers.length} blocker${row.blockers.length === 1 ? '' : 's'}</span>`;
       return `<tr>
-        <td><strong>${esc(row.ref)}</strong><div class="muted small">${esc(dateLabel(row.date))}</div></td>
+        <td><strong>${esc(row.ref)}</strong><div class="muted small">${esc(row.documentType)} · ${esc(dateLabel(row.date))}</div>${row.originalRef ? `<div class="muted small">Against ${esc(row.originalRef)}</div>` : ''}</td>
         <td>${esc(row.buyer.legalName || row.party)}<div class="muted small">${row.buyer.gstin ? esc(row.buyer.gstin) : 'Unregistered / B2C'}</div></td>
         <td>${esc(row.placeOfSupplyName || row.placeOfSupply)}<div class="muted small">${esc(row.supplyType)}</div></td>
         <td class="num">${money(row.taxable)}</td>
@@ -597,18 +597,18 @@ export function eInvoiceScreen() {
         <button class="btn small" type="submit">Apply</button>
       </form>
       <div class="ratio-grid">
-        <div class="ratio-card"><span class="ratio-label">Sales invoices</span><strong>${report.count}</strong><span class="muted small">${report.b2cCount} B2C</span></div>
+        <div class="ratio-card"><span class="ratio-label">Outward documents</span><strong>${report.count}</strong><span class="muted small">${report.b2cCount} B2C</span></div>
         <div class="ratio-card"><span class="ratio-label">B2B eligible</span><strong>${report.eligibleCount}</strong><span class="muted small">${money(report.eligibleValue)} invoice value</span></div>
         <div class="ratio-card"><span class="ratio-label">Ready drafts</span><strong>${report.readyCount}</strong><span class="muted small">${report.blockedCount} need review</span></div>
-        <div class="ratio-card"><span class="ratio-label">Sales value</span><strong>${money(report.total)}</strong><span class="muted small">Invoices in this period</span></div>
+        <div class="ratio-card"><span class="ratio-label">Outward value</span><strong>${money(report.total)}</strong><span class="muted small">Invoices and notes in this period</span></div>
       </div>
       ${report.rows.length
         ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
             <thead><tr><th>Invoice</th><th>Buyer</th><th>Place of supply</th><th class="num">Taxable</th><th class="num">Invoice total</th><th>Status</th><th>Readiness notes</th><th></th></tr></thead>
             <tbody>${rows}</tbody>
           </table></div>`
-        : '<p class="muted">No sales invoices carry GST in this period.</p>'}`,
-      'Draft JSON follows the NIC e-invoice field names for review and manual upload. No IRN, QR code or IRP acknowledgement is generated.',
+        : '<p class="muted">No sales invoices, credit notes or debit notes carry GST in this period.</p>'}`,
+      'Draft JSON follows the NIC e-invoice field names for review and manual upload, including CRN/DBN document types with the linked original invoice. No IRN, QR code or IRP acknowledgement is generated.',
     )}`;
 }
 

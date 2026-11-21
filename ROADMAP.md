@@ -200,7 +200,7 @@ Status: **Done**, **Partial**, **Missing**.
 | GST registration, tax ledgers, HSN/SAC and rate setup | Done (Stage 3; GSTIN, home state, rate master, tax ledgers and HSN on stock items; no SAC master) |
 | GST on vouchers: CGST/SGST/IGST, cess, reverse charge, exempt/nil | Partial — voucher and per-line rates, cess, RCM flag and Nil/Exempt; no exports/SEZ, composition or ITC reversal |
 | GSTR-1, GSTR-3B, GSTR-2B reconciliation and annual returns | Partial — GSTR-1 outward working papers, HSN summary, GSTR-3B liability/ITC summary, GSTR-2B B2B import/reconciliation, GSTR-9 annual working paper/JSON, a late-fee/interest estimator, a monthly GSTR-1 JSON export and a hand-entered filing/ARN register; no CMP-08/GSTR-4 or other return formats |
-| E-invoice and e-way bill generation | Partial — B2B e-invoice readiness and draft NIC-style JSON; e-way working papers, Part B transporter/vehicle details, distance-based validity and draft JSON at a configurable threshold; no IRN/QR, consolidated e-way bill, per-item e-invoice rates/discounts or amendment |
+| E-invoice and e-way bill generation | Partial — B2B e-invoice readiness and draft NIC-style JSON for invoices, credit notes and debit notes, with mixed-rate line splitting; e-way working papers, Part B transporter/vehicle details, distance-based validity and draft JSON at a configurable threshold; no IRN/QR, consolidated e-way bill, e-invoice discounts/charges or amendment |
 | TDS/TCS sections, thresholds, challans, returns and certificates | Partial — TAN, section/rate/threshold master, TDS on purchases, TCS on sales, party PAN, register with quarterly and threshold views, challan tracking and downloadable 26Q/27Q/27EQ working papers; no signed certificates, TRACES, threshold enforcement, higher-rate/no-PAN logic or journal deductions |
 | Tax audit, reconciliation and statutory registers | Partial — turnover, output-tax/ITC and TDS/TCS reconciliations plus a Form 3CD-style checklist and a user-managed compliance calendar; no Form 3CD, audit opinion, statutory registers or consolidation |
 | Immutable audit trail | Done (Stage 1, app-level append-only; not tamper-proof against browser-storage edits) |
@@ -367,6 +367,14 @@ inside those stages.
   related limit IDs and rough size.
 - Corrected stale register entries: per-line GST is resolved; GST filing
   history and local statutory gaps are stated separately.
+
+### 2026-11-21 — Phase 67: e-invoice notes and mixed-rate lines
+
+- E-invoice drafts now cover outward credit and debit notes as CRN/DBN
+  documents, with the linked original invoice number and date.
+- Mixed-rate invoices allocate item value across the stored GST rate buckets,
+  so each draft item carries its own GstRt and matching tax amount.
+- Verification: 383 tests (382 pass, 1 skipped); 1,381.2 kB build.
 
 ### 2026-11-21 — Phase 66: payroll statutory working papers
 

@@ -25892,14 +25892,14 @@ function costCentresScreen() {
           <tbody>${centreRows}</tbody>
         </table></div>`
       : '<p class="muted">No cost centres yet. Create them in Masters, then choose one on a voucher line.</p>'}
-    <h3 class="column-title">Unallocated lines</h3>
+    <h3 class="column-title">Unallocated value</h3>
     ${report.unallocatedRows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
-          <thead><tr><th>Ledger without a cost centre</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
+          <thead><tr><th>Ledger / unallocated share</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Net</th></tr></thead>
           <tbody>${unallocatedRows}</tbody>
         </table></div>`
-      : '<p class="muted">Every voucher line in this period has a cost centre.</p>'}`,
-    'Allocated columns include only lines with a cost centre. Openings come from the selected financial year and are added only in the net-plus-opening column. The unallocated table reconciles the remaining lines in the same period. Profit & loss by category counts only tagged income and expense lines, so untagged income or expense is excluded. Click a centre to see its vouchers.',
+      : '<p class="muted">Every voucher line in this period is fully allocated.</p>'}`,
+    'Allocated columns include each centre\'s share of a line, including split lines. Openings come from the selected financial year and are added only in the net-plus-opening column. The unallocated table reconciles any remaining value in the same period. Profit & loss by category counts only tagged income and expense shares, so untagged income or expense is excluded. Click a centre to see its vouchers.',
   );
 }
 

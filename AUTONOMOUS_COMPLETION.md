@@ -49,7 +49,7 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 - Full suite: 387 tests (386 pass, 1 skipped), 0 failures.
 - Build: 1,409.1 kB.
 - Targeted suites: GST, GSTR-2B, GSTR-9, late fee, TDS returns, inventory, bank, budgets, currency, bulk vouchers, payroll.
-- Latest deployment: https://5a2d7758.zledgercraft.pages.dev (HTTP 200); custom domain https://zledgercraft.pages.dev/ also HTTP 200.
+- Latest deployment: https://86ba1a9f.zledgercraft.pages.dev (HTTP 200); custom domain https://zledgercraft.pages.dev/ also HTTP 200.
 - Projects 1–7 are complete. Project 8’s local work is complete; its parked
   external dependencies are excluded from the active backlog.
 

@@ -8841,6 +8841,32 @@ export function importState(json) {
   return { ok: true, state: restored };
 }
 
+/** Validate and summarize a backup without applying it. */
+export function previewImportState(json) {
+  const result = importState(json);
+  if (!result.ok) return result;
+  const companies = result.state.companies.map((company) => ({
+    name: company.name,
+    ledgers: company.ledgers.length,
+    vouchers: company.vouchers.length,
+    years: company.years?.length ?? 0,
+    employees: company.payroll?.employees?.length ?? 0,
+    payrollRuns: company.payroll?.runs?.length ?? 0,
+  }));
+  return {
+    ok: true,
+    activeCompanyId: result.state.activeCompanyId,
+    companies,
+    totals: {
+      companies: companies.length,
+      ledgers: companies.reduce((sum, company) => sum + company.ledgers, 0),
+      vouchers: companies.reduce((sum, company) => sum + company.vouchers, 0),
+      employees: companies.reduce((sum, company) => sum + company.employees, 0),
+      payrollRuns: companies.reduce((sum, company) => sum + company.payrollRuns, 0),
+    },
+  };
+}
+
 export function vouchersSorted(company) {
   return [...company.vouchers].sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? 1 : -1;

@@ -368,6 +368,14 @@ inside those stages.
 - Corrected stale register entries: per-line GST is resolved; GST filing
   history and local statutory gaps are stated separately.
 
+### 2026-11-21 — Phase 70: backup restore dry run
+
+- `previewImportState` validates a backup without applying it and returns the
+  company names plus ledger, voucher, employee and payroll-run counts.
+- The restore preview now shows either that summary or the exact validation
+  error, instead of only counting raw JSON arrays.
+- Verification: 384 tests (383 pass, 1 skipped); 1,396.3 kB build.
+
 ### 2026-11-21 — Phase 69: cost-centre openings
 
 - A cost centre can store a net debit or credit opening for each financial

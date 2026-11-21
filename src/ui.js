@@ -99,6 +99,7 @@ import {
   gstTaxLedgers,
   emptyState,
   importState,
+  previewImportState,
   isPartyLedger,
   ledgerOptions,
   loadState,
@@ -7465,17 +7466,18 @@ export function previewRestore(payload) {
     return;
   }
   try {
-    const parsed = JSON.parse(payload);
-    if (!Array.isArray(parsed.companies)) {
-      target.textContent = 'This JSON has no companies array.';
-      return;
-    }
-    const vouchers = parsed.companies.reduce((sum, item) => sum + (item.vouchers?.length ?? 0), 0);
-    const ledgers = parsed.companies.reduce((sum, item) => sum + (item.ledgers?.length ?? 0), 0);
-    target.textContent = `Contains ${parsed.companies.length} company${parsed.companies.length === 1 ? '' : 'ies'}, ${ledgers} ledger${ledgers === 1 ? '' : 's'} and ${vouchers} voucher${vouchers === 1 ? '' : 's'}.`;
+    JSON.parse(payload);
   } catch {
     target.textContent = 'Not valid JSON yet.';
+    return;
   }
+  const preview = previewImportState(payload);
+  if (!preview.ok) {
+    target.textContent = `This backup would be rejected: ${preview.error}`;
+    return;
+  }
+  const names = preview.companies.map((company) => company.name).join(', ');
+  target.textContent = `Valid backup: ${preview.totals.companies} company${preview.totals.companies === 1 ? '' : 'ies'}, ${preview.totals.ledgers} ledger${preview.totals.ledgers === 1 ? '' : 's'}, ${preview.totals.vouchers} voucher${preview.totals.vouchers === 1 ? '' : 's'}${preview.totals.payrollRuns ? `, ${preview.totals.payrollRuns} payroll run${preview.totals.payrollRuns === 1 ? '' : 's'}` : ''}. ${names}.`;
 }
 
 export function handleInput(event) {

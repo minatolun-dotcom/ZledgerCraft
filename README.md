@@ -702,10 +702,12 @@ disabled.
   registration/sections/voucher deductions/PANs and tax challans, payroll
   pay heads, employees, monthly amounts and run snapshots, bank statements
   and their matches) before anything is replaced.
-- Restore shows a preview of what the backup contains and snapshots the current
-  data first. A backup can replace the whole workspace or restore one named
-  company while keeping the others; the last ten manual, daily and pre-restore
-  snapshots can be downloaded individually, restored or superseded.
+- Restore shows a dry-run preview that validates the backup and lists its
+  company names and entity counts, or the exact error that would block restore.
+  It snapshots the current data first. A backup can replace the whole workspace
+  or restore one named company while keeping the others; the last ten manual,
+  daily and pre-restore snapshots can be downloaded individually, restored or
+  superseded.
 - Passphrase-encrypted JSON downloads are available from **Backup & restore**.
   The browser encrypts the backup with AES-256-GCM and a PBKDF2-derived key; the
   passphrase is never stored or uploaded. Encrypted downloads require a secure

@@ -11289,6 +11289,32 @@ function importState(json) {
   return { ok: true, state: restored };
 }
 
+/** Validate and summarize a backup without applying it. */
+function previewImportState(json) {
+  const result = importState(json);
+  if (!result.ok) return result;
+  const companies = result.state.companies.map((company) => ({
+    name: company.name,
+    ledgers: company.ledgers.length,
+    vouchers: company.vouchers.length,
+    years: company.years?.length ?? 0,
+    employees: company.payroll?.employees?.length ?? 0,
+    payrollRuns: company.payroll?.runs?.length ?? 0,
+  }));
+  return {
+    ok: true,
+    activeCompanyId: result.state.activeCompanyId,
+    companies,
+    totals: {
+      companies: companies.length,
+      ledgers: companies.reduce((sum, company) => sum + company.ledgers, 0),
+      vouchers: companies.reduce((sum, company) => sum + company.vouchers, 0),
+      employees: companies.reduce((sum, company) => sum + company.employees, 0),
+      payrollRuns: companies.reduce((sum, company) => sum + company.payrollRuns, 0),
+    },
+  };
+}
+
 function vouchersSorted(company) {
   return [...company.vouchers].sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? 1 : -1;
@@ -33254,17 +33280,18 @@ function previewRestore(payload) {
     return;
   }
   try {
-    const parsed = JSON.parse(payload);
-    if (!Array.isArray(parsed.companies)) {
-      target.textContent = 'This JSON has no companies array.';
-      return;
-    }
-    const vouchers = parsed.companies.reduce((sum, item) => sum + (item.vouchers?.length ?? 0), 0);
-    const ledgers = parsed.companies.reduce((sum, item) => sum + (item.ledgers?.length ?? 0), 0);
-    target.textContent = `Contains ${parsed.companies.length} company${parsed.companies.length === 1 ? '' : 'ies'}, ${ledgers} ledger${ledgers === 1 ? '' : 's'} and ${vouchers} voucher${vouchers === 1 ? '' : 's'}.`;
+    JSON.parse(payload);
   } catch {
     target.textContent = 'Not valid JSON yet.';
+    return;
   }
+  const preview = previewImportState(payload);
+  if (!preview.ok) {
+    target.textContent = `This backup would be rejected: ${preview.error}`;
+    return;
+  }
+  const names = preview.companies.map((company) => company.name).join(', ');
+  target.textContent = `Valid backup: ${preview.totals.companies} company${preview.totals.companies === 1 ? '' : 'ies'}, ${preview.totals.ledgers} ledger${preview.totals.ledgers === 1 ? '' : 's'}, ${preview.totals.vouchers} voucher${preview.totals.vouchers === 1 ? '' : 's'}${preview.totals.payrollRuns ? `, ${preview.totals.payrollRuns} payroll run${preview.totals.payrollRuns === 1 ? '' : 's'}` : ''}. ${names}.`;
 }
 
 function handleInput(event) {

@@ -15,6 +15,7 @@ import {
   findLedgerByName,
   gstinChecksumValid,
   importState,
+  previewImportState,
   postDueRecurringVouchers,
   postRecurringVoucher,
   saveGstSettings,
@@ -720,6 +721,13 @@ test('backup export and restore round-trip through validation', () => {
   assert.equal(restored.state.activeCompanyId, state.activeCompanyId);
   assert.equal(restored.state.companies[0].fyEnd, '2027-03-31');
 
+  const preview = previewImportState(json);
+  assert.equal(preview.ok, true, preview.error);
+  assert.equal(preview.totals.companies, 1);
+  assert.equal(preview.totals.vouchers, 1);
+  assert.equal(preview.companies[0].name, 'Backup Co');
+  assert.equal(previewImportState('not json').ok, false);
+
   assert.equal(importState('not json').ok, false);
   assert.equal(importState('{}').ok, false);
   assert.equal(importState(JSON.stringify({ companies: [] })).ok, false);
@@ -729,6 +737,9 @@ test('backup export and restore round-trip through validation', () => {
   const brokenResult = importState(JSON.stringify(broken));
   assert.equal(brokenResult.ok, false);
   assert.match(brokenResult.error, /missing ledger/);
+  const brokenPreview = previewImportState(JSON.stringify(broken));
+  assert.equal(brokenPreview.ok, false);
+  assert.match(brokenPreview.error, /missing ledger/);
 
   const unbalanced = JSON.parse(json);
   unbalanced.companies[0].vouchers[0].lines[1].amount = 999;

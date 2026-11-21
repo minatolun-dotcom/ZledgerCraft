@@ -10,6 +10,45 @@ deferred, or absent so it is not forgotten.
 When a limit is removed, mark it resolved here and update the roadmap and
 README. When a new limit is introduced, add it here in the same change.
 
+## Parked external dependencies
+
+These items are recorded for completeness but are **excluded from the active
+backlog**. They need third-party accounts, credentials, authorisation, live
+feeds or vendor policy changes, so they are not planned, implemented or reported
+unless the owner explicitly asks for them. The local parts of the same rows
+remain active.
+
+| Parked ID | Scope | Related limits |
+| --- | --- | --- |
+| P-01 | Direct GST return filing, GSTN/GSP upload and automatic acknowledgement | KL-73, RL-10 |
+| P-02 | IRP e-invoice registration, signing, IRN/QR and IRP error handling | KL-94 |
+| P-03 | E-way bill portal submission, extension and cancellation | KL-95 |
+| P-04 | TRACES/TDS return filing and portal-generated Form 16/16A | KL-84, KL-99 |
+| P-05 | Live bank feeds and live exchange-rate feeds | KL-32, KL-68 |
+| P-06 | Portal GSTIN verification and a live statutory HSN/rate directory | KL-76, KL-77 |
+| P-07 | Cloud MFA under Neon Managed Auth | KL-116 |
+
+## Active local backlog
+
+These are the remaining gaps that can be closed in this codebase without a
+third-party account or live feed. They are grouped by product lane, not by the
+order in which they must ship. Sizes are rough: S is a contained change, M is a
+feature slice, L needs a data-model or workflow change.
+
+| Lane | Fixable gap | Related limits | Size |
+| --- | --- | --- | --- |
+| Local statutory depth | GSTR-2B import/reconciliation, GSTR-9 working paper and JSON, due-date/late-fee/interest calculation, Form 26Q/27Q/27EQ and payroll ECR/ESI/24Q/16 working papers | KL-73, KL-84, KL-90, KL-97, KL-99 | L |
+| GST model depth | Export/SEZ/zero-rated, bill-to/ship-to, composition, separate RCM payable, GST openings, CDNR matching, split balancing lines, GST plus TDS on one voucher | KL-74, KL-75, KL-78, KL-79, KL-85, KL-86, KL-96 | L |
+| E-invoice/e-way local quality | Per-line rates, discounts and charges in the draft, credit/debit-note e-invoices, consolidated e-way drafts, validity and multi-vehicle data | KL-94, KL-95, KL-98 | M |
+| Forex depth | Per-ledger currency, foreign openings, foreign stock/bill allocation, revaluation reversal and history | KL-64, KL-66, KL-67, KL-69 | L |
+| Cost and budget depth | Multiple cost centres per line, cost-centre openings, monthly budget phasing, revision workflow, arbitrary multi-centre budgets | KL-21–KL-24, KL-31, KL-60, KL-62, KL-63 | M–L |
+| Inventory and manufacturing | FIFO/expiry batch costing, batch-tracked BOM components, production edit/reversal, multi-godown production, automatic stock-adjustment journals, by-products/rework, godown valuation layers | KL-41, KL-44, KL-45, KL-101, KL-103–KL-107 | L |
+| Banking depth | Many-to-one statement matching, bulk adjustments, full instrument lifecycle, cheque/stationery alignment | KL-33, KL-34, KL-37–KL-40 | M |
+| Import and restore | Partial/dry-run imports, GST/TDS/cost-centre/currency columns, period-only restore, broader Tally XML and Excel coverage | KL-14–KL-18, KL-109–KL-112 | M–L |
+| Reporting and UX | Multi-period columns, configurable charts, report designer, branded full report pack, mobile-first pass, cross-device drafts, bulk voucher alteration, load benchmarks | KL-29, KL-30, KL-52, KL-55–KL-57, KL-117 | M–L |
+| Platform and security | Live-workspace encryption, tamper-evident audit anchoring, write API/webhooks, offline mode, nested-field querying and richer merge metadata | KL-03, KL-09, KL-10, KL-12, KL-108, KL-114, KL-115 | L |
+| Documents and numbering | Post-dated/memorandum/reversing vouchers, multiple numbering series and prefixes, automatic series reset | KL-26, KL-27 | M |
+
 ## Platform, storage and operations
 
 | ID | Limit | Current behaviour / consequence |
@@ -112,9 +151,9 @@ README. When a new limit is introduced, add it here in the same change.
 | KL-48 | Resolved — e-invoice/e-way bill and tax-audit working papers added 2026-11-18 | B2B e-invoice readiness with draft NIC-style JSON, e-way Part A drafts and tax-audit reconciliations exist. Remaining gaps are KL-94–KL-99. |
 | KL-49 | Resolved — TDS/TCS deduction, register and challans added 2026-11-18 | TAN, section/rate/threshold master, TDS on purchases, TCS on sales, party PAN, a register with section/party/quarterly/threshold views and challan tracking exist. Remaining gaps are KL-81–KL-88. |
 | KL-50 | Resolved — payroll runs, payslips and salary register added 2026-11-18 | Employee and pay-head masters, fixed monthly salary structures, one journal-posting run per month, printable payslips and a salary register exist. Remaining gaps are KL-89–KL-93. |
-| KL-51 | Statutory registers still absent | Tax-audit reconciliations, a Form 3CD-style checklist, a user-managed compliance calendar and a simple company consolidation report exist, but there are no statutory registers or filing history. |
-| KL-72 | One GST rate per voucher | Tax is computed at a single rate on the whole taxable value. There are no per-item or per-line rates, and a mixed-rate invoice needs separate vouchers or a manual journal. |
-| KL-73 | GST returns are local, with a manual GSTR-1 JSON | GSTR-1, the HSN summary, GSTR-3B and a monthly annual working paper are computed from vouchers. A monthly GSTR-1 JSON export now contains GSTN-style b2b, b2cs, cdnr/cdnur and HSN sections for manual upload. A filing register records a user-entered ARN, period, filed date and notes after a manual portal submission. There is no portal filing or automatic acknowledgement, GSTN API submission, GSTR-2B reconciliation, GSTR-9, due-date/late-fee tracking or electronic filing status feed. |
+| KL-51 | Statutory registers still absent | Tax-audit reconciliations, a Form 3CD-style checklist, a user-managed compliance calendar, a GST filing/ARN register and a simple company consolidation report exist, but there are no statutory registers and no TDS/TCS filing history. |
+| KL-72 | Resolved — per-line GST rates added 2026-11-21 | Ledger lines can carry their own GST rate; mixed-rate invoices aggregate by rate in the return working papers while retaining voucher-level defaults and exempt lines. |
+| KL-73 | GST returns are local, with a manual GSTR-1 JSON | GSTR-1, the HSN summary, GSTR-3B and a monthly annual working paper are computed from vouchers. A monthly GSTR-1 JSON export contains GSTN-style b2b, b2cs, cdnr/cdnur and HSN sections for manual upload, and a local filing register stores a user-entered ARN, period, filed date and notes. Active local gaps are GSTR-2B reconciliation, GSTR-9, due-date/late-fee calculation and more return exports; direct filing is parked under P-01. |
 | KL-74 | Simplified supply classification | CGST+SGST versus IGST is derived from place of supply against the home state. There is no export/SEZ/zero-rated/deemed-export treatment, bill-to/ship-to, composition scheme, e-commerce operator rule, GST TDS or ITC reversal/reversal rules. |
 | KL-75 | Reverse charge is a flag only | RCM tax is posted to the same tax ledgers and reported in both liability and ITC, so it nets to zero. There is no separate RCM payable ledger, cash payment tracking, self-invoice or RCM-specific register. |
 | KL-76 | GSTIN checks are structural | GSTINs are validated for format and home-state prefix, a base-36 checksum warning is shown in e-invoice readiness, and buyer GSTIN/place-of-supply mismatches are warned about; there is no portal verification. Tax ledgers are ordinary Duties & Taxes ledgers tagged with a role and can be created or renamed from a dedicated tax-ledger field. |
@@ -187,7 +226,7 @@ current terms before relying on one.
 | RL-07 | Partially resolved — SQLite/LAN MFA policy and per-company voucher approvals added 2026-11-19 (KL-11, KL-26) | `require_mfa` blocks sign-in until TOTP is enrolled and prevents disabling 2FA while required. Voucher approval keeps pending entries out of posted books, supports an optional approval threshold, lets the submitter revise or withdraw before a decision with an owner-visible revision history, blocks self-approval and enforces owner-only posting on the server. Neon Managed Auth cannot enforce TOTP. | Keep the SQLite/LAN MFA path; for cloud MFA, use Neon mode single-factor or move to a self-managed identity provider only after a concrete need. Extend approvals with in-place pending edits and an approval matrix only if operations need them. | It does not provide statutory e-signatures, cloud MFA, or a full segregation-of-duties matrix. |
 | RL-08 | HTTPS is optional for LAN and manual for self-hosting (KL-113) | The hosted Cloudflare Pages + Worker + Neon Function deployment uses HTTPS and secure cookies. A self-hosted LAN server still needs a certificate/key and cannot make devices trust a LAN certificate automatically. | Put [Caddy](https://caddyserver.com/) (Apache-2.0) in front of the app and use its internal CA for a LAN hostname; install Caddy's root CA on the client devices once. Alternatively use [mkcert](https://github.com/FiloSottile/mkcert) to create a locally trusted cert/key and set `TLS_CERT_PATH`/`TLS_KEY_PATH`. Let's Encrypt is free only when the server has a real domain and can complete an HTTP/DNS challenge. | Internal-CA certificates are trusted only on devices where you install the CA. It does not protect a compromised client, and it does not make an internet-exposed server safe by itself. |
 | RL-09 | Partially resolved — Neon workspace is live, but no offline mode (KL-03) | The hosted Neon workspace supports shared multi-device access with revision checks, leases and conservative merge. SQLite remains a single-server database, and there is no offline editing or safe live-file sync. | For remote access, keep one server and use [Tailscale](https://tailscale.com/) (free personal plan) or WireGuard (GPLv2) to reach it privately; do not expose the port publicly. For copies, replicate restic snapshots off-site. Do not use file-sync tools on the live SQLite file. | A VPN is remote access, not cloud sync or offline editing. It does not let two sites write independently while disconnected. |
-| RL-10 | Statutory filing and portal integrations are absent (KL-73, KL-94, KL-99) | GSTN, IRP/e-invoice and TDS/return APIs need registered API access, credentials and ongoing compliance changes; they are not a free drop-in library. | Keep the current working papers and add clean CSV/JSON exports plus a filing checklist and acknowledgement storage. Use the government portals manually. This is free and honest. Treat direct filing as a separate, credentialed integration project. | Manual filing remains manual, and portal acknowledgements are not fetched automatically. Do not represent draft JSON as a filed return. |
+| RL-10 | Parked — statutory portal integrations (KL-73, KL-84, KL-94, KL-95, KL-99) | Direct filing is excluded from the active backlog under P-01–P-04. Local exports, working papers, the compliance calendar and the filing/ARN register remain active. | Keep improving local exports, checklists and acknowledgement storage; use government portals manually. | Direct filing and automatic acknowledgements are out of scope unless explicitly requested. |
 
 ### Recommended order
 

@@ -13,8 +13,11 @@ separately in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 complete (6 of 6). Stage 3 — Compliance complete (4 of 4): GST setup, voucher
 tax and returns, TDS/TCS deduction and challans, payroll runs with payslips,
 and e-invoice/e-way bill plus tax-audit working papers are done. Stage 4 —
-Depth and scale is in progress (1 of 4 complete): inventory depth is complete
-with godowns, batches, stock transfers, orders, BOMs and manufacturing; the
+Depth and scale has delivered inventory depth, alternate units, per-line
+GST/TDS, multiple instruments, stock/WIP posting, forex balances, bulk vouchers,
+supplementary payroll and statutory exports; remaining depth is tracked in the
+active local backlog. Inventory depth includes godowns, batches, stock
+transfers, orders, BOMs and manufacturing; the
 server workspace now uses a local SQLite database where every top-level company
 collection has its own table; company headers, account groups, financial years,
 stock-item fields and common ledger columns are typed, along with transfer,
@@ -27,8 +30,7 @@ Conservative merge is implemented for independent changes. Neon Postgres now
 stores the workspace, revisions, leases, audit rows, profiles, sessions and
 account lockout state, and Neon Managed Auth handles credentials in cloud mode.
 The production API is deployed as a Neon Function behind the
-`books.lengkhawm.online` Cloudflare Worker proxy; external APIs and statutory
-integrations still need work.** The single-user accounting core is complete,
+`books.lengkhawm.online` Cloudflare Worker proxy.** The single-user accounting core is complete,
 and LAN or Neon mode adds authenticated multi-user access, but the app is still
 an advanced local MVP, not production or statutory ready.
 
@@ -46,16 +48,15 @@ and R2 backup upload verified. It is still not suitable for regulated filing or
 unreviewed internet exposure; the remaining limits and operator duties are in
 `KNOWN_LIMITS.md`.
 
-**Recommended next work:** follow the free-path order in
-[KNOWN_LIMITS.md § Remaining limits and free paths](KNOWN_LIMITS.md#remaining-limits-and-free-paths):
-App-level encryption (passphrase-encrypted JSON downloads and optional
-AES-256-GCM encryption for server/R2 backups are complete; live-workspace
-encryption remains), nested-field promotion (every top-level company
-collection now has its own table and common columns are typed; nested settings
-and line detail remain JSON) and, in the larger-project group, APIs/webhooks
-and statutory integrations. Voucher
+**Recommended next work:** choose from the
+[active local backlog](KNOWN_LIMITS.md#active-local-backlog). The highest-leverage
+lanes are local statutory depth (GSTR-2B, GSTR-9, late-fee calculation and
+TDS/payroll working papers), GST model depth (exports/SEZ, RCM, openings and
+split balancing), forex/cost-centre depth and inventory batch/FIFO
+manufacturing. Live-workspace encryption, nested-field querying, write
+APIs/webhooks and offline mode remain larger platform projects. Voucher
 approvals, the SQLite/LAN per-account 2FA policy and branded PDF reports are
-now complete.
+complete.
 
 Working now:
 
@@ -180,14 +181,15 @@ Working now:
 
 Why it is not production-ready: browser mode still lives in one browser's local
 storage with unprotected access-control profiles, the app audit trail is not
-tamper-proof, LAN mode is one same-machine SQLite server with voucher leases but
-no field-level history or offsite copy, bank reconciliation has no live/OFX/QIF feed,
-GST returns, e-invoice/e-way drafts and TDS/TCS records are unfiled working
-papers, no IRN/QR or portal acknowledgement is produced, the tax-audit checklist
-is not a Form 3CD or an audit opinion, payroll has no attendance, PF/ESI
-computation or statutory returns, and inventory has no physical stock count,
-batch-wise costing, partial-completion WIP, automatic opening-stock journals or job work. The full deferred list
-is in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
+tamper-proof, the live workspace is not encrypted, and LAN mode is one
+same-machine SQLite server with voucher leases but no field-level history. Bank
+reconciliation has no split/many-to-one matching, statutory returns remain
+working papers with no GSTR-2B/GSTR-9 or TDS/payroll return generation, payroll
+has no statutory return files, and inventory lacks FIFO/expiry costing,
+batch-tracked BOM components, partial-completion WIP and several automatic
+stock journals. Mobile use, report layout, import recovery and large-workspace
+performance are also deliberately limited. The full deferred list is in
+[KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
 ## Missing feature inventory
 
@@ -198,9 +200,9 @@ Status: **Done**, **Partial**, **Missing**.
 | Feature | Status |
 | --- | --- |
 | GST registration, tax ledgers, HSN/SAC and rate setup | Done (Stage 3; GSTIN, home state, rate master, tax ledgers and HSN on stock items; no SAC master) |
-| GST on vouchers: CGST/SGST/IGST, cess, reverse charge, exempt/nil | Partial — one rate per invoice, cess, RCM flag and Nil/Exempt; no per-item rates, exports/SEZ or ITC reversal |
+| GST on vouchers: CGST/SGST/IGST, cess, reverse charge, exempt/nil | Partial — voucher and per-line rates, cess, RCM flag and Nil/Exempt; no exports/SEZ, composition or ITC reversal |
 | GSTR-1, GSTR-3B, GSTR-2B reconciliation and annual returns | Partial — GSTR-1 outward working papers, HSN summary, GSTR-3B liability/ITC summary, a monthly GSTR-1 JSON export for manual upload and a hand-entered filing/ARN register; no portal filing, GSTN API submission, automatic acknowledgement, 2B reconciliation or annual return |
-| E-invoice and e-way bill generation | Partial — B2B e-invoice readiness and draft NIC-style JSON; e-way Part A working papers and draft JSON at a configurable threshold; no IRP/e-way portal submission, IRN/QR, Part B, transporter/vehicle, cancellation or amendment |
+| E-invoice and e-way bill generation | Partial — B2B e-invoice readiness and draft NIC-style JSON; e-way working papers, Part B transporter/vehicle details and draft JSON at a configurable threshold; no IRN/QR, consolidated e-way bill, validity, cancellation or amendment |
 | TDS/TCS sections, thresholds, challans, returns and certificates | Partial — TAN, section/rate/threshold master, TDS on purchases, TCS on sales, party PAN, register with quarterly and threshold views, and challan tracking; no returns, certificates, threshold enforcement, higher-rate/no-PAN logic or journal deductions |
 | Tax audit, reconciliation and statutory registers | Partial — turnover, output-tax/ITC and TDS/TCS reconciliations plus a Form 3CD-style checklist and a user-managed compliance calendar; no Form 3CD, audit opinion, statutory registers or consolidation |
 | Immutable audit trail | Done (Stage 1, app-level append-only; not tamper-proof against browser-storage edits) |
@@ -212,8 +214,8 @@ Status: **Done**, **Partial**, **Missing**.
 | Employee, pay-head and salary-structure masters | Done (Stage 3; fixed monthly amounts, PAN, joining date, active flag, ledger-linked pay heads) |
 | Payroll runs and salary journal | Done (Stage 3; one regular run per month plus supplementary and signed adjustment runs, each posting a balanced Journal and storing its employee snapshot) |
 | Payslips and salary register | Done (Stage 3; printable payslip and period register with pay-head, statutory and employee totals, CSV) |
-| Attendance, leave, overtime, arrears, bonus and gratuity | Missing |
-| PF/ESI/PT computation, employer contributions, ECR/returns and Form 24Q/16 | Missing (PF/ESI/PT are manually entered deduction pay heads) |
+| Attendance, leave, overtime, arrears, bonus and gratuity | Partial — attendance CSV, leave register, bonus/arrears adjustments and proration; no overtime or gratuity |
+| PF/ESI/PT computation, employer contributions, ECR/returns and Form 24Q/16 | Partial — configurable PF/ESI calculator, employer share posting and PT amount; no state PT slabs, ECR/ESI return files, Form 24Q or Form 16 |
 | Salary payments, advances, loans and reimbursements | Missing |
 | CTC, increment history and full-and-final settlement | Missing |
 
@@ -344,6 +346,15 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
+
+### 2026-11-21 — Phase 66: external dependency parking and local backlog audit
+
+- Recorded third-party-dependent scopes under parked dependencies P-01–P-07 and
+  removed them from the active backlog.
+- Added the active local backlog of fixable product gaps, grouped by lane with
+  related limit IDs and rough size.
+- Corrected stale register entries: per-line GST is resolved; GST filing
+  history and local statutory gaps are stated separately.
 
 ### 2026-11-21 — Phase 65: manual GST filing acknowledgements
 

@@ -24,7 +24,7 @@ SQLite/Postgres workspace mirror and node:test regression suites.
 | 5 | Foreign-currency ledger balances | Complete | Every foreign-currency ledger balance is reported by currency with book value, average and latest rates; party receipts and payments are matched FIFO to invoices, realised gain/loss is posted once through Forex Gain/Loss, posted revaluation adjusts the carrying rate to prevent double counting, and P&L/balance-sheet notes disclose realised, unrealised and open exposure. | Per-ledger currency, foreign opening balances, explicit bill-wise foreign allocations and foreign inventory remain out of scope. |
 | 6 | Bulk voucher grid | Complete | A grid posts Journal, Payment, Receipt and Contra vouchers row by row with date, type, debit/credit ledger, amount, source reference and narration. The whole batch is validated on an isolated company copy, errors are attached to their rows, nothing is posted unless every row passes, and source references stop repeated rows or re-posts. | Spreadsheet clipboard paste, bulk alteration of existing vouchers, column chooser and saved views remain out of scope. |
 | 7 | Full payroll reversal and supplementary runs | Complete | Reversal posts an opposite Journal, marks the run, blocks double reversal, removes both vouchers on delete and excludes reversed runs from payroll summaries. A supplementary run pays only uncovered active employees after the regular run; an adjustment run posts explicit signed deltas by employee and pay head, including negative reversals, and run kinds, reversal state and restored totals survive backups. | Bulky payroll upload, bank payment matching and statutory return filing remain outside this project. |
-| 8 | Statutory portal filing | Externally blocked | Local returns, e-invoice/e-way drafts, challans and compliance calendar exist. A monthly GSTR-1 JSON export now carries GSTN-style b2b, b2cs, cdnr/cdnur and HSN sections for manual upload, and a local filing register stores the ARN, period, date and notes after a user files on the portal. Nothing is transmitted or represented as portal-verified. | Credentialed GSTN/IRP/TRACES submission, acknowledgements and filing status feeds. |
+| 8 | Statutory portal filing | Parked | Local returns, e-invoice/e-way drafts, challans, compliance calendar, GSTR-1 JSON export and a filing/ARN register exist. Direct portal submission is recorded under parked external dependencies P-01–P-04. | Removed from the active backlog. |
 
 ## Other completed architectural work in this pass
 
@@ -46,15 +46,14 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 - Full suite: 364 tests (363 pass, 1 skipped), 0 failures.
 - Build: 1,323.5 kB.
-- Targeted suites: inventory, bank, budgets, currency, bulk vouchers, payroll.
-- Latest deployment: https://1c51254f.zledgercraft.pages.dev (HTTP 200).
-- Projects 1–7 are complete; no code project remains open.
+- Targeted suites: GST, inventory, bank, budgets, currency, bulk vouchers, payroll.
+- Latest deployment: https://eba3b9c4.zledgercraft.pages.dev (HTTP 200).
+- Projects 1–7 are complete. Project 8’s local work is complete; its parked
+  external dependencies are excluded from the active backlog.
 
 ## Statutory filing boundary
 
-Project 8 cannot be completed in this environment. Credentialed GSTN/GSP,
-IRP/e-invoice and TRACES/TAN access plus an authorised filing environment are
-required. The app keeps local returns, e-invoice/e-way drafts, challans and the
-compliance calendar, but no portal submission, acknowledgement or filing-status
-feed was simulated. A maintainer with those credentials can build the provider
-adapters without changing the existing local working papers.
+Project 8 remains parked at the external dependency boundary. The app keeps
+local returns, e-invoice/e-way drafts, challans, the compliance calendar, the
+GSTR-1 JSON export and the filing/ARN register. The parked scopes are recorded
+in `KNOWN_LIMITS.md`; the local statutory gaps remain in the active backlog.

@@ -306,7 +306,7 @@ export function payrollScreen() {
   const runRows = report.runs
     .map(
       (item) => `<tr class="${item.reversed ? 'muted' : ''}">
-        <td><strong>${esc(payrollMonthLabel(item.month))}</strong>${item.reversed ? ' <span class="badge">reversed</span>' : ''}</td>
+        <td><strong>${esc(payrollMonthLabel(item.month))}</strong>${item.kind && item.kind !== 'Regular' ? ` <span class="badge">${esc(item.kind)}</span>` : ''}${item.reason ? `<div class="muted small">${esc(item.reason)}</div>` : ''}${item.reversed ? ' <span class="badge">reversed</span>' : ''}</td>
         <td>${esc(dateLabel(item.date))}</td>
         <td class="num">${item.employees}</td>
         <td class="num">${money(item.gross)}</td>
@@ -364,7 +364,7 @@ export function payrollScreen() {
       <div class="field form-actions"><button class="btn small" type="submit">Run payroll and post journal</button></div>
       <p id="payroll-run-error" class="form-error" role="alert"></p>
     </form>
-    <p class="muted small">One run is allowed per month. Paid days default to the calendar days available between joining and exit; reduce them for unpaid absence. The journal debits each earning ledger, credits each deduction ledger and credits Salary Payable with the net pay.</p>
+    <p class="muted small">One regular run is allowed per month. Paid days default to the calendar days available between joining and exit; reduce them for unpaid absence. The journal debits each earning ledger, credits each deduction ledger and credits Salary Payable with the net pay. Use the supplementary and adjustment panel for later corrections.</p>
     ${report.runs.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact payroll-table">
           <thead><tr><th>Month</th><th>Posted</th><th class="num">Employees</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Net</th><th>Voucher</th><th></th></tr></thead>
@@ -399,6 +399,41 @@ export function payrollScreen() {
       </tr>`,
     )
     .join('');
+  const adjustmentLines = Array.from({ length: 4 }, (_, index) => `<tr class="payroll-adjust-row">
+    <td><select name="adj-employee-${index}" aria-label="Adjustment ${index + 1} employee">
+      <option value="">Choose employee</option>${employees.map((employee) => `<option value="${esc(employee.id)}">${esc(employee.name)}${employee.code ? ` · ${esc(employee.code)}` : ''}</option>`).join('')}
+    </select></td>
+    <td><select name="adj-head-${index}" aria-label="Adjustment ${index + 1} pay head">
+      <option value="">Choose pay head</option>${heads.map((head) => `<option value="${esc(head.id)}">${esc(head.name)} · ${esc(head.kind)}</option>`).join('')}
+    </select></td>
+    <td><input name="adj-amount-${index}" inputmode="decimal" placeholder="+/- amount" aria-label="Adjustment ${index + 1} amount"></td>
+  </tr>`).join('');
+  const supplementaryPanel = panel(
+    'Supplementary & adjustment runs',
+    `<form id="payroll-supplementary-form" class="inline-form" novalidate>
+      <label class="field inline-field"><span>Month</span><input name="month" type="month" value="${esc(month)}" required></label>
+      <label class="field inline-field"><span>Post date</span><input name="date" type="date" value="${esc(runDate)}" required></label>
+      <input name="reason" maxlength="200" placeholder="Reason (e.g. missed joiner)" aria-label="Supplementary reason">
+      <button class="btn small" type="submit">Run uncovered employees</button>
+      <p id="payroll-supplementary-error" class="form-error" role="alert"></p>
+    </form>
+    <p class="muted small">A supplementary run pays active employees not yet covered by the month's regular or earlier supplementary runs. Reverse or delete the original run to correct an already-paid employee instead.</p>
+    <form id="payroll-adjustment-form" novalidate>
+      <div class="filter-bar">
+        <label class="field inline-field"><span>Month</span><input name="month" type="month" value="${esc(month)}" required></label>
+        <label class="field inline-field"><span>Post date</span><input name="date" type="date" value="${esc(runDate)}" required></label>
+        <label class="field inline-field"><span>Reason</span><input name="reason" maxlength="200" placeholder="Bonus, arrears or correction" required></label>
+      </div>
+      <table class="data-table compact payroll-table">
+        <thead><tr><th>Employee</th><th>Pay head</th><th class="num">Signed amount</th></tr></thead>
+        <tbody>${adjustmentLines}</tbody>
+      </table>
+      <p class="muted small">Positive earning adds pay; negative earning reverses pay. Positive deduction adds a deduction; negative deduction reverses one. Each line is allocated explicitly to its employee and pay head.</p>
+      <div class="form-actions"><button class="btn primary" type="submit">Post adjustment run</button></div>
+      <p id="payroll-adjustment-error" class="form-error" role="alert"></p>
+    </form>`,
+    'Adjustment lines post one journal against the selected earning or deduction ledgers and Salary Payable. They are stored as a distinct payroll run, so the salary register keeps the regular and supplementary snapshots separate.',
+  );
   const summaryPanel = salaryRegisterPanel(report, from, to);
   const leaveRecords = [...(payroll.leaveRecords ?? [])].sort(
     (a, b) => b.from.localeCompare(a.from) || a.employeeId.localeCompare(b.employeeId),
@@ -428,7 +463,7 @@ export function payrollScreen() {
   );
 
   if (!payroll.enabled) return setupPanel;
-  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${statutoryPanel}${runsPanel}${report.count ? summaryPanel : ''}`;
+  return `${setupPanel}${headsPanel}${employeesPanel}${leavePanel}${statutoryPanel}${runsPanel}${supplementaryPanel}${report.count ? summaryPanel : ''}`;
 }
 
 export function salaryRegisterPanel(report, from, to, standalone = false) {
@@ -531,9 +566,11 @@ export function payrollRunScreen() {
       </tr>`,
     )
     .join('');
+  const runKind = run.kind ?? 'Regular';
   return panel(
-    `${payrollMonthLabel(run.month)} payroll`,
-    `<div class="ratio-grid">
+    `${payrollMonthLabel(run.month)} ${runKind === 'Regular' ? 'payroll' : `${runKind.toLowerCase()} payroll`}`,
+    `${run.reason ? `<p class="muted">${esc(run.reason)}</p>` : ''}
+    <div class="ratio-grid">
       <div class="ratio-card"><span class="ratio-label">Employees</span><strong>${run.totals.employees}</strong><span class="muted small">Posted ${esc(dateLabel(run.date))}</span></div>
       <div class="ratio-card"><span class="ratio-label">Gross earnings</span><strong>${money(run.totals.gross)}</strong><span class="muted small">Debited to salary ledgers</span></div>
       <div class="ratio-card"><span class="ratio-label">Deductions</span><strong>${money(run.totals.deductions)}</strong><span class="muted small">Credited to deduction ledgers</span></div>

@@ -420,10 +420,14 @@ disabled.
 **Payroll**
 - Run payroll for a month: the run debits each earning ledger, credits each
   deduction ledger, credits Salary Payable with net pay and posts one Journal
-  voucher. One run is allowed per month and the run stores the amounts and
-  voucher lines as a snapshot. A run can be reversed: the app posts the opposite
-  Journal, marks the run as reversed and excludes it from payroll summaries.
-  Deleting the run removes the original and reversal journals.
+  voucher. One regular run is allowed per month and stores the amounts and
+  voucher lines as a snapshot. A supplementary run pays active employees missed
+  by the regular or earlier supplementary runs and posts its own Journal. An
+  adjustment run allocates explicit signed amounts by employee and pay head,
+  including negative corrections, and posts one balanced Journal. Any run can be
+  reversed: the app posts the opposite Journal, marks it reversed and excludes
+  it from payroll summaries. Deleting it removes the original and reversal
+  journals.
 - A bank-transfer CSV for a payroll run with net pay and employee bank details,
   flagged when an employee is missing an account or IFSC. It is a working file,
   not a bank-validated payment instruction.
@@ -809,7 +813,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | GST registration, rates and tax on vouchers | Partial — GSTIN and home state, registration/party contacts, rate master with cess, CGST/SGST/IGST tax ledgers, HSN on stock items and SAC on service ledgers, invoice-level tax on four voucher types and credit/debit-note invoice links; no per-item rates, exports/SEZ, composition scheme, ITC reversal or GST on advances |
 | GST returns, e-invoice / e-way bill, GST reconciliation | Partial — GSTR-1 outward working papers, HSN summary and GSTR-3B liability/ITC summary with net payable, B2B e-invoice readiness with draft NIC-style JSON, e-way drafts with saved Part B details and tax-audit reconciliations; no portal filing, GSTR-1 JSON export, IRP/e-way submission, IRN/QR, validity tracking, GSTR-2B reconciliation, annual return or Form 3CD |
 | TDS/TCS deduction, sections and challans | Partial — TAN, section/rate/threshold master, deduction on purchases and collection on sales, party PAN, register with quarterly and threshold views, and challan tracking with optional late fee/interest; no returns or certificates, threshold enforcement, higher-rate/no-PAN logic, journal deductions or GST+TDS on one voucher |
-| Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit and paid-days proration, casual/sick/earned leave balances and a leave register, bank details, one journal-posting run per month, employee-wise salary register, printable payslips and a bank-transfer CSV, employee and optional employer PF/ESI, and a fixed PT amount; no automatic leave-to-paid-days link, overtime, arrears, general formula language, state PT slabs, ECR/returns, Form 24Q/16 or bank payment workflow |
+| Payroll, statutory deductions | Partial — pay heads, employee master with fixed monthly amounts, joining/exit and paid-days proration, casual/sick/earned leave balances and a leave register, bank details, one regular journal-posting run per month plus supplementary and signed adjustment runs, employee-wise salary register, printable payslips and a bank-transfer CSV, employee and optional employer PF/ESI, and a fixed PT amount; no automatic leave-to-paid-days link, overtime, general formula language, state PT slabs, ECR/returns, Form 24Q/16 or bank payment workflow |
 | Bank reconciliation and statement import | Covered — CSV, OFX, QIF and MT940 statement import, optional opening/closing balance validation, auto/manual matching, adjustment posting and book balance; no Excel or live bank feeds |
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque-book ranges with next numbers, cheque/DD advice, receipt deposit-slip and contra advice previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no multiple instruments per voucher, automatic number allocation, magnetic-ink cheque stationery presets or bank-issued advice formats |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary, break-up and an unallocated-line reconciliation; no merging categories or split allocations |

@@ -590,3 +590,116 @@ test('payroll reversal posts an opposite journal and excludes the run from summa
   assert.equal(deletePayrollRun(company, run.run.id).ok, true);
   assert.equal(company.vouchers.some((voucher) => voucher.id === reversed.voucher.id), false);
 });
+
+test('a supplementary run pays only employees missed by the regular run', () => {
+  const { company } = fixture();
+  const asha = standardEmployee(company);
+  const regular = runPayroll(company, { month: '2026-04' });
+  assert.equal(regular.ok, true, regular.error);
+  assert.equal(regular.run.rows.length, 1);
+
+  const rohan = standardEmployee(company, 'Rohan Das', { dateOfJoining: '2026-04-20' });
+  const supplementary = runPayroll(company, {
+    month: '2026-04',
+    kind: 'Supplementary',
+    reason: 'Late joiner',
+  });
+  assert.equal(supplementary.ok, true, supplementary.error);
+  assert.equal(supplementary.run.kind, 'Supplementary');
+  assert.equal(supplementary.run.reason, 'Late joiner');
+  assert.equal(supplementary.run.rows.length, 1);
+  assert.equal(supplementary.run.rows[0].employeeId, rohan.id);
+  assert.match(supplementary.voucher.narration, /Supplementary payroll/);
+  assert.equal(company.payroll.runs.length, 2);
+  assert.equal(company.vouchers.length, 2);
+
+  const none = runPayroll(company, { month: '2026-04', kind: 'Supplementary' });
+  assert.equal(none.ok, false);
+  assert.match(none.error, /No uncovered active employees/);
+
+  const report = payrollSummary(company, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(report.count, 2);
+  assert.equal(report.runs.filter((run) => run.kind === 'Supplementary').length, 1);
+  assert.equal(report.totals.gross, regular.run.totals.gross + supplementary.run.totals.gross);
+});
+
+test('supplementary and adjustment runs require a regular run first', () => {
+  const { company } = fixture();
+  standardEmployee(company);
+  const early = runPayroll(company, { month: '2026-04', kind: 'Supplementary' });
+  assert.equal(early.ok, false);
+  assert.match(early.error, /regular payroll/i);
+  const adjustment = runPayroll(company, {
+    month: '2026-04',
+    kind: 'Adjustment',
+    adjustments: [],
+  });
+  assert.equal(adjustment.ok, false);
+  assert.match(adjustment.error, /regular payroll/i);
+});
+
+test('an adjustment run allocates explicit signed deltas to employee pay heads', () => {
+  const { company } = fixture();
+  const asha = standardEmployee(company);
+  assert.equal(runPayroll(company, { month: '2026-04' }).ok, true);
+  const basic = head(company, 'Basic Salary');
+  const pf = head(company, 'Provident Fund (Employee)');
+  const adjusted = runPayroll(company, {
+    month: '2026-04',
+    kind: 'Adjustment',
+    reason: 'Bonus and PF correction',
+    adjustments: [
+      { employeeId: asha.id, payHeadId: basic.id, amount: 5000 },
+      { employeeId: asha.id, payHeadId: pf.id, amount: 500 },
+    ],
+  });
+  assert.equal(adjusted.ok, true, adjusted.error);
+  assert.equal(adjusted.run.kind, 'Adjustment');
+  assert.equal(adjusted.run.rows.length, 1);
+  assert.equal(adjusted.run.rows[0].gross, 5000);
+  assert.equal(adjusted.run.rows[0].deductionTotal, 500);
+  assert.equal(adjusted.run.rows[0].net, 4500);
+  const payable = payrollLedgers(company).payable;
+  const basicLine = adjusted.voucher.lines.find((line) => line.ledgerId === basic.ledgerId);
+  const pfLine = adjusted.voucher.lines.find((line) => line.ledgerId === pf.ledgerId);
+  const payableLine = adjusted.voucher.lines.find((line) => line.ledgerId === payable.id);
+  assert.deepEqual({ side: basicLine.side, amount: basicLine.amount }, { side: 'Dr', amount: 5000 });
+  assert.deepEqual({ side: pfLine.side, amount: pfLine.amount }, { side: 'Cr', amount: 500 });
+  assert.deepEqual({ side: payableLine.side, amount: payableLine.amount }, { side: 'Cr', amount: 4500 });
+  assert.equal(trialBalance(company, '2026-04-30').balanced, true);
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  assert.equal(restored.state.companies[0].payroll.runs.find((run) => run.kind === 'Adjustment').totals.net, 4500);
+});
+
+test('a negative adjustment reverses pay and remains valid in backups', () => {
+  const { company } = fixture();
+  const asha = standardEmployee(company);
+  assert.equal(runPayroll(company, { month: '2026-04' }).ok, true);
+  const basic = head(company, 'Basic Salary');
+  const adjusted = runPayroll(company, {
+    month: '2026-04',
+    kind: 'Adjustment',
+    reason: 'Recover overpayment',
+    adjustments: [{ employeeId: asha.id, payHeadId: basic.id, amount: -1000 }],
+  });
+  assert.equal(adjusted.ok, true, adjusted.error);
+  assert.equal(adjusted.run.rows[0].net, -1000);
+  const payable = payrollLedgers(company).payable;
+  const payableLine = adjusted.voucher.lines.find((line) => line.ledgerId === payable.id);
+  const basicLine = adjusted.voucher.lines.find((line) => line.ledgerId === basic.ledgerId);
+  assert.deepEqual({ side: payableLine.side, amount: payableLine.amount }, { side: 'Dr', amount: 1000 });
+  assert.deepEqual({ side: basicLine.side, amount: basicLine.amount }, { side: 'Cr', amount: 1000 });
+  assert.equal(trialBalance(company, '2026-04-30').balanced, true);
+
+  const state = emptyState();
+  state.companies = [company];
+  state.activeCompanyId = company.id;
+  const restored = importState(exportState(state));
+  assert.equal(restored.ok, true, restored.error);
+  assert.equal(restored.state.companies[0].payroll.runs.some((run) => run.kind === 'Adjustment'), true);
+});

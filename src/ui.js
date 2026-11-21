@@ -3682,6 +3682,71 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'payroll-supplementary-form') {
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const result = runPayroll(active, {
+      month: data.get('month'),
+      date: data.get('date'),
+      kind: 'Supplementary',
+      reason: data.get('reason'),
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'payroll-supplementary-error');
+      return;
+    }
+    logAudit(
+      'payroll.supplementary',
+      `Supplementary payroll for ${result.run.month}: ${result.run.totals.employees} employee(s), ${money(result.run.totals.net)} net, posted as Journal ${result.voucher.no}.`,
+      active,
+      result.run.month,
+    );
+    persist();
+    setFlash(`Supplementary payroll posted · ${money(result.run.totals.net)} net.`);
+    navigate('payrollRun', { id: result.run.id });
+    return;
+  }
+
+  if (form.id === 'payroll-adjustment-form') {
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const data = new FormData(form);
+    const adjustments = [];
+    for (const row of form.querySelectorAll('tr.payroll-adjust-row')) {
+      const employeeId = row.querySelector('[name^="adj-employee-"]')?.value ?? '';
+      const payHeadId = row.querySelector('[name^="adj-head-"]')?.value ?? '';
+      const amount = row.querySelector('[name^="adj-amount-"]')?.value.trim() ?? '';
+      if (!employeeId && !payHeadId && !amount) continue;
+      adjustments.push({ employeeId, payHeadId, amount });
+    }
+    const result = runPayroll(active, {
+      month: data.get('month'),
+      date: data.get('date'),
+      kind: 'Adjustment',
+      reason: data.get('reason'),
+      adjustments,
+    });
+    if (!result.ok) {
+      showFormError(result.error, 'payroll-adjustment-error');
+      return;
+    }
+    logAudit(
+      'payroll.adjustment',
+      `Payroll adjustment for ${result.run.month}: ${result.run.totals.employees} employee(s), ${money(result.run.totals.net)} net, posted as Journal ${result.voucher.no}.`,
+      active,
+      result.run.month,
+    );
+    persist();
+    setFlash(`Payroll adjustment posted · ${money(result.run.totals.net)} net.`);
+    navigate('payrollRun', { id: result.run.id });
+    return;
+  }
+
   if (form.id === 'currency-form') {
     if (!can('master.write')) {
       requirePermission('master.write');

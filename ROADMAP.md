@@ -210,7 +210,7 @@ Status: **Done**, **Partial**, **Missing**.
 | Feature | Status |
 | --- | --- |
 | Employee, pay-head and salary-structure masters | Done (Stage 3; fixed monthly amounts, PAN, joining date, active flag, ledger-linked pay heads) |
-| Payroll runs and salary journal | Done (Stage 3; one run per month, one balanced Journal, stored employee snapshot) |
+| Payroll runs and salary journal | Done (Stage 3; one regular run per month plus supplementary and signed adjustment runs, each posting a balanced Journal and storing its employee snapshot) |
 | Payslips and salary register | Done (Stage 3; printable payslip and period register with pay-head, statutory and employee totals, CSV) |
 | Attendance, leave, overtime, arrears, bonus and gratuity | Missing |
 | PF/ESI/PT computation, employer contributions, ECR/returns and Form 24Q/16 | Missing (PF/ESI/PT are manually entered deduction pay heads) |
@@ -344,6 +344,17 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
+
+### 2026-11-21 — Phase 63: supplementary and adjustment payroll runs
+
+- Supplementary runs cover only active employees not already paid in the month,
+  with the normal proration and employer statutory calculation.
+- Adjustment runs allocate explicit signed deltas by employee and pay head,
+  supporting bonus/arrears additions and negative corrections with one balanced
+  Journal per run.
+- Run kinds, reasons, paid-day snapshots, employer totals and reversal details
+  now survive backup normalization; a month can hold multiple non-regular runs.
+- Verification: 362 tests (361 pass, 1 skipped); 1,310.6 kB build.
 
 ### 2026-11-21 — Phase 62: atomic bulk voucher grid
 

@@ -3882,6 +3882,7 @@ export function payrollSummary(company, { from, to } = {}) {
         runId: run.id,
         month: run.month,
         date: run.date,
+        kind: run.kind ?? 'Regular',
         employeeId: row.employeeId,
         employee: row.name,
         gross: row.gross,
@@ -3890,10 +3891,18 @@ export function payrollSummary(company, { from, to } = {}) {
       });
       let employee = employeeMap.get(row.employeeId);
       if (!employee) {
-        employee = { employeeId: row.employeeId, name: row.name, months: 0, gross: 0, deductions: 0, net: 0 };
+        employee = {
+          employeeId: row.employeeId,
+          name: row.name,
+          months: 0,
+          monthSet: new Set(),
+          gross: 0,
+          deductions: 0,
+          net: 0,
+        };
         employeeMap.set(row.employeeId, employee);
       }
-      employee.months += 1;
+      employee.monthSet.add(run.month);
       employee.gross = round2(employee.gross + row.gross);
       employee.deductions = round2(employee.deductions + row.deductionTotal);
       employee.net = round2(employee.net + row.net);
@@ -3949,6 +3958,8 @@ export function payrollSummary(company, { from, to } = {}) {
         id: run.id,
         month: run.month,
         date: run.date,
+        kind: run.kind ?? 'Regular',
+        reason: run.reason ?? '',
         employees: run.totals.employees,
         gross: run.totals.gross,
         deductions: run.totals.deductions,
@@ -3963,7 +3974,9 @@ export function payrollSummary(company, { from, to } = {}) {
     payHeads: [...headMap.values()].sort(
       (a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name),
     ),
-    employees: [...employeeMap.values()].sort((a, b) => b.net - a.net || a.name.localeCompare(b.name)),
+    employees: [...employeeMap.values()]
+      .map(({ monthSet, ...employee }) => ({ ...employee, months: monthSet.size }))
+      .sort((a, b) => b.net - a.net || a.name.localeCompare(b.name)),
     statutory: [...statutoryMap.entries()]
       .map(([tag, amount]) => ({ tag, amount }))
       .sort((a, b) => a.tag.localeCompare(b.tag)),

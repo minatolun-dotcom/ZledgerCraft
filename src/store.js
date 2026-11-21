@@ -2096,12 +2096,13 @@ export function normalizePayroll(company) {
     .filter(Boolean);
 
   const seenRunIds = new Set();
-  const seenRunMonths = new Set();
+  const seenRegularMonths = new Set();
   const runs = (Array.isArray(source.runs) ? source.runs : [])
     .filter((run) => run && typeof run === 'object' && payrollMonthEnd(run.month))
     .map((run) => {
       const month = String(run.month);
       const date = String(run.date ?? '');
+      const runKind = ['Supplementary', 'Adjustment'].includes(run.kind) ? run.kind : 'Regular';
       if (!isValidIsoDate(date) || date.slice(0, 7) !== month) return null;
       const rows = (Array.isArray(run.rows) ? run.rows : [])
         .filter((row) => row && typeof row === 'object' && row.employeeId)
@@ -2109,12 +2110,14 @@ export function normalizePayroll(company) {
           const gross = parseAmount(row.gross);
           const deductionTotal = parseAmount(row.deductionTotal);
           const net = parseAmount(row.net);
-          if (gross === null || gross <= 0 || deductionTotal === null || deductionTotal < 0 || net === null || net < 0) return null;
+          if (gross === null || deductionTotal === null || net === null) return null;
+          if (runKind !== 'Adjustment' && (gross <= 0 || deductionTotal < 0 || net < 0)) return null;
           const entries = (list) =>
             (Array.isArray(list) ? list : [])
               .map((entry) => {
                 const amount = parseAmount(entry?.amount);
-                if (!entry?.payHeadId || !String(entry.name ?? '').trim() || amount === null || amount <= 0) return null;
+                if (!entry?.payHeadId || !String(entry.name ?? '').trim() || amount === null) return null;
+                if (runKind === 'Adjustment' ? amount === 0 : amount <= 0) return null;
                 return {
                   payHeadId: String(entry.payHeadId).slice(0, 80),
                   name: String(entry.name).trim().slice(0, 60),
@@ -2127,11 +2130,16 @@ export function normalizePayroll(company) {
             employeeId: String(row.employeeId).slice(0, 80),
             name: String(row.name ?? '').trim().slice(0, 80),
             ...(row.code ? { code: String(row.code).slice(0, 20) } : {}),
+            ...(row.workedDays !== undefined ? { workedDays: round2(parseAmount(row.workedDays) ?? 0) } : {}),
+            paidDays: round2(parseAmount(row.paidDays) ?? 0),
+            monthDays: round2(parseAmount(row.monthDays) ?? 0),
             earnings: entries(row.earnings),
             deductions: entries(row.deductions),
             gross: round2(gross),
             deductionTotal: round2(deductionTotal),
             net: round2(net),
+            ...(parseAmount(row.employerPf) ? { employerPf: round2(parseAmount(row.employerPf)) } : {}),
+            ...(parseAmount(row.employerEsi) ? { employerEsi: round2(parseAmount(row.employerEsi)) } : {}),
           };
         })
         .filter(Boolean);
@@ -2141,17 +2149,39 @@ export function normalizePayroll(company) {
         gross: round2(rows.reduce((sum, row) => sum + row.gross, 0)),
         deductions: round2(rows.reduce((sum, row) => sum + row.deductionTotal, 0)),
         net: round2(rows.reduce((sum, row) => sum + row.net, 0)),
+        employerPf: round2(rows.reduce((sum, row) => sum + (row.employerPf ?? 0), 0)),
+        employerEsi: round2(rows.reduce((sum, row) => sum + (row.employerEsi ?? 0), 0)),
       };
+      totals.employerCost = round2(totals.employerPf + totals.employerEsi);
       const id = String(run.id || uid('run')).slice(0, 80);
-      if (seenRunIds.has(id) || seenRunMonths.has(month)) return null;
+      if (seenRunIds.has(id)) return null;
+      if (runKind === 'Regular' && seenRegularMonths.has(month)) return null;
       seenRunIds.add(id);
-      seenRunMonths.add(month);
+      if (runKind === 'Regular') seenRegularMonths.add(month);
       return {
         id,
         month,
         date,
+        kind: runKind,
+        ...(run.reason ? { reason: String(run.reason).trim().slice(0, 200) } : {}),
         rows,
         totals,
+        ...(Array.isArray(run.adjustments)
+          ? {
+              adjustments: run.adjustments
+                .filter((entry) => entry && entry.employeeId && entry.payHeadId)
+                .map((entry) => ({
+                  employeeId: String(entry.employeeId).slice(0, 80),
+                  payHeadId: String(entry.payHeadId).slice(0, 80),
+                  amount: round2(parseAmount(entry.amount) ?? 0),
+                })),
+            }
+          : {}),
+        ...(run.reversedAt ? { reversedAt: String(run.reversedAt) } : {}),
+        ...(run.reversalVoucherId ? { reversalVoucherId: String(run.reversalVoucherId) } : {}),
+        ...(run.reversalDate && isValidIsoDate(String(run.reversalDate))
+          ? { reversalDate: String(run.reversalDate) }
+          : {}),
         ...(run.voucherId && (company.vouchers ?? []).some((voucher) => voucher.id === run.voucherId)
           ? { voucherId: String(run.voucherId).slice(0, 80) }
           : {}),
@@ -2159,7 +2189,12 @@ export function normalizePayroll(company) {
       };
     })
     .filter(Boolean)
-    .sort((a, b) => a.month.localeCompare(b.month));
+    .sort(
+      (a, b) =>
+        a.month.localeCompare(b.month) ||
+        (a.kind === 'Regular' ? 0 : a.kind === 'Supplementary' ? 1 : 2) -
+          (b.kind === 'Regular' ? 0 : b.kind === 'Supplementary' ? 1 : 2),
+    );
 
   const leaveRecords = (Array.isArray(source.leaveRecords) ? source.leaveRecords : [])
     .filter((record) => record && record.id && isValidIsoDate(record.from) && isValidIsoDate(record.to) && record.to >= record.from)
@@ -2648,15 +2683,40 @@ export function runPayroll(company, input = {}) {
   const month = String(input.month ?? '');
   const end = payrollMonthEnd(month);
   if (!end) return { ok: false, error: 'Choose the payroll month as YYYY-MM.' };
-  if ((company.payroll.runs ?? []).some((run) => run.month === month)) {
+  const kind = ['Supplementary', 'Adjustment'].includes(input.kind) ? input.kind : 'Regular';
+  const reason = String(input.reason ?? '').trim().slice(0, 200);
+  const monthRuns = (company.payroll.runs ?? []).filter((run) => run.month === month);
+  const regularRun = monthRuns.find((run) => (run.kind ?? 'Regular') === 'Regular') ?? null;
+  if (kind === 'Regular' && regularRun) {
     return { ok: false, error: `Payroll for ${month} has already been run.` };
+  }
+  if (kind !== 'Regular' && !regularRun) {
+    return { ok: false, error: `Run the regular payroll for ${month} first, then add a ${kind.toLowerCase()} run.` };
   }
   const date = String(input.date ?? '').trim() || end;
   if (!isValidIsoDate(date) || date.slice(0, 7) !== month) {
     return { ok: false, error: 'The payroll date must fall inside the payroll month.' };
   }
+  if (kind === 'Adjustment') {
+    return postPayrollAdjustment(company, { month, date, reason, adjustments: input.adjustments });
+  }
   const heads = new Map((company.payroll.payHeads ?? []).map((head) => [head.id, head]));
-  const employees = (company.payroll.employees ?? []).filter((employee) => employee.active);
+  let employees = (company.payroll.employees ?? []).filter((employee) => employee.active);
+  if (kind === 'Supplementary') {
+    const covered = new Set(monthRuns.flatMap((run) => (run.rows ?? []).map((row) => row.employeeId)));
+    const selected = Array.isArray(input.employeeIds) && input.employeeIds.length
+      ? new Set(input.employeeIds.map(String))
+      : null;
+    employees = employees.filter(
+      (employee) => !covered.has(employee.id) && (!selected || selected.has(employee.id)),
+    );
+    if (!employees.length) {
+      return {
+        ok: false,
+        error: 'No uncovered active employees remain for this month. Use an adjustment run for extra or reversed amounts.',
+      };
+    }
+  }
   if (!employees.length) return { ok: false, error: 'Add an active employee before running payroll.' };
 
   const monthDays = Number(end.slice(8, 10));
@@ -2770,7 +2830,7 @@ export function runPayroll(company, input = {}) {
   const posted = addVoucher(company, {
     type: 'Journal',
     date,
-    narration: `Payroll for ${month}`,
+    narration: `${kind === 'Supplementary' ? 'Supplementary payroll' : 'Payroll'} for ${month}${reason ? `: ${reason}` : ''}`,
     lines,
   });
   if (!posted.ok) return posted;
@@ -2779,8 +2839,133 @@ export function runPayroll(company, input = {}) {
     id: uid('run'),
     month,
     date,
+    kind,
+    ...(reason ? { reason } : {}),
     voucherId: posted.voucher.id,
     rows,
+    totals,
+    createdAt: new Date().toISOString(),
+  };
+  posted.voucher.payrollRunId = run.id;
+  company.payroll.runs = [...(company.payroll.runs ?? []), run].sort((a, b) => a.month.localeCompare(b.month));
+  return { ok: true, run, voucher: posted.voucher };
+}
+
+function postPayrollAdjustment(company, { month, date, reason, adjustments }) {
+  const entries = Array.isArray(adjustments) ? adjustments : [];
+  if (!entries.length) return { ok: false, error: 'Add at least one employee and pay-head adjustment.' };
+  if (entries.length > 200) return { ok: false, error: 'Post at most 200 adjustment lines in one run.' };
+  const heads = new Map((company.payroll.payHeads ?? []).map((head) => [head.id, head]));
+  const employees = new Map((company.payroll.employees ?? []).map((employee) => [employee.id, employee]));
+  const payable =
+    (company.ledgers ?? []).find((ledger) => ledger.id === company.payroll.salaryPayableLedgerId) ??
+    payrollLedgers(company).payable;
+  if (!payable) return { ok: false, error: 'Salary Payable ledger is missing. Save the payroll setup again to recreate it.' };
+
+  const byEmployee = new Map();
+  const debitTotals = new Map();
+  const creditTotals = new Map();
+  const add = (map, ledgerId, amount) => map.set(ledgerId, round2((map.get(ledgerId) ?? 0) + amount));
+  const snapshot = [];
+  for (const [index, entry] of entries.entries()) {
+    const employee = employees.get(String(entry?.employeeId ?? ''));
+    if (!employee) return { ok: false, error: `Adjustment line ${index + 1}: choose an employee.` };
+    const head = heads.get(String(entry?.payHeadId ?? ''));
+    if (!head) return { ok: false, error: `Adjustment line ${index + 1}: choose a pay head.` };
+    if (!head.ledgerId || !(company.ledgers ?? []).some((ledger) => ledger.id === head.ledgerId)) {
+      return { ok: false, error: `Adjustment line ${index + 1}: ${head.name} has no ledger.` };
+    }
+    const amount = parseAmount(entry?.amount);
+    if (amount === null || amount === 0) {
+      return { ok: false, error: `Adjustment line ${index + 1}: enter a non-zero signed amount.` };
+    }
+    if (Math.abs(amount) > 100000000) {
+      return { ok: false, error: `Adjustment line ${index + 1}: the amount is too large.` };
+    }
+    let row = byEmployee.get(employee.id);
+    if (!row) {
+      row = {
+        employeeId: employee.id,
+        name: employee.name,
+        ...(employee.code ? { code: employee.code } : {}),
+        paidDays: 0,
+        monthDays: 0,
+        earnings: [],
+        deductions: [],
+        gross: 0,
+        deductionTotal: 0,
+        net: 0,
+      };
+      byEmployee.set(employee.id, row);
+    }
+    const line = {
+      payHeadId: head.id,
+      name: head.name,
+      amount,
+      ...(head.statutory ? { statutory: head.statutory } : {}),
+    };
+    if (head.kind === 'Earning') {
+      row.earnings.push(line);
+      row.gross = round2(row.gross + amount);
+      if (amount > 0) {
+        add(debitTotals, head.ledgerId, amount);
+        add(creditTotals, payable.id, amount);
+      } else {
+        add(creditTotals, head.ledgerId, -amount);
+        add(debitTotals, payable.id, -amount);
+      }
+    } else {
+      row.deductions.push(line);
+      row.deductionTotal = round2(row.deductionTotal + amount);
+      if (amount > 0) {
+        add(creditTotals, head.ledgerId, amount);
+        add(debitTotals, payable.id, amount);
+      } else {
+        add(debitTotals, head.ledgerId, -amount);
+        add(creditTotals, payable.id, -amount);
+      }
+    }
+    snapshot.push({ employeeId: employee.id, payHeadId: head.id, amount });
+  }
+
+  const rows = [...byEmployee.values()].map((row) => ({
+    ...row,
+    net: round2(row.gross - row.deductionTotal),
+  }));
+  const totals = {
+    employees: rows.length,
+    gross: round2(rows.reduce((sum, row) => sum + row.gross, 0)),
+    deductions: round2(rows.reduce((sum, row) => sum + row.deductionTotal, 0)),
+    net: round2(rows.reduce((sum, row) => sum + row.net, 0)),
+    employerPf: 0,
+    employerEsi: 0,
+    employerCost: 0,
+  };
+  const netTotals = new Map();
+  for (const [ledgerId, amount] of debitTotals) netTotals.set(ledgerId, round2((netTotals.get(ledgerId) ?? 0) + amount));
+  for (const [ledgerId, amount] of creditTotals) netTotals.set(ledgerId, round2((netTotals.get(ledgerId) ?? 0) - amount));
+  const lines = [];
+  for (const [ledgerId, amount] of netTotals) {
+    if (Math.abs(amount) < 0.005) continue;
+    lines.push({ ledgerId, side: amount > 0 ? 'Dr' : 'Cr', amount: Math.abs(amount) });
+  }
+  if (!lines.length) return { ok: false, error: 'The adjustment has no net ledger effect.' };
+  const posted = addVoucher(company, {
+    type: 'Journal',
+    date,
+    narration: `Payroll adjustment for ${month}${reason ? `: ${reason}` : ''}`,
+    lines,
+  });
+  if (!posted.ok) return posted;
+  const run = {
+    id: uid('run'),
+    month,
+    date,
+    kind: 'Adjustment',
+    ...(reason ? { reason } : {}),
+    voucherId: posted.voucher.id,
+    rows,
+    adjustments: snapshot,
     totals,
     createdAt: new Date().toISOString(),
   };
@@ -2792,18 +2977,20 @@ export function runPayroll(company, input = {}) {
 export function payrollBankTransferRows(company, runId) {
   const run = (company.payroll?.runs ?? []).find((entry) => entry.id === runId);
   if (!run) return { ok: false, error: 'Payroll run not found.' };
-  const rows = run.rows.map((row) => {
-    const employee = (company.payroll?.employees ?? []).find((entry) => entry.id === row.employeeId);
-    return {
-      employeeId: row.employeeId,
-      name: row.name,
-      code: row.code ?? employee?.code ?? '',
-      bankName: employee?.bankName ?? '',
-      accountNumber: employee?.bankAccount ?? '',
-      ifsc: employee?.ifsc ?? '',
-      net: row.net,
-    };
-  });
+  const rows = run.rows
+    .filter((row) => row.net > 0)
+    .map((row) => {
+      const employee = (company.payroll?.employees ?? []).find((entry) => entry.id === row.employeeId);
+      return {
+        employeeId: row.employeeId,
+        name: row.name,
+        code: row.code ?? employee?.code ?? '',
+        bankName: employee?.bankName ?? '',
+        accountNumber: employee?.bankAccount ?? '',
+        ifsc: employee?.ifsc ?? '',
+        net: row.net,
+      };
+    });
   const missing = rows.filter((row) => !row.accountNumber || !row.ifsc).map((row) => row.name);
   return { ok: true, run, rows, missing };
 }
@@ -7248,12 +7435,19 @@ function validateImportedCompany(company) {
     if (!Array.isArray(payroll.runs)) return `Company "${name}" has invalid payroll runs.`;
     const payrollVoucherIds = new Set(company.vouchers.map((voucher) => voucher.id));
     const runIds = new Set();
-    const runMonths = new Set();
+    const regularMonths = new Set();
     for (const run of payroll.runs) {
       if (!run?.id || runIds.has(run.id) || !payrollMonthEnd(run.month)) {
         return `Company "${name}" has an invalid payroll run.`;
       }
-      if (runMonths.has(run.month)) return `Company "${name}" has duplicate payroll months.`;
+      const runKind = run.kind ?? 'Regular';
+      if (!['Regular', 'Supplementary', 'Adjustment'].includes(runKind)) {
+        return `Company "${name}": payroll run ${run.month} has an invalid kind.`;
+      }
+      if (runKind === 'Regular') {
+        if (regularMonths.has(run.month)) return `Company "${name}" has duplicate regular payroll months.`;
+        regularMonths.add(run.month);
+      }
       if (!isValidIsoDate(String(run.date ?? '')) || String(run.date).slice(0, 7) !== run.month) {
         return `Company "${name}": payroll run ${run.month} has an invalid date.`;
       }
@@ -7273,8 +7467,11 @@ function validateImportedCompany(company) {
         if (!row?.employeeId || rowGross === null || rowDeductions === null || rowNet === null) {
           return `Company "${name}": payroll run ${run.month} has an invalid employee row.`;
         }
-        if (rowGross <= 0 || rowDeductions < 0 || rowNet < 0 || Math.abs(round2(rowGross - rowDeductions) - rowNet) >= 0.01) {
+        if (Math.abs(round2(rowGross - rowDeductions) - rowNet) >= 0.01) {
           return `Company "${name}": payroll run ${run.month} does not reconcile an employee row.`;
+        }
+        if (runKind !== 'Adjustment' && (rowGross <= 0 || rowDeductions < 0 || rowNet < 0)) {
+          return `Company "${name}": payroll run ${run.month} has an invalid employee amount.`;
         }
         gross = round2(gross + rowGross);
         deductions = round2(deductions + rowDeductions);
@@ -7289,7 +7486,6 @@ function validateImportedCompany(company) {
         return `Company "${name}": payroll run ${run.month} has inconsistent totals.`;
       }
       runIds.add(run.id);
-      runMonths.add(run.month);
     }
   }
 

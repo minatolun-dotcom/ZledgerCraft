@@ -16521,19 +16521,22 @@ function eInvoiceRegister(company, filters = {}) {
 }
 
 function ewayPayload(company, document, voucher, seller, buyer, lines, partB = null) {
-  const items = lines.map((line, index) => ({
-    itemNo: index + 1,
-    productName: line.description,
-    productDesc: line.description,
-    hsnCode: line.hsn,
-    quantity: Number(line.qty) || 0,
-    qtyUnit: line.unit,
-    cgstRate: document.supplyType === 'Intra' ? (Number(document.rate) || 0) / 2 : 0,
-    sgstRate: document.supplyType === 'Intra' ? (Number(document.rate) || 0) / 2 : 0,
-    igstRate: document.supplyType === 'Inter' ? Number(document.rate) || 0 : 0,
-    cessRate: Number(document.cessRate) || 0,
-    taxableAmount: round2(line.taxable),
-  }));
+  const items = eInvoiceRatedLines(document, lines).map((line, index) => {
+    const rate = Number(line.rate ?? document.rate) || 0;
+    return {
+      itemNo: index + 1,
+      productName: line.description,
+      productDesc: line.description,
+      hsnCode: line.hsn,
+      quantity: Number(line.qty) || 0,
+      qtyUnit: line.unit,
+      cgstRate: document.supplyType === 'Intra' ? round2(rate / 2) : 0,
+      sgstRate: document.supplyType === 'Intra' ? round2(rate / 2) : 0,
+      igstRate: document.supplyType === 'Inter' ? rate : 0,
+      cessRate: Number(line.cessRate ?? document.cessRate) || 0,
+      taxableAmount: round2(line.taxable),
+    };
+  });
 
   return {
     Version: '1.0.0620',

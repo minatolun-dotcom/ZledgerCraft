@@ -312,6 +312,8 @@ test('e-way bill register uses the 50,000 threshold and saves Part B details', (
   assert.equal(payload.totalValue, 118000);
   assert.equal(payload.cgstValue, 9000);
   assert.equal(payload.sgstValue, 9000);
+  assert.equal(payload.itemList[0].cgstRate, 9);
+  assert.equal(payload.itemList[0].igstRate, 0);
   assert.equal(payload.itemList[0].hsnCode, '6109');
   assert.equal(payload.itemList[0].qtyUnit, 'NOS');
   assert.match(report.rows[0].warnings.join(' '), /Part B/);

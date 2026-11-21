@@ -373,8 +373,9 @@ inside those stages.
 - E-invoice drafts now cover outward credit and debit notes as CRN/DBN
   documents, with the linked original invoice number and date.
 - Mixed-rate invoices allocate item value across the stored GST rate buckets,
-  so each draft item carries its own GstRt and matching tax amount.
-- Verification: 383 tests (382 pass, 1 skipped); 1,381.2 kB build.
+  so each e-invoice and e-way draft item carries its own GST rate and matching
+  tax amount.
+- Verification: 383 tests (382 pass, 1 skipped); 1,381.3 kB build.
 
 ### 2026-11-21 — Phase 66: payroll statutory working papers
 

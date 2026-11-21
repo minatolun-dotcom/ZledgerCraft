@@ -607,7 +607,8 @@ disabled.
   minimum (₹50,000 by default), consignee, destination state, taxable and invoice
   value, Part A readiness notes, saved Part B transporter, vehicle and distance
   details per invoice, and distance-based validity with its expiry date, plus a
-  draft JSON download. Nothing is submitted to the portal.
+  draft JSON download with mixed-rate item lines. Nothing is submitted to the
+  portal.
 - Compliance calendar: user-managed GST, TDS, payroll and other filing tasks
   with title, due date, category and notes. Open tasks are flagged overdue or
   due within seven days, and tasks can be edited, marked done, reopened and

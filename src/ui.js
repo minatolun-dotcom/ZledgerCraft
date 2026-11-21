@@ -1316,6 +1316,14 @@ export function prepareDraft(type, source = null) {
       ? source.lines.map((line) => ({
           ...line,
           amount: line.currencyAmount ?? line.amount,
+          ...(Array.isArray(line.costCentreAllocations)
+            ? {
+                costCentreAllocations: line.costCentreAllocations.map((allocation) => ({
+                  ...allocation,
+                  amount: allocation.currencyAmount ?? allocation.amount,
+                })),
+              }
+            : {}),
           allocations: (line.allocations ?? []).map((allocation) => ({ ...allocation })),
         }))
       : voucherFormLines(type),
@@ -1500,10 +1508,15 @@ export function formLines(form) {
       ledgerId: ledgerIdByName(row.querySelector('input.ledger').value),
       side: row.querySelector('select.side').value,
       amount: row.querySelector('input.amount').value,
-      costCentreId: row.querySelector('select.cost-centre')?.value ?? '',
       gstRateId: row.querySelector('select.gst-line-rate')?.value ?? '',
       tdsSectionId: row.querySelector('select.tds-line-section')?.value ?? '',
     };
+    const costAllocations = [...row.querySelectorAll('.cost-allocation-entry')].map((entry) => ({
+      centreId: entry.querySelector('select.alloc-centre')?.value ?? '',
+      amount: entry.querySelector('input.alloc-centre-amount')?.value ?? '',
+    }));
+    if (costAllocations.length) line.costCentreAllocations = costAllocations;
+    else line.costCentreId = row.querySelector('select.cost-centre')?.value ?? '';
     if (allocationsByLine.has(index)) line.allocations = allocationsByLine.get(index);
     return line;
   });
@@ -6698,6 +6711,49 @@ async function handleClick(event) {
       render();
       const inputs = document.querySelectorAll('#voucher-form input.ledger');
       inputs[inputs.length - 1]?.focus();
+      break;
+    }
+    case 'split-cost-centre': {
+      captureDraft();
+      const line = draft.lines[Number(trigger.dataset.index)];
+      if (!line) break;
+      if (!Array.isArray(line.costCentreAllocations) || !line.costCentreAllocations.length) {
+        line.costCentreAllocations = [
+          { centreId: line.costCentreId || '', amount: line.amount || '' },
+          { centreId: '', amount: '' },
+        ];
+        delete line.costCentreId;
+      }
+      render();
+      document.querySelector('.cost-allocation-entry input.alloc-centre-amount')?.focus();
+      break;
+    }
+    case 'add-cost-allocation': {
+      captureDraft();
+      const line = draft.lines[Number(trigger.dataset.index)];
+      if (!line || !Array.isArray(line.costCentreAllocations)) break;
+      line.costCentreAllocations.push({ centreId: '', amount: '' });
+      render();
+      const rows = document.querySelectorAll('.cost-allocation-entry');
+      rows[rows.length - 1]?.querySelector('input.alloc-centre-amount')?.focus();
+      break;
+    }
+    case 'remove-cost-allocation': {
+      captureDraft();
+      const line = draft.lines[Number(trigger.dataset.index)];
+      if (!line || !Array.isArray(line.costCentreAllocations)) break;
+      line.costCentreAllocations.splice(Number(trigger.dataset.allocation), 1);
+      if (!line.costCentreAllocations.length) delete line.costCentreAllocations;
+      render();
+      break;
+    }
+    case 'single-cost-centre': {
+      captureDraft();
+      const line = draft.lines[Number(trigger.dataset.index)];
+      if (!line || !Array.isArray(line.costCentreAllocations) || !line.costCentreAllocations.length) break;
+      line.costCentreId = line.costCentreAllocations.find((allocation) => allocation.centreId)?.centreId ?? '';
+      delete line.costCentreAllocations;
+      render();
       break;
     }
     case 'add-instrument': {

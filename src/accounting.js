@@ -7,6 +7,7 @@ import {
   gstStateName,
   gstinChecksumValid,
   isValidIsoDate,
+  lineCostAllocations,
   orderRemainingItems,
   parseAmount,
   primaryGroupOf,
@@ -936,28 +937,33 @@ export function costCentreSummary(company, filters = {}) {
   for (const voucher of vouchersSorted(company)) {
     if (voucher.date < from || voucher.date > to) continue;
     for (const line of voucher.lines ?? []) {
-      if (!line.costCentreId) {
+      const allocations = lineCostAllocations(line);
+      let allocated = 0;
+      for (const allocation of allocations) {
+        allocated = round2(allocated + allocation.amount);
+        const centre = byCentre.get(allocation.centreId);
+        if (!centre) continue;
+        const category = byCategory.get(centre.categoryId);
+        const amount = allocation.amount;
+        if (line.side === 'Cr') {
+          centre.credit = round2(centre.credit + amount);
+          if (category) category.credit = round2(category.credit + amount);
+        } else {
+          centre.debit = round2(centre.debit + amount);
+          if (category) category.debit = round2(category.debit + amount);
+        }
+        centre.vouchers.add(voucher.id);
+        if (category) category.vouchers.add(voucher.id);
+      }
+      const remainder = round2(round2(line.amount) - allocated);
+      if (remainder > EPSILON) {
         const key = line.ledgerId;
         const entry = unallocated.get(key) ?? { ledgerId: key, debit: 0, credit: 0 };
-        if (line.side === 'Cr') entry.credit = round2(entry.credit + round2(line.amount));
-        else entry.debit = round2(entry.debit + round2(line.amount));
+        if (line.side === 'Cr') entry.credit = round2(entry.credit + remainder);
+        else entry.debit = round2(entry.debit + remainder);
         unallocated.set(key, entry);
         unallocatedVouchers.add(voucher.id);
-        continue;
       }
-      const centre = byCentre.get(line.costCentreId);
-      if (!centre) continue;
-      const category = byCategory.get(centre.categoryId);
-      const amount = round2(line.amount);
-      if (line.side === 'Cr') {
-        centre.credit = round2(centre.credit + amount);
-        if (category) category.credit = round2(category.credit + amount);
-      } else {
-        centre.debit = round2(centre.debit + amount);
-        if (category) category.debit = round2(category.debit + amount);
-      }
-      centre.vouchers.add(voucher.id);
-      if (category) category.vouchers.add(voucher.id);
     }
   }
 
@@ -1048,25 +1054,27 @@ export function costCategoryPnl(company, filters = {}) {
   for (const voucher of vouchersSorted(company)) {
     if (voucher.date < from || voucher.date > to) continue;
     for (const line of voucher.lines ?? []) {
-      const categoryId = centreCategory.get(line.costCentreId);
-      if (!categoryId) continue;
-      const category = byCategory.get(categoryId);
       const ledger = ledgerById.get(line.ledgerId);
-      if (!category || !ledger) continue;
+      if (!ledger) continue;
       const nature = groupNature(company, ledger.groupId);
       if (nature !== 'Income' && nature !== 'Expense') continue;
-      const amount = round2(line.amount);
       const direct = isDirectGroup(company, ledger.groupId);
-      if (nature === 'Income') {
-        const net = line.side === 'Cr' ? amount : -amount;
-        if (direct) category.directIncome = round2(category.directIncome + net);
-        else category.indirectIncome = round2(category.indirectIncome + net);
-      } else {
-        const net = line.side === 'Dr' ? amount : -amount;
-        if (direct) category.directExpense = round2(category.directExpense + net);
-        else category.indirectExpense = round2(category.indirectExpense + net);
+      for (const allocation of lineCostAllocations(line)) {
+        const categoryId = centreCategory.get(allocation.centreId);
+        const category = categoryId ? byCategory.get(categoryId) : null;
+        if (!category) continue;
+        const amount = allocation.amount;
+        if (nature === 'Income') {
+          const net = line.side === 'Cr' ? amount : -amount;
+          if (direct) category.directIncome = round2(category.directIncome + net);
+          else category.indirectIncome = round2(category.indirectIncome + net);
+        } else {
+          const net = line.side === 'Dr' ? amount : -amount;
+          if (direct) category.directExpense = round2(category.directExpense + net);
+          else category.indirectExpense = round2(category.indirectExpense + net);
+        }
+        category.vouchers.add(voucher.id);
       }
-      category.vouchers.add(voucher.id);
     }
   }
 
@@ -1124,10 +1132,11 @@ export function costCentreBreakup(company, centreId, filters = {}) {
   for (const voucher of vouchersSorted(company)) {
     if (voucher.date < from || voucher.date > to) continue;
     for (const line of voucher.lines ?? []) {
-      if (line.costCentreId !== centreId) continue;
+      const allocation = lineCostAllocations(line).find((entry) => entry.centreId === centreId);
+      if (!allocation) continue;
       const ledger = ledgerById.get(line.ledgerId);
       const ledgerName = ledger?.name ?? 'Unknown';
-      const amount = round2(line.amount);
+      const amount = allocation.amount;
       rows.push({
         voucherId: voucher.id,
         date: voucher.date,
@@ -1674,14 +1683,23 @@ export function budgetVsActual(company, filters = {}) {
       for (const voucher of company.vouchers ?? []) {
         if (voucher.date < year.start || voucher.date > asOn) continue;
         for (const line of voucher.lines ?? []) {
-          const matches = costCentre
-            ? line.costCentreId === target.id
-            : costCategory
-              ? categoryByCentre.get(line.costCentreId) === target.id
-              : ledgerIds.has(line.ledgerId);
-          if (!matches) continue;
-          if (line.side === 'Cr') credit = round2(credit + line.amount);
-          else debit = round2(debit + line.amount);
+          let amount = round2(line.amount);
+          if (costCentre || costCategory) {
+            amount = round2(
+              lineCostAllocations(line)
+                .filter((allocation) =>
+                  costCentre
+                    ? allocation.centreId === target.id
+                    : categoryByCentre.get(allocation.centreId) === target.id,
+                )
+                .reduce((sum, allocation) => sum + allocation.amount, 0),
+            );
+            if (amount <= 0) continue;
+          } else if (!ledgerIds.has(line.ledgerId)) {
+            continue;
+          }
+          if (line.side === 'Cr') credit = round2(credit + amount);
+          else debit = round2(debit + amount);
         }
       }
       const nature = costCentre

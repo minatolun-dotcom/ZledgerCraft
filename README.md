@@ -379,9 +379,10 @@ disabled.
   number, instrument date and bank ledger. The selected bank must also appear on
   a voucher line. Instrument dates later than the voucher are marked post-dated;
   manual cleared/stopped/cancelled changes keep a short status history.
-- Cost centre on any voucher line (one centre per line), with the centre shown
-  on the accepted voucher. Unallocated lines remain valid and stay outside
-  cost-centre reports.
+- Cost centre on any voucher line, either one centre for the full line or an
+  amount split across several centres. A split must add up to the line amount;
+  the accepted voucher shows each centre's share. Unallocated lines remain valid
+  and stay outside cost-centre reports.
 - Bill-wise details: a bill number and due date on sales and purchases, and
   receipts, payments, journals and returns can settle a specific bill. Anything
   unallocated still settles the oldest bill, then becomes an advance. The
@@ -555,10 +556,10 @@ disabled.
   instruments a deposit-or-withdrawal advice.
 - Cost centre summary by category and centre, with debit/credit/net, voucher
   counts, period filter, a category P&L for tagged income and expense, an
-  unallocated-line reconciliation and click-through to a cost-centre break-up
-  with ledger-wise movement and voucher lines. Each centre can carry a net debit
-  or credit opening per financial year; reports show net with opening and budget
-  actuals can include it.
+  unallocated-share reconciliation and click-through to a cost-centre break-up
+  with ledger-wise movement and voucher lines. Split line amounts are counted
+  per centre share. Each centre can carry a net debit or credit opening per
+  financial year; reports show net with opening and budget actuals can include it.
 - Budget vs Actual by ledger, group, cost centre or cost category for a
   financial year and as-on date: budget, actual, variance, used percentage,
   over-budget status and Print/CSV. A budget may carry an optional four-quarter

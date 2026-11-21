@@ -1019,6 +1019,32 @@ export function partyOpenBills(company, ledgerId, options = {}) {
   return bills;
 }
 
+/**
+ * Cost-centre shares on a voucher line. Older lines have one full-line centre;
+ * newer lines can split the amount across several centres.
+ */
+export function lineCostAllocations(line) {
+  if (!line || typeof line !== 'object') return [];
+  if (Array.isArray(line.costCentreAllocations) && line.costCentreAllocations.length) {
+    return line.costCentreAllocations
+      .filter((allocation) => allocation && allocation.centreId)
+      .map((allocation) => ({
+        centreId: String(allocation.centreId),
+        amount: round2(parseAmount(allocation.amount) ?? 0),
+      }))
+      .filter((allocation) => allocation.amount > 0);
+  }
+  if (line.costCentreId) {
+    return [
+      {
+        centreId: String(line.costCentreId),
+        amount: round2(parseAmount(line.amount) ?? 0),
+      },
+    ];
+  }
+  return [];
+}
+
 // Existing companies from older versions have no cost-centre masters yet.
 function seedCostMasters(company) {
   if (!Array.isArray(company.costCategories) || company.costCategories.length === 0) {
@@ -1095,6 +1121,31 @@ export function normalizeCostMasters(company) {
   for (const voucher of company.vouchers ?? []) {
     for (const line of voucher.lines ?? []) {
       if (line.costCentreId && !centreIds.has(line.costCentreId)) delete line.costCentreId;
+      if (line.costCentreAllocations !== undefined) {
+        if (!Array.isArray(line.costCentreAllocations)) {
+          delete line.costCentreAllocations;
+          continue;
+        }
+        const seenCentres = new Set();
+        const allocations = line.costCentreAllocations
+          .filter((allocation) => allocation && typeof allocation === 'object')
+          .map((allocation) => ({
+            centreId: String(allocation.centreId || ''),
+            amount: round2(parseAmount(allocation.amount) ?? 0),
+          }))
+          .filter((allocation) => {
+            if (!allocation.centreId || !centreIds.has(allocation.centreId)) return false;
+            if (allocation.amount <= 0 || seenCentres.has(allocation.centreId)) return false;
+            seenCentres.add(allocation.centreId);
+            return true;
+          });
+        if (allocations.length) {
+          line.costCentreAllocations = allocations;
+          delete line.costCentreId;
+        } else {
+          delete line.costCentreAllocations;
+        }
+      }
     }
   }
   return company;
@@ -3818,7 +3869,7 @@ export function costCentreUsage(company, centreId) {
   let count = 0;
   for (const voucher of company.vouchers ?? []) {
     for (const line of voucher.lines ?? []) {
-      if (line.costCentreId === centreId) count += 1;
+      if (lineCostAllocations(line).some((allocation) => allocation.centreId === centreId)) count += 1;
     }
   }
   return count;
@@ -3880,9 +3931,32 @@ export function mergeCostCentre(company, sourceId, targetId) {
   let linesMoved = 0;
   for (const voucher of company.vouchers ?? []) {
     for (const line of voucher.lines ?? []) {
-      if (line.costCentreId !== source.id) continue;
-      line.costCentreId = target.id;
-      linesMoved += 1;
+      let moved = false;
+      if (line.costCentreId === source.id) {
+        line.costCentreId = target.id;
+        moved = true;
+      }
+      if (Array.isArray(line.costCentreAllocations)) {
+        const merged = [];
+        const byCentre = new Map();
+        for (const allocation of line.costCentreAllocations) {
+          if (!allocation || typeof allocation !== 'object') continue;
+          if (allocation.centreId === source.id) moved = true;
+          const centreId = allocation.centreId === source.id ? target.id : allocation.centreId;
+          const amount = round2(parseAmount(allocation.amount) ?? 0);
+          if (!centreId || amount <= 0) continue;
+          const existing = byCentre.get(centreId);
+          if (existing) existing.amount = round2(existing.amount + amount);
+          else {
+            const next = { centreId: String(centreId), amount };
+            byCentre.set(centreId, next);
+            merged.push(next);
+          }
+        }
+        if (merged.length) line.costCentreAllocations = merged;
+        else delete line.costCentreAllocations;
+      }
+      if (moved) linesMoved += 1;
     }
   }
   for (const budget of sourceBudgets) budget.targetId = target.id;
@@ -4283,7 +4357,42 @@ export function validateVoucherInput(company, type, input, options = {}) {
     const parsed = { ledgerId: line.ledgerId, side, amount };
     if (foreign) parsed.currencyAmount = rawAmount;
     const costCentreId = String(line.costCentreId ?? '').trim();
-    if (costCentreId) {
+    const rawCostAllocations = Array.isArray(line.costCentreAllocations) ? line.costCentreAllocations : [];
+    if (rawCostAllocations.length) {
+      if (costCentreId) {
+        return { ok: false, error: `Line ${index + 1}: choose either one cost centre or a split, not both.` };
+      }
+      const allocations = [];
+      const seenCentres = new Set();
+      let allocatedCost = 0;
+      for (const [allocationIndex, allocation] of rawCostAllocations.entries()) {
+        const centreId = String(allocation?.centreId ?? '').trim();
+        if (!centreId) {
+          return { ok: false, error: `Line ${index + 1}, cost-centre split ${allocationIndex + 1}: choose a centre.` };
+        }
+        if (!(company.costCentres ?? []).some((centre) => centre.id === centreId)) {
+          return { ok: false, error: `Line ${index + 1}: that cost centre no longer exists.` };
+        }
+        if (seenCentres.has(centreId)) {
+          return { ok: false, error: `Line ${index + 1}: use each cost centre once per line.` };
+        }
+        const allocationAmount = parseAmount(allocation?.amount);
+        if (allocationAmount === null || allocationAmount <= 0) {
+          return { ok: false, error: `Line ${index + 1}: enter an amount for every cost-centre split.` };
+        }
+        seenCentres.add(centreId);
+        allocatedCost = round2(allocatedCost + allocationAmount);
+        allocations.push({
+          centreId,
+          amount: foreign ? round2(allocationAmount * exchangeRate) : allocationAmount,
+          ...(foreign ? { currencyAmount: allocationAmount } : {}),
+        });
+      }
+      if (Math.abs(round2(allocatedCost - rawAmount)) > 0.005) {
+        return { ok: false, error: `Line ${index + 1}: cost-centre splits must add up to the line amount.` };
+      }
+      parsed.costCentreAllocations = allocations;
+    } else if (costCentreId) {
       if (!(company.costCentres ?? []).some((centre) => centre.id === costCentreId)) {
         return { ok: false, error: `Line ${index + 1}: that cost centre no longer exists.` };
       }
@@ -8046,6 +8155,37 @@ function validateImportedCompany(company) {
       if (line.costCentreId && !costCentreIds.has(line.costCentreId)) {
         return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} uses a missing cost centre.`;
       }
+      if (line.costCentreAllocations !== undefined) {
+        if (!Array.isArray(line.costCentreAllocations) || !line.costCentreAllocations.length) {
+          return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has invalid cost-centre splits.`;
+        }
+        if (line.costCentreId) {
+          return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} mixes a single and split cost centre.`;
+        }
+        const seenCentres = new Set();
+        let costAllocated = 0;
+        for (const allocation of line.costCentreAllocations) {
+          if (!allocation || !costCentreIds.has(allocation.centreId)) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} uses a missing cost centre.`;
+          }
+          if (seenCentres.has(allocation.centreId)) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} repeats a cost centre on one line.`;
+          }
+          const allocationAmount = parseAmount(allocation.amount);
+          if (allocationAmount === null || allocationAmount <= 0) {
+            return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has an invalid cost-centre split amount.`;
+          }
+          seenCentres.add(allocation.centreId);
+          costAllocated = round2(costAllocated + allocationAmount);
+        }
+        const lineAmount = parseAmount(line.amount);
+        if (lineAmount === null || lineAmount <= 0) {
+          return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has a non-positive amount.`;
+        }
+        if (Math.abs(round2(costAllocated - lineAmount)) > 0.005) {
+          return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has cost-centre splits that do not add up to the line amount.`;
+        }
+      }
       const amount = parseAmount(line.amount);
       if (amount === null || amount <= 0) {
         return `Company "${name}": voucher ${voucher.type} ${voucher.no ?? ''} has a non-positive amount.`;
@@ -8773,6 +8913,17 @@ export function importState(json) {
           amount: parseAmount(line.amount) ?? 0,
           ...(line.currencyAmount !== undefined ? { currencyAmount: parseAmount(line.currencyAmount) ?? 0 } : {}),
           ...(line.costCentreId ? { costCentreId: line.costCentreId } : {}),
+          ...(Array.isArray(line.costCentreAllocations) && line.costCentreAllocations.length
+            ? {
+                costCentreAllocations: line.costCentreAllocations.map((allocation) => ({
+                  centreId: allocation.centreId,
+                  amount: parseAmount(allocation.amount) ?? 0,
+                  ...(allocation.currencyAmount !== undefined
+                    ? { currencyAmount: parseAmount(allocation.currencyAmount) ?? 0 }
+                    : {}),
+                })),
+              }
+            : {}),
           ...(Array.isArray(line.allocations) && line.allocations.length
             ? {
                 allocations: line.allocations.map((allocation) => ({

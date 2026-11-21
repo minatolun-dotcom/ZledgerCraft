@@ -32,6 +32,8 @@ SQLite/Postgres workspace mirror and node:test regression suites.
 - Cheque-book master with bank/prefix/range/next number, overlap validation and
   recorded-instrument deletion protection.
 - Single-company restore while preserving the rest of the workspace.
+- Cost-centre amount splits per voucher line, with validated shares and
+  split-aware summaries, break-ups, budgets and master merges.
 - Optional quarterly budget phasing with elapsed-quarter budget-to-date.
 - Alternate-unit master, line conversion and amount-preserving valuation.
 - Full test suite and release verification recorded below.
@@ -44,10 +46,10 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 ## Verification
 
-- Full suite: 384 tests (383 pass, 1 skipped), 0 failures.
-- Build: 1,396.3 kB.
+- Full suite: 387 tests (386 pass, 1 skipped), 0 failures.
+- Build: 1,409.1 kB.
 - Targeted suites: GST, GSTR-2B, GSTR-9, late fee, TDS returns, inventory, bank, budgets, currency, bulk vouchers, payroll.
-- Latest deployment: https://a96591e0.zledgercraft.pages.dev (HTTP 200); custom domain https://zledgercraft.pages.dev/ also HTTP 200.
+- Latest deployment: https://5a2d7758.zledgercraft.pages.dev (HTTP 200); custom domain https://zledgercraft.pages.dev/ also HTTP 200.
 - Projects 1–7 are complete. Project 8’s local work is complete; its parked
   external dependencies are excluded from the active backlog.
 

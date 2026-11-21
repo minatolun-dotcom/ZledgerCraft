@@ -144,6 +144,164 @@ test('cost allocations roll up by centre and category', () => {
   assert.equal(department.centreCount, 2);
 });
 
+test('a voucher line can split its amount across several cost centres', () => {
+  const { company, bank, rent, admin, salesTeam, category } = costFixture();
+  const split = addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-10',
+    lines: [
+      {
+        ledgerId: rent.id,
+        side: 'Dr',
+        amount: 1000,
+        costCentreAllocations: [
+          { centreId: admin.id, amount: 600 },
+          { centreId: salesTeam.id, amount: 400 },
+        ],
+      },
+      { ledgerId: bank.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+  assert.equal(split.ok, true, split.error);
+  const line = company.vouchers[0].lines[0];
+  assert.equal(line.costCentreId, undefined);
+  assert.deepEqual(line.costCentreAllocations, [
+    { centreId: admin.id, amount: 600 },
+    { centreId: salesTeam.id, amount: 400 },
+  ]);
+  assert.equal(costCentreUsage(company, admin.id), 1);
+  assert.equal(costCentreUsage(company, salesTeam.id), 1);
+
+  const summary = costCentreSummary(company);
+  assert.equal(summary.centreRows.find((row) => row.centreId === admin.id).debit, 600);
+  assert.equal(summary.centreRows.find((row) => row.centreId === salesTeam.id).debit, 400);
+  assert.equal(summary.totalDebit, 1000);
+  assert.equal(summary.unallocatedDebit, 0, 'the split covers the whole rent line');
+  assert.equal(summary.unallocatedCredit, 1000, 'the untagged bank line stays unallocated');
+  assert.equal(summary.categoryRows.find((row) => row.categoryId === category.id).debit, 1000);
+
+  const detail = costCentreBreakup(company, admin.id, { from: '2026-04-01', to: '2026-04-30' });
+  assert.equal(detail.rows.length, 1);
+  assert.equal(detail.rows[0].amount, 600);
+  assert.equal(detail.debit, 600);
+
+  addBudget(company, {
+    name: 'Admin plan',
+    targetType: 'costCentre',
+    targetId: admin.id,
+    yearId: company.yearId,
+    amount: 1000,
+  });
+  addBudget(company, {
+    name: 'Department plan',
+    targetType: 'costCategory',
+    targetId: category.id,
+    yearId: company.yearId,
+    amount: 1000,
+  });
+  const budget = budgetVsActual(company, { yearId: company.yearId, asOn: '2026-04-30' });
+  assert.equal(budget.rows.find((row) => row.name === 'Admin plan').actual, 600);
+  assert.equal(budget.rows.find((row) => row.name === 'Department plan').actual, 1000);
+
+  const restored = importState(exportState({ version: 1, activeCompanyId: company.id, companies: [company] }));
+  assert.equal(restored.ok, true, restored.error);
+  const restoredLine = restored.state.companies[0].vouchers[0].lines[0];
+  assert.deepEqual(restoredLine.costCentreAllocations, line.costCentreAllocations);
+  assert.equal(costCentreSummary(restored.state.companies[0]).totalDebit, 1000);
+});
+
+test('cost-centre splits are validated and merged without duplication', () => {
+  const { company, bank, rent, admin, salesTeam } = costFixture();
+  const base = {
+    type: 'Payment',
+    date: '2026-04-10',
+    lines: [
+      {
+        ledgerId: rent.id,
+        side: 'Dr',
+        amount: 1000,
+        costCentreAllocations: [
+          { centreId: admin.id, amount: 600 },
+          { centreId: salesTeam.id, amount: 400 },
+        ],
+      },
+      { ledgerId: bank.id, side: 'Cr', amount: 1000 },
+    ],
+  };
+  const withAllocations = (allocations, extra = {}) => ({
+    ...base,
+    lines: [
+      { ...base.lines[0], costCentreAllocations: allocations, ...extra },
+      base.lines[1],
+    ],
+  });
+  assert.match(
+    addVoucher(company, withAllocations([
+      { centreId: admin.id, amount: 600 },
+      { centreId: salesTeam.id, amount: 300 },
+    ])).error,
+    /must add up/i,
+  );
+  assert.match(
+    addVoucher(company, withAllocations([{ centreId: 'missing', amount: 1000 }])).error,
+    /cost centre no longer exists/i,
+  );
+  assert.match(
+    addVoucher(company, withAllocations([
+      { centreId: admin.id, amount: 500 },
+      { centreId: admin.id, amount: 500 },
+    ])).error,
+    /each cost centre once/i,
+  );
+  assert.match(
+    addVoucher(company, withAllocations([{ centreId: admin.id, amount: 1000 }], { costCentreId: admin.id })).error,
+    /either one cost centre or a split/i,
+  );
+  assert.match(
+    addVoucher(company, withAllocations([{ centreId: admin.id, amount: 0 }, { centreId: salesTeam.id, amount: 1000 }])).error,
+    /enter an amount/i,
+  );
+
+  const saved = addVoucher(company, base);
+  assert.equal(saved.ok, true, saved.error);
+  const merged = mergeCostCentre(company, admin.id, salesTeam.id);
+  assert.equal(merged.ok, true, merged.error);
+  assert.equal(merged.linesMoved, 1);
+  assert.deepEqual(company.vouchers[0].lines[0].costCentreAllocations, [
+    { centreId: salesTeam.id, amount: 1000 },
+  ]);
+  assert.equal(costCentreUsage(company, admin.id), 0);
+  assert.equal(costCentreUsage(company, salesTeam.id), 1);
+});
+
+test('backups reject cost-centre splits that do not add up', () => {
+  const { company, bank, rent, admin, salesTeam } = costFixture();
+  const saved = addVoucher(company, {
+    type: 'Payment',
+    date: '2026-04-10',
+    lines: [
+      {
+        ledgerId: rent.id,
+        side: 'Dr',
+        amount: 1000,
+        costCentreAllocations: [
+          { centreId: admin.id, amount: 600 },
+          { centreId: salesTeam.id, amount: 400 },
+        ],
+      },
+      { ledgerId: bank.id, side: 'Cr', amount: 1000 },
+    ],
+  });
+  assert.equal(saved.ok, true, saved.error);
+  const restored = importState(exportState({ version: 1, activeCompanyId: company.id, companies: [company] }));
+  assert.equal(restored.ok, true, restored.error);
+
+  company.vouchers[0].lines[0].costCentreAllocations[1].amount = 300;
+  const broken = importState(exportState({ version: 1, activeCompanyId: company.id, companies: [company] }));
+  assert.equal(broken.ok, false);
+  assert.match(broken.error, /cost-centre splits.*do not add up/i);
+});
+
 test('cost-category P&L counts tagged income and expenses only', () => {
   const { company, bank, customer, rent, salaries, sales, category, admin, salesTeam } = costFixture();
   addVoucher(company, {

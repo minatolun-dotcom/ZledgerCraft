@@ -1299,6 +1299,43 @@ kbd {
   max-width: 180px;
 }
 
+.cost-single {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.cost-single .btn {
+  white-space: nowrap;
+}
+
+.cost-split {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 220px;
+}
+
+.cost-allocation-entry {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.cost-allocation-entry select {
+  min-width: 110px;
+}
+
+.cost-allocation-entry input {
+  width: 82px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-split-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
 .lines-table input.amount {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -2336,6 +2373,19 @@ kbd {
   .voucher-form .lines-table input,
   .voucher-form .lines-table select {
     width: 100%;
+  }
+
+  .voucher-form .cost-split {
+    min-width: 0;
+  }
+
+  .voucher-form .cost-allocation-entry {
+    flex-wrap: wrap;
+  }
+
+  .voucher-form .cost-allocation-entry input {
+    width: auto;
+    flex: 1 1 90px;
   }
 
   .voucher-form .icon-btn {

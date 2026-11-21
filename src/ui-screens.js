@@ -43,6 +43,7 @@ import {
   closeFinancialYear,
   costCentreUsage,
   dateLabel,
+  lineCostAllocations,
   defaultFyStart,
   defaultGodownId,
   deleteBom,
@@ -1469,6 +1470,29 @@ export function voucherNewScreen() {
   const linkedOrder = draft.orderId
     ? (active.orders ?? []).find((order) => order.id === draft.orderId)
     : null;
+  const costCentreCell = (line, index) => {
+    const allocations = Array.isArray(line.costCentreAllocations) ? line.costCentreAllocations : [];
+    if (!allocations.length) {
+      return `<div class="cost-single">
+        <select class="cost-centre" aria-label="Line ${index + 1} cost centre">${costCentreSelectOptions(active, line.costCentreId)}</select>
+        ${(active.costCentres ?? []).length ? `<button type="button" class="btn small ghost" data-action="split-cost-centre" data-index="${index}" title="Split this line across cost centres">Split</button>` : ''}
+      </div>`;
+    }
+    return `<div class="cost-split">
+      ${allocations.map((allocation, allocationIndex) => `<div class="cost-allocation-entry">
+        <select class="alloc-centre" aria-label="Line ${index + 1} split ${allocationIndex + 1} cost centre">${costCentreSelectOptions(active, allocation.centreId)}</select>
+        <input class="alloc-centre-amount" inputmode="decimal" placeholder="0.00" value="${esc(allocation.amount)}"
+          aria-label="Line ${index + 1} split ${allocationIndex + 1} amount">
+        <button type="button" class="icon-btn" data-action="remove-cost-allocation" data-index="${index}" data-allocation="${allocationIndex}"
+          title="Remove this cost-centre split" aria-label="Remove split ${allocationIndex + 1} from line ${index + 1}">✕</button>
+      </div>`).join('')}
+      <div class="cost-split-actions">
+        <button type="button" class="btn small ghost" data-action="add-cost-allocation" data-index="${index}">+ Centre</button>
+        <button type="button" class="btn small ghost" data-action="single-cost-centre" data-index="${index}" title="Use one cost centre for the full line">Use one</button>
+      </div>
+      <div class="muted small">Shares must total the line amount.</div>
+    </div>`;
+  };
 
   const rows = draft.lines
     .map(
@@ -1497,7 +1521,7 @@ export function voucherNewScreen() {
                 .map((section) => `<option value="${esc(section.id)}"${line.tdsSectionId === section.id ? ' selected' : ''}>${esc(section.code)} · ${esc(section.rate)}%</option>`)
                 .join('')}</select>`
             : ''}</td>
-        <td data-label="Cost centre"><select class="cost-centre" aria-label="Line ${index + 1} cost centre">${costCentreSelectOptions(active, line.costCentreId)}</select></td>
+        <td data-label="Cost centre">${costCentreCell(line, index)}</td>
         <td class="row-actions">
           <button type="button" class="icon-btn" data-action="remove-line" data-index="${index}"
             title="Remove line" aria-label="Remove line">✕</button>
@@ -1711,9 +1735,15 @@ export function voucherViewScreen() {
     .map((line) => {
       const ledger = active.ledgers.find((item) => item.id === line.ledgerId);
       const group = ledger ? groupById(active, ledger.groupId) : null;
-      const costCentre = line.costCentreId
-        ? (active.costCentres ?? []).find((centre) => centre.id === line.costCentreId)
-        : null;
+      const costAllocations = lineCostAllocations(line)
+        .map((allocation) => {
+          const centre = (active.costCentres ?? []).find((item) => item.id === allocation.centreId);
+          if (!centre) return '';
+          return line.costCentreAllocations?.length
+            ? `Cost centre: ${centre.name} · ${money(allocation.amount)}`
+            : `Cost centre: ${centre.name}`;
+        })
+        .filter(Boolean);
       const allocations = (line.allocations ?? [])
         .map((allocation) => {
           const bill = active.vouchers.find((item) => item.id === allocation.voucherId);
@@ -1721,7 +1751,7 @@ export function voucherViewScreen() {
         })
         .filter(Boolean);
       return `<tr>
-        <td>${esc(ledger?.name ?? 'Unknown')}${costCentre ? `<div class="muted small">Cost centre: ${esc(costCentre.name)}</div>` : ''}${allocations.length ? `<div class="muted small">${allocations.map(esc).join('<br>')}</div>` : ''}</td>
+        <td>${esc(ledger?.name ?? 'Unknown')}${costAllocations.length ? `<div class="muted small">${costAllocations.map(esc).join('<br>')}</div>` : ''}${allocations.length ? `<div class="muted small">${allocations.map(esc).join('<br>')}</div>` : ''}</td>
         <td class="muted">${esc(group?.name ?? '')}</td>
         <td class="num">${line.side === 'Dr' ? (voucherCurrency ? `${foreignMoney(line.currencyAmount)}<div class="muted small">${money(line.amount)}</div>` : money(line.amount)) : ''}</td>
         <td class="num">${line.side === 'Cr' ? (voucherCurrency ? `${foreignMoney(line.currencyAmount)}<div class="muted small">${money(line.amount)}</div>` : money(line.amount)) : ''}</td>

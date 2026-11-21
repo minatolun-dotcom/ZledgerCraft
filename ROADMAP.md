@@ -118,8 +118,9 @@ Working now:
 - Cheque/DD details on payment, receipt and contra vouchers, a post-dated/due/
   cleared register with reconciliation-aware status, and a printable cheque
   preview with Indian-numbering amount words.
-- Cost categories and centres, optional cost centre on any voucher line, and
-  cost centre/category summaries with period filtering and voucher drill-down.
+- Cost categories and centres, optional cost centre on any voucher line or an
+  amount split across several centres, and cost centre/category summaries with
+  period filtering and voucher drill-down.
 - Annual budgets per ledger or group with a Budget vs Actual report, as-on date,
   variance, used percentage and over-budget status.
 - Foreign currency masters with dated INR rates, voucher-level currency and
@@ -367,6 +368,18 @@ inside those stages.
   related limit IDs and rough size.
 - Corrected stale register entries: per-line GST is resolved; GST filing
   history and local statutory gaps are stated separately.
+
+### 2026-11-21 — Phase 71: multiple cost centres per voucher line
+
+- Voucher lines accept `costCentreAllocations`, an amount split across up to any
+  number of centres. The split must total the line amount and repeat no centre;
+  older single-centre `costCentreId` lines are unchanged.
+- The voucher form adds a Split action, per-centre amount rows, add/remove and
+  Use one, with responsive styling. Accepted vouchers show each centre share.
+- Cost-centre summaries, category P&L, centre break-ups, budget actuals, usage
+  guards, master merges, backups and workspace line persistence understand the
+  split. Unallocated reconciliation counts any uncovered remainder.
+- Verification: 387 tests (386 pass, 1 skipped); 1,409.1 kB build.
 
 ### 2026-11-21 — Phase 70: backup restore dry run
 

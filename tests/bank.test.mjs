@@ -168,6 +168,29 @@ test('auto-match honours narration overlap, date window and amount tolerance', (
   assert.equal(company.bankReconciliations[bank.id].matches[rentLine.id], small.id);
 });
 
+test('a one-to-one match reports only the matching bank line on a multi-line voucher', () => {
+  const { company, bank, capital } = bankFixture();
+  const created = addVoucher(company, {
+    type: 'Receipt',
+    date: '2026-04-10',
+    narration: 'Two deposits',
+    lines: [
+      { ledgerId: bank.id, side: 'Dr', amount: 300 },
+      { ledgerId: bank.id, side: 'Dr', amount: 200 },
+      { ledgerId: capital.id, side: 'Cr', amount: 500 },
+    ],
+  });
+  assert.equal(created.ok, true, created.error);
+  saveBankStatement(company, bank.id, [{ date: '2026-04-10', amount: 300 }]);
+  const lineId = company.bankReconciliations[bank.id].statement.lines[0].id;
+  assert.equal(setBankMatch(company, bank.id, lineId, created.voucher.id).ok, true);
+
+  const report = bankReconciliation(company, bank.id);
+  assert.equal(report.lines[0].matchedEntries.length, 1);
+  assert.equal(report.lines[0].matchedEntries[0].amount, 300);
+  assert.equal(report.lines[0].matchedDifference, 0);
+});
+
 test('manual group matching requires same-direction vouchers and an exact total', () => {
   const { company, bank, capital, rent } = bankFixture();
   const first = receipt(company, bank, capital, 1000, '2026-04-10', 'Deposit one');

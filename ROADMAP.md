@@ -382,7 +382,7 @@ inside those stages.
   grouped matches clear every instrument in the post-dated register. Backup
   validation, normalization, editing/deleting vouchers and statement pruning all
   understand group matches.
-- Verification: 392 tests (391 pass, 1 skipped); 1,424.5 kB build.
+- Verification: 393 tests (392 pass, 1 skipped); 1,424.8 kB build.
 
 ### 2026-11-21 — Phase 71: multiple cost centres per voucher line
 

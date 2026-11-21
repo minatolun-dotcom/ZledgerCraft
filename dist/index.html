@@ -12180,7 +12180,15 @@ function bankReconciliation(company, ledgerId) {
   }
   const lines = (config?.statement?.lines ?? []).map((line) => {
     const matchedVoucherIds = bankMatchVoucherIds(matches[line.id]);
-    const matchedEntries = entries.filter((entry) => matchedVoucherIds.includes(entry.voucherId));
+    let matchedEntries = [];
+    if (matchedVoucherIds.length === 1) {
+      matchedEntries = entries
+        .filter((entry) => entry.voucherId === matchedVoucherIds[0])
+        .sort((a, b) => Math.abs(a.amount - line.amount) - Math.abs(b.amount - line.amount))
+        .slice(0, 1);
+    } else if (matchedVoucherIds.length > 1) {
+      matchedEntries = entries.filter((entry) => matchedVoucherIds.includes(entry.voucherId));
+    }
     const matchedTotal = round2(matchedEntries.reduce((sum, entry) => sum + entry.amount, 0));
     return {
       ...line,

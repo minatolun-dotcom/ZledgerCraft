@@ -4905,6 +4905,74 @@ export function updateVoucher(company, voucherId, input) {
   return { ok: true, voucher };
 }
 
+/**
+ * Validate a batch of vouchers against an isolated company copy. Nothing in the
+ * live company changes until every row has passed validation.
+ */
+export function validateVoucherBatch(company, rows) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return { ok: false, errors: [{ index: 0, error: 'Add at least one voucher row.' }], count: 0 };
+  }
+  if (rows.length > 500) {
+    return { ok: false, errors: [{ index: 0, error: 'Post at most 500 vouchers in one batch.' }], count: rows.length };
+  }
+  let clone;
+  try {
+    clone = structuredClone(company);
+  } catch {
+    return { ok: false, errors: [{ index: 0, error: 'This company could not be copied for batch validation.' }], count: rows.length };
+  }
+  const errors = [];
+  const seen = new Map();
+  const existing = new Set(
+    (company.vouchers ?? []).map((voucher) => String(voucher.batchRef ?? '').trim()).filter(Boolean),
+  );
+  const start = clone.vouchers.length;
+  for (const [index, row] of rows.entries()) {
+    const batchRef = String(row?.batchRef ?? '').trim();
+    if (batchRef.length > 60) {
+      errors.push({ index, error: 'Source reference must be 60 characters or fewer.' });
+      continue;
+    }
+    if (batchRef) {
+      if (seen.has(batchRef)) {
+        errors.push({ index, error: `Reference "${batchRef}" is repeated on row ${seen.get(batchRef) + 1}.` });
+        continue;
+      }
+      if (existing.has(batchRef)) {
+        errors.push({ index, error: `Reference "${batchRef}" has already been posted.` });
+        continue;
+      }
+      seen.set(batchRef, index);
+    }
+    const result = addVoucher(clone, row);
+    if (!result.ok) {
+      errors.push({ index, error: result.error });
+      continue;
+    }
+    if (batchRef) result.voucher.batchRef = batchRef;
+  }
+  if (errors.length) {
+    return {
+      ok: false,
+      errors,
+      count: rows.length,
+      validCount: rows.length - errors.length,
+      preview: clone.vouchers.slice(start),
+    };
+  }
+  return { ok: true, errors: [], count: rows.length, vouchers: clone.vouchers.slice(start), company: clone };
+}
+
+/** Post a validated batch atomically by replacing the company with its checked copy. */
+export function postVoucherBatch(company, rows) {
+  const checked = validateVoucherBatch(company, rows);
+  if (!checked.ok) return checked;
+  for (const key of Object.keys(company)) delete company[key];
+  Object.assign(company, checked.company);
+  return { ok: true, count: checked.count, vouchers: checked.vouchers };
+}
+
 /** Allocations in other vouchers that settle this bill, grouped by party ledger. */
 export function allocationsAgainst(company, voucherId) {
   const totals = new Map();

@@ -113,6 +113,7 @@ import {
   postForexRevaluation,
   postForexSettlement,
   postOverdueInterest,
+  postVoucherBatch,
   postRecurringVoucher,
   postStockCount,
   rateForCurrency,
@@ -282,6 +283,7 @@ import {
   parseBankStatement,
   parseBankStatementCsv,
   budgetsScreen,
+  bulkVoucherScreen,
   forexScreen,
 } from './ui-admin.js';
 import {
@@ -1909,6 +1911,7 @@ export function asideHtml(active) {
     ['gateway', 'Gateway', 'Esc'],
     ['masters', 'Masters', 'K'],
     ['vouchers', 'Vouchers', 'V'],
+    ['bulkVouchers', 'Bulk vouchers', ''],
     ['payroll', 'Payroll', ''],
     ['daybook', 'Day Book', 'D'],
     ['ledgerPick', 'Ledger', 'L'],
@@ -2171,6 +2174,8 @@ export function screenHtml() {
       return mastersScreen();
     case 'vouchers':
       return vouchersScreen();
+    case 'bulkVouchers':
+      return bulkVoucherScreen();
     case 'voucherNew':
       return voucherNewScreen();
     case 'voucherView':
@@ -3960,6 +3965,66 @@ export async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'bulk-voucher-form') {
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const active = company();
+    if (!active) return;
+    const parsed = [...form.querySelectorAll('tr.bulk-row')].map((row, index) => ({
+      index,
+      date: row.querySelector('[name="date"]')?.value ?? '',
+      type: row.querySelector('[name="type"]')?.value ?? 'Journal',
+      debit: row.querySelector('[name="debit"]')?.value ?? '',
+      credit: row.querySelector('[name="credit"]')?.value ?? '',
+      amount: row.querySelector('[name="amount"]')?.value ?? '',
+      batchRef: row.querySelector('[name="batchRef"]')?.value.trim() ?? '',
+      narration: row.querySelector('[name="narration"]')?.value ?? '',
+    }));
+    const filled = parsed.filter(
+      (row) => row.debit || row.credit || row.amount || row.batchRef || row.narration,
+    );
+    if (!filled.length) {
+      showFormError('Enter at least one voucher row.', 'bulk-error');
+      return;
+    }
+    const inputs = filled.map((row) => ({
+      type: row.type,
+      date: row.date,
+      narration: row.narration || 'Bulk voucher',
+      batchRef: row.batchRef || undefined,
+      lines: [
+        { ledgerId: row.debit, side: 'Dr', amount: row.amount },
+        { ledgerId: row.credit, side: 'Cr', amount: row.amount },
+      ],
+    }));
+    const result = postVoucherBatch(active, inputs);
+    if (!result.ok) {
+      filters.bulk = {
+        rows: filled.map((row) => ({
+          date: row.date,
+          type: row.type,
+          debit: row.debit,
+          credit: row.credit,
+          amount: row.amount,
+          batchRef: row.batchRef,
+          narration: row.narration,
+        })),
+        errors: result.errors ?? [{ index: 0, error: result.error ?? 'The batch could not be posted.' }],
+      };
+      setFlash(`${result.errors?.length ?? 1} row${(result.errors?.length ?? 1) === 1 ? '' : 's'} need attention. Nothing was posted.`, 'warn');
+      render();
+      return;
+    }
+    logAudit('voucher.bulk', `Posted ${result.count} voucher${result.count === 1 ? '' : 's'} in one batch.`, active);
+    persist();
+    filters.bulk = { rows: [] };
+    setFlash(`${result.count} voucher${result.count === 1 ? '' : 's'} posted.`);
+    render();
+    return;
+  }
+
   if (form.id === 'forex-report-form') {
     const data = new FormData(form);
     filters.forex = { asOn: data.get('asOn') || '' };
@@ -4256,6 +4321,40 @@ async function handleClick(event) {
 
   const action = trigger.dataset.action;
   switch (action) {
+    case 'bulk-add-row': {
+      const tbody = document.querySelector('#bulk-voucher-form tbody');
+      const last = tbody?.querySelector('tr.bulk-row:last-child');
+      if (!tbody || !last) {
+        render();
+        break;
+      }
+      const clone = last.cloneNode(true);
+      for (const input of clone.querySelectorAll('input')) {
+        input.value = input.name === 'date' ? todayIso() : '';
+      }
+      const type = clone.querySelector('select[name="type"]');
+      if (type) type.value = 'Journal';
+      for (const select of clone.querySelectorAll('select[name="debit"], select[name="credit"]')) {
+        select.value = '';
+      }
+      const status = clone.querySelector('.bulk-row-status');
+      if (status) status.textContent = '';
+      tbody.append(clone);
+      clone.querySelector('select[name="debit"]')?.focus();
+      break;
+    }
+
+    case 'bulk-remove-row': {
+      const row = trigger.closest('tr.bulk-row');
+      const tbody = row?.parentElement;
+      row?.remove();
+      if (tbody && !tbody.querySelector('tr.bulk-row')) {
+        filters.bulk = { rows: [] };
+        render();
+      }
+      break;
+    }
+
     case 'new-voucher':
       openVoucher(trigger.dataset.type);
       break;

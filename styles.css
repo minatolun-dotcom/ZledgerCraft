@@ -2407,3 +2407,19 @@ kbd {
     min-height: 44px;
   }
 }
+
+.bulk-grid select {
+  min-width: 11rem;
+  max-width: 15rem;
+}
+
+.bulk-grid input[name="amount"] {
+  width: 7rem;
+}
+
+.bulk-row-status {
+  max-width: 16rem;
+  white-space: normal;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}

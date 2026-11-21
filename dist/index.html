@@ -2421,6 +2421,22 @@ kbd {
   }
 }
 
+.bulk-grid select {
+  min-width: 11rem;
+  max-width: 15rem;
+}
+
+.bulk-grid input[name="amount"] {
+  width: 7rem;
+}
+
+.bulk-row-status {
+  max-width: 16rem;
+  white-space: normal;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 </style>
   </head>
   <body>
@@ -7335,6 +7351,74 @@ function updateVoucher(company, voucherId, input) {
   }
   pruneBankReconciliations(company);
   return { ok: true, voucher };
+}
+
+/**
+ * Validate a batch of vouchers against an isolated company copy. Nothing in the
+ * live company changes until every row has passed validation.
+ */
+function validateVoucherBatch(company, rows) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return { ok: false, errors: [{ index: 0, error: 'Add at least one voucher row.' }], count: 0 };
+  }
+  if (rows.length > 500) {
+    return { ok: false, errors: [{ index: 0, error: 'Post at most 500 vouchers in one batch.' }], count: rows.length };
+  }
+  let clone;
+  try {
+    clone = structuredClone(company);
+  } catch {
+    return { ok: false, errors: [{ index: 0, error: 'This company could not be copied for batch validation.' }], count: rows.length };
+  }
+  const errors = [];
+  const seen = new Map();
+  const existing = new Set(
+    (company.vouchers ?? []).map((voucher) => String(voucher.batchRef ?? '').trim()).filter(Boolean),
+  );
+  const start = clone.vouchers.length;
+  for (const [index, row] of rows.entries()) {
+    const batchRef = String(row?.batchRef ?? '').trim();
+    if (batchRef.length > 60) {
+      errors.push({ index, error: 'Source reference must be 60 characters or fewer.' });
+      continue;
+    }
+    if (batchRef) {
+      if (seen.has(batchRef)) {
+        errors.push({ index, error: `Reference "${batchRef}" is repeated on row ${seen.get(batchRef) + 1}.` });
+        continue;
+      }
+      if (existing.has(batchRef)) {
+        errors.push({ index, error: `Reference "${batchRef}" has already been posted.` });
+        continue;
+      }
+      seen.set(batchRef, index);
+    }
+    const result = addVoucher(clone, row);
+    if (!result.ok) {
+      errors.push({ index, error: result.error });
+      continue;
+    }
+    if (batchRef) result.voucher.batchRef = batchRef;
+  }
+  if (errors.length) {
+    return {
+      ok: false,
+      errors,
+      count: rows.length,
+      validCount: rows.length - errors.length,
+      preview: clone.vouchers.slice(start),
+    };
+  }
+  return { ok: true, errors: [], count: rows.length, vouchers: clone.vouchers.slice(start), company: clone };
+}
+
+/** Post a validated batch atomically by replacing the company with its checked copy. */
+function postVoucherBatch(company, rows) {
+  const checked = validateVoucherBatch(company, rows);
+  if (!checked.ok) return checked;
+  for (const key of Object.keys(company)) delete company[key];
+  Object.assign(company, checked.company);
+  return { ok: true, count: checked.count, vouchers: checked.vouchers };
 }
 
 /** Allocations in other vouchers that settle this bill, grouped by party ledger. */
@@ -18640,6 +18724,7 @@ function voucherViewScreen() {
       `<div class="voucher-view-meta">
         <div><span class="label">Date</span><strong>${esc(dateLabel(voucher.date))}</strong></div>
         <div><span class="label">Amount</span><strong>${money(voucher.total)}</strong></div>
+        ${voucher.batchRef ? `<div><span class="label">Source ref</span><span>${esc(voucher.batchRef)}</span></div>` : ''}
         ${voucherCurrency ? `<div><span class="label">Currency</span><span>${foreignMoney(voucher.currencyTotal)} @ ${money(voucher.exchangeRate)}<br><span class="muted small">${esc(voucherCurrency.name)}</span></span></div>` : ''}
         ${voucher.bill ? `<div><span class="label">Bill</span><span>${esc(voucher.bill.ref || '—')}${voucher.bill.dueDate ? ` · due ${esc(dateLabel(voucher.bill.dueDate))}` : ''}</span></div>` : ''}
         ${Array.isArray(voucher.instruments) && voucher.instruments.length ? `<div><span class="label">Instruments</span><span>${voucher.instruments.map((instrument) => `${esc(instrument.kind)} ${esc(instrument.number)} · ${esc(dateLabel(instrument.date))} · ${money(instrument.amount ?? voucher.total)}<br><span class="muted small">${esc(active.ledgers.find((ledger) => ledger.id === instrument.bankLedgerId)?.name ?? 'Unknown bank')}${instrument.status ? ` · ${esc(instrument.status)}` : ''}</span>`).join('<br>')}</span></div>` : voucher.instrument ? `<div><span class="label">Instrument</span><span>${esc(voucher.instrument.kind)} ${esc(voucher.instrument.number)} · ${esc(dateLabel(voucher.instrument.date))}<br><span class="muted small">${esc(active.ledgers.find((ledger) => ledger.id === voucher.instrument.bankLedgerId)?.name ?? 'Unknown bank')}</span></span></div>` : ''}
@@ -21930,6 +22015,52 @@ function forexScreen() {
   );
 }
 
+
+function bulkVoucherScreen() {
+  if (!company()) return emptyCompanyScreen('Bulk vouchers');
+  const active = company();
+  const bulkState = filters.bulk ?? {};
+  const rows = Array.isArray(bulkState.rows) && bulkState.rows.length
+    ? bulkState.rows
+    : Array.from({ length: 5 }, () => ({ date: todayIso(), type: 'Journal' }));
+  const errors = new Map((bulkState.errors ?? []).map((entry) => [entry.index, entry.error]));
+  const ledgers = [...(active.ledgers ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const ledgerOptions = (selected) => `<option value="">Choose ledger</option>${ledgers
+    .map(
+      (ledger) =>
+        `<option value="${esc(ledger.id)}"${selected === ledger.id ? ' selected' : ''}>${esc(ledger.name)}</option>`,
+    )
+    .join('')}`;
+  const rowHtml = (row, index) => `<tr class="bulk-row" data-index="${index}">
+    <td><input name="date" type="date" value="${esc(row.date ?? todayIso())}" aria-label="Row ${index + 1} date"></td>
+    <td><select name="type" aria-label="Row ${index + 1} voucher type">${['Journal', 'Payment', 'Receipt', 'Contra']
+      .map((type) => `<option value="${type}"${row.type === type ? ' selected' : ''}>${type}</option>`)
+      .join('')}</select></td>
+    <td><select name="debit" aria-label="Row ${index + 1} debit ledger">${ledgerOptions(row.debit)}</select></td>
+    <td><select name="credit" aria-label="Row ${index + 1} credit ledger">${ledgerOptions(row.credit)}</select></td>
+    <td><input name="amount" inputmode="decimal" placeholder="0.00" value="${esc(row.amount ?? '')}" aria-label="Row ${index + 1} amount"></td>
+    <td><input name="batchRef" maxlength="60" placeholder="Optional source ref" value="${esc(row.batchRef ?? '')}" aria-label="Row ${index + 1} source reference"></td>
+    <td><input name="narration" maxlength="200" placeholder="Narration" value="${esc(row.narration ?? '')}" aria-label="Row ${index + 1} narration"></td>
+    <td class="bulk-row-status">${errors.has(index) ? `<span class="neg">${esc(errors.get(index))}</span>` : ''}</td>
+    <td class="row-actions"><button class="btn small danger" type="button" data-action="bulk-remove-row">Remove</button></td>
+  </tr>`;
+  return panel(
+    'Bulk vouchers',
+    `<p class="muted">Enter one double-entry voucher per row. Rows are validated together; if any row fails, no voucher is posted. A source reference prevents the same row from being posted twice.</p>
+    <form id="bulk-voucher-form" novalidate>
+      <div class="table-scroll" tabindex="0"><table class="data-table compact bulk-grid">
+        <thead><tr><th>Date</th><th>Type</th><th>Debit ledger</th><th>Credit ledger</th><th class="num">Amount</th><th>Source ref</th><th>Narration</th><th>Check</th><th></th></tr></thead>
+        <tbody>${rows.map(rowHtml).join('')}</tbody>
+      </table></div>
+      <p id="bulk-error" class="form-error" role="alert"></p>
+      <div class="form-actions">
+        <button class="btn small" type="button" data-action="bulk-add-row">Add row</button>
+        <button class="btn primary" type="submit">Validate &amp; post batch</button>
+      </div>
+    </form>`,
+    'Atomic batch posting. Journal, Payment, Receipt and Contra vouchers use a debit and credit ledger per row. Use references for duplicate protection; a repeated reference within the batch or an already posted reference stops the whole batch.',
+  );
+}
 
 // ---- src/ui-tax.js ----
 // ZledgerCraft - GST, e-invoice, e-way bill and TDS screens.
@@ -25740,6 +25871,7 @@ function asideHtml(active) {
     ['gateway', 'Gateway', 'Esc'],
     ['masters', 'Masters', 'K'],
     ['vouchers', 'Vouchers', 'V'],
+    ['bulkVouchers', 'Bulk vouchers', ''],
     ['payroll', 'Payroll', ''],
     ['daybook', 'Day Book', 'D'],
     ['ledgerPick', 'Ledger', 'L'],
@@ -26002,6 +26134,8 @@ function screenHtml() {
       return mastersScreen();
     case 'vouchers':
       return vouchersScreen();
+    case 'bulkVouchers':
+      return bulkVoucherScreen();
     case 'voucherNew':
       return voucherNewScreen();
     case 'voucherView':
@@ -27791,6 +27925,66 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (form.id === 'bulk-voucher-form') {
+    if (!can('voucher.write')) {
+      requirePermission('voucher.write');
+      return;
+    }
+    const active = company();
+    if (!active) return;
+    const parsed = [...form.querySelectorAll('tr.bulk-row')].map((row, index) => ({
+      index,
+      date: row.querySelector('[name="date"]')?.value ?? '',
+      type: row.querySelector('[name="type"]')?.value ?? 'Journal',
+      debit: row.querySelector('[name="debit"]')?.value ?? '',
+      credit: row.querySelector('[name="credit"]')?.value ?? '',
+      amount: row.querySelector('[name="amount"]')?.value ?? '',
+      batchRef: row.querySelector('[name="batchRef"]')?.value.trim() ?? '',
+      narration: row.querySelector('[name="narration"]')?.value ?? '',
+    }));
+    const filled = parsed.filter(
+      (row) => row.debit || row.credit || row.amount || row.batchRef || row.narration,
+    );
+    if (!filled.length) {
+      showFormError('Enter at least one voucher row.', 'bulk-error');
+      return;
+    }
+    const inputs = filled.map((row) => ({
+      type: row.type,
+      date: row.date,
+      narration: row.narration || 'Bulk voucher',
+      batchRef: row.batchRef || undefined,
+      lines: [
+        { ledgerId: row.debit, side: 'Dr', amount: row.amount },
+        { ledgerId: row.credit, side: 'Cr', amount: row.amount },
+      ],
+    }));
+    const result = postVoucherBatch(active, inputs);
+    if (!result.ok) {
+      filters.bulk = {
+        rows: filled.map((row) => ({
+          date: row.date,
+          type: row.type,
+          debit: row.debit,
+          credit: row.credit,
+          amount: row.amount,
+          batchRef: row.batchRef,
+          narration: row.narration,
+        })),
+        errors: result.errors ?? [{ index: 0, error: result.error ?? 'The batch could not be posted.' }],
+      };
+      setFlash(`${result.errors?.length ?? 1} row${(result.errors?.length ?? 1) === 1 ? '' : 's'} need attention. Nothing was posted.`, 'warn');
+      render();
+      return;
+    }
+    logAudit('voucher.bulk', `Posted ${result.count} voucher${result.count === 1 ? '' : 's'} in one batch.`, active);
+    persist();
+    filters.bulk = { rows: [] };
+    setFlash(`${result.count} voucher${result.count === 1 ? '' : 's'} posted.`);
+    render();
+    return;
+  }
+
   if (form.id === 'forex-report-form') {
     const data = new FormData(form);
     filters.forex = { asOn: data.get('asOn') || '' };
@@ -28087,6 +28281,40 @@ async function handleClick(event) {
 
   const action = trigger.dataset.action;
   switch (action) {
+    case 'bulk-add-row': {
+      const tbody = document.querySelector('#bulk-voucher-form tbody');
+      const last = tbody?.querySelector('tr.bulk-row:last-child');
+      if (!tbody || !last) {
+        render();
+        break;
+      }
+      const clone = last.cloneNode(true);
+      for (const input of clone.querySelectorAll('input')) {
+        input.value = input.name === 'date' ? todayIso() : '';
+      }
+      const type = clone.querySelector('select[name="type"]');
+      if (type) type.value = 'Journal';
+      for (const select of clone.querySelectorAll('select[name="debit"], select[name="credit"]')) {
+        select.value = '';
+      }
+      const status = clone.querySelector('.bulk-row-status');
+      if (status) status.textContent = '';
+      tbody.append(clone);
+      clone.querySelector('select[name="debit"]')?.focus();
+      break;
+    }
+
+    case 'bulk-remove-row': {
+      const row = trigger.closest('tr.bulk-row');
+      const tbody = row?.parentElement;
+      row?.remove();
+      if (tbody && !tbody.querySelector('tr.bulk-row')) {
+        filters.bulk = { rows: [] };
+        render();
+      }
+      break;
+    }
+
     case 'new-voucher':
       openVoucher(trigger.dataset.type);
       break;

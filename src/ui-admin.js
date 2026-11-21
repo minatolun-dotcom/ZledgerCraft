@@ -958,3 +958,49 @@ export function forexScreen() {
   );
 }
 
+
+export function bulkVoucherScreen() {
+  if (!company()) return emptyCompanyScreen('Bulk vouchers');
+  const active = company();
+  const bulkState = filters.bulk ?? {};
+  const rows = Array.isArray(bulkState.rows) && bulkState.rows.length
+    ? bulkState.rows
+    : Array.from({ length: 5 }, () => ({ date: todayIso(), type: 'Journal' }));
+  const errors = new Map((bulkState.errors ?? []).map((entry) => [entry.index, entry.error]));
+  const ledgers = [...(active.ledgers ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const ledgerOptions = (selected) => `<option value="">Choose ledger</option>${ledgers
+    .map(
+      (ledger) =>
+        `<option value="${esc(ledger.id)}"${selected === ledger.id ? ' selected' : ''}>${esc(ledger.name)}</option>`,
+    )
+    .join('')}`;
+  const rowHtml = (row, index) => `<tr class="bulk-row" data-index="${index}">
+    <td><input name="date" type="date" value="${esc(row.date ?? todayIso())}" aria-label="Row ${index + 1} date"></td>
+    <td><select name="type" aria-label="Row ${index + 1} voucher type">${['Journal', 'Payment', 'Receipt', 'Contra']
+      .map((type) => `<option value="${type}"${row.type === type ? ' selected' : ''}>${type}</option>`)
+      .join('')}</select></td>
+    <td><select name="debit" aria-label="Row ${index + 1} debit ledger">${ledgerOptions(row.debit)}</select></td>
+    <td><select name="credit" aria-label="Row ${index + 1} credit ledger">${ledgerOptions(row.credit)}</select></td>
+    <td><input name="amount" inputmode="decimal" placeholder="0.00" value="${esc(row.amount ?? '')}" aria-label="Row ${index + 1} amount"></td>
+    <td><input name="batchRef" maxlength="60" placeholder="Optional source ref" value="${esc(row.batchRef ?? '')}" aria-label="Row ${index + 1} source reference"></td>
+    <td><input name="narration" maxlength="200" placeholder="Narration" value="${esc(row.narration ?? '')}" aria-label="Row ${index + 1} narration"></td>
+    <td class="bulk-row-status">${errors.has(index) ? `<span class="neg">${esc(errors.get(index))}</span>` : ''}</td>
+    <td class="row-actions"><button class="btn small danger" type="button" data-action="bulk-remove-row">Remove</button></td>
+  </tr>`;
+  return panel(
+    'Bulk vouchers',
+    `<p class="muted">Enter one double-entry voucher per row. Rows are validated together; if any row fails, no voucher is posted. A source reference prevents the same row from being posted twice.</p>
+    <form id="bulk-voucher-form" novalidate>
+      <div class="table-scroll" tabindex="0"><table class="data-table compact bulk-grid">
+        <thead><tr><th>Date</th><th>Type</th><th>Debit ledger</th><th>Credit ledger</th><th class="num">Amount</th><th>Source ref</th><th>Narration</th><th>Check</th><th></th></tr></thead>
+        <tbody>${rows.map(rowHtml).join('')}</tbody>
+      </table></div>
+      <p id="bulk-error" class="form-error" role="alert"></p>
+      <div class="form-actions">
+        <button class="btn small" type="button" data-action="bulk-add-row">Add row</button>
+        <button class="btn primary" type="submit">Validate &amp; post batch</button>
+      </div>
+    </form>`,
+    'Atomic batch posting. Journal, Payment, Receipt and Contra vouchers use a debit and credit ledger per row. Use references for duplicate protection; a repeated reference within the batch or an already posted reference stops the whole batch.',
+  );
+}

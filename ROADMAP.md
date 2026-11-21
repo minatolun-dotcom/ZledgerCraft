@@ -345,6 +345,15 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-21 — Phase 62: atomic bulk voucher grid
+
+- A row grid posts Journal, Payment, Receipt and Contra vouchers together with
+  date, debit/credit ledger, amount, source reference and narration.
+- Rows validate against an isolated company copy; errors stay on their row and
+  no voucher is posted unless the entire batch passes.
+- Repeated in-batch references and already posted references reject the batch.
+- Verification: 358 tests (357 pass, 1 skipped); 1,295.9 kB build.
+
 ### 2026-11-21 — Phase 61: currency ledger balances and forex settlements
 
 - Every ledger touched by a foreign voucher reports foreign debit, credit,

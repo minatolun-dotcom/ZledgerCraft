@@ -22,7 +22,7 @@ SQLite/Postgres workspace mirror and node:test regression suites.
 | 3 | Multiple instruments per voucher | Complete | Vouchers store an allocated `instruments` array with per-instrument bank/date/number/amount; validation enforces complete amounts and bank-total reconciliation; the voucher form adds/removes rows, the register flattens rows and targets status changes per instrument, and the primary instrument stays backward compatible. | Automatic instrument numbering and a full issued-instrument lifecycle remain out of scope. |
 | 4 | Stock/WIP posting | Complete | Production posts a balanced component/conversion journal through Stock in Hand and Work in Progress, creates the four posting ledgers, records the journal on the production entry, removes it with the run, and reports stock-ledger reconciliation against operational stock. | Partial-completion WIP balances, by-products and automatic opening-stock journals remain out of scope. |
 | 5 | Foreign-currency ledger balances | Complete | Every foreign-currency ledger balance is reported by currency with book value, average and latest rates; party receipts and payments are matched FIFO to invoices, realised gain/loss is posted once through Forex Gain/Loss, posted revaluation adjusts the carrying rate to prevent double counting, and P&L/balance-sheet notes disclose realised, unrealised and open exposure. | Per-ledger currency, foreign opening balances, explicit bill-wise foreign allocations and foreign inventory remain out of scope. |
-| 6 | Bulk voucher grid | Open | Single voucher entry and all-or-nothing CSV/Tally import. | Spreadsheet grid, row validation, atomic batch posting, duplicate prevention. |
+| 6 | Bulk voucher grid | Complete | A grid posts Journal, Payment, Receipt and Contra vouchers row by row with date, type, debit/credit ledger, amount, source reference and narration. The whole batch is validated on an isolated company copy, errors are attached to their rows, nothing is posted unless every row passes, and source references stop repeated rows or re-posts. | Spreadsheet clipboard paste, bulk alteration of existing vouchers, column chooser and saved views remain out of scope. |
 | 7 | Full payroll reversal and supplementary runs | Partial | Reversal posts an opposite Journal, marks the run, blocks double reversal, removes both vouchers on delete and excludes reversed runs from payroll summaries. | Supplementary/adjustment runs and explicit delta allocation. |
 | 8 | Statutory portal filing | Externally blocked | Local returns, e-invoice/e-way drafts, challans and compliance calendar exist. | Credentialed GSTN/IRP/TRACES submission, acknowledgements and filing status feeds. |
 
@@ -44,12 +44,12 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 ## Verification
 
-- Full suite: 353 tests (352 pass, 1 skipped), 0 failures.
-- Build: 1,286.4 kB.
+- Full suite: 358 tests (357 pass, 1 skipped), 0 failures.
+- Build: 1,295.9 kB.
 - Targeted suites: inventory, bank, budgets, payroll.
 
 ## Exact next action
 
-Continue with the bulk voucher grid. Statutory filing
+Continue with supplementary payroll runs. Statutory filing
 cannot be completed without GSTN/IRP/TRACES credentials and authorization; do not
 simulate submission.

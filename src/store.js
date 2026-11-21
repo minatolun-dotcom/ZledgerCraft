@@ -4086,32 +4086,45 @@ export function validateVoucherInput(company, type, input, options = {}) {
     return { ok: false, error: `Voucher is not balanced: debit ${fmtMoney(debitTotal)} vs credit ${fmtMoney(creditTotal)}.` };
   }
 
-  let instrument = null;
-  const rawInstrument = input.instrument && typeof input.instrument === 'object' ? input.instrument : {};
-  const instrumentTouched = Boolean(
-    rawInstrument.kind || String(rawInstrument.number ?? '').trim() || rawInstrument.date,
-  );
-  if (instrumentTouched) {
+  const rawInstruments = Array.isArray(input.instruments) && input.instruments.length
+    ? input.instruments
+    : input.instrument && typeof input.instrument === 'object'
+      ? [input.instrument]
+      : [];
+  const instruments = [];
+  for (const raw of rawInstruments) {
+    if (!raw || (!raw.kind && !String(raw.number ?? '').trim() && !raw.date)) continue;
     if (!['Payment', 'Receipt', 'Contra'].includes(type)) {
       return { ok: false, error: 'Cheque/DD details are only available on payment, receipt and contra vouchers.' };
     }
-    if (!['Cheque', 'DD'].includes(rawInstrument.kind)) {
+    if (!['Cheque', 'DD'].includes(raw.kind)) {
       return { ok: false, error: 'Choose Cheque or DD as the instrument type.' };
     }
-    const number = String(rawInstrument.number ?? '').trim();
+    const number = String(raw.number ?? '').trim();
     if (!number) return { ok: false, error: 'Enter the cheque or DD number.' };
     if (number.length > 30) return { ok: false, error: 'Cheque/DD number must be 30 characters or fewer.' };
-    const instrumentDate = String(rawInstrument.date || date);
+    const instrumentDate = String(raw.date || date);
     if (!isValidIsoDate(instrumentDate)) return { ok: false, error: 'Enter a valid cheque/DD date.' };
     const bankLineIds = [...new Set(lines.filter((line) => isBankLedger(company, line.ledgerId)).map((line) => line.ledgerId))];
     if (bankLineIds.length === 0) {
       return { ok: false, error: 'Add a bank ledger line before recording cheque/DD details.' };
     }
-    const bankLedgerId = rawInstrument.bankLedgerId || bankLineIds[0];
+    const bankLedgerId = raw.bankLedgerId || bankLineIds[0];
     if (!bankLineIds.includes(bankLedgerId)) {
       return { ok: false, error: 'The cheque/DD bank must be one of the bank ledgers on this voucher.' };
     }
-    instrument = { kind: rawInstrument.kind, number, date: instrumentDate, bankLedgerId };
+    const amount = raw.amount === undefined || String(raw.amount).trim() === '' ? null : parseAmount(raw.amount);
+    if (amount !== null && amount <= 0) return { ok: false, error: 'Instrument amount must be greater than zero.' };
+    instruments.push({ kind: raw.kind, number, date: instrumentDate, bankLedgerId, ...(amount !== null ? { amount } : {}) });
+  }
+  const instrument = instruments[0] ?? null;
+  if (instruments.filter((entry) => entry.amount !== undefined).length && instruments.some((entry) => entry.amount === undefined)) {
+    return { ok: false, error: 'Enter an amount on every instrument row or leave them all blank.' };
+  }
+  const instrumentTotal = round2(instruments.reduce((sum, entry) => sum + (entry.amount ?? 0), 0));
+  const bankLineTotal = round2(lines.filter((line) => isBankLedger(company, line.ledgerId)).reduce((sum, line) => sum + line.amount, 0));
+  if (instrumentTotal > 0 && Math.abs(instrumentTotal - bankLineTotal) >= 0.01) {
+    return { ok: false, error: `Instrument amounts total ${fmtMoney(instrumentTotal)} but the bank lines total ${fmtMoney(bankLineTotal)}.` };
   }
 
   const rawItems = Array.isArray(input.items) ? input.items : [];
@@ -4228,6 +4241,7 @@ export function validateVoucherInput(company, type, input, options = {}) {
     items,
     bill,
     instrument,
+    instruments,
     gst,
     tds,
     total: debitTotal,
@@ -4563,6 +4577,7 @@ export function addVoucher(company, input) {
   if (checked.items.length) voucher.items = checked.items;
   if (checked.bill) voucher.bill = checked.bill;
   if (checked.instrument) voucher.instrument = checked.instrument;
+  if (checked.instruments.length > 1) voucher.instruments = checked.instruments;
   if (checked.gst) voucher.gst = checked.gst;
   if (checked.tds) voucher.tds = checked.tds;
   if (orderLink.order) voucher.orderId = orderLink.order.id;
@@ -4690,6 +4705,7 @@ export function updatePendingVoucher(company, voucherId, input = {}, actor = {})
   if (checked.items.length) pending.items = checked.items;
   if (checked.bill) pending.bill = checked.bill;
   if (checked.instrument) pending.instrument = checked.instrument;
+  if (checked.instruments.length > 1) pending.instruments = checked.instruments;
   if (checked.gst) pending.gst = checked.gst;
   if (checked.tds) pending.tds = checked.tds;
   pending.editedAt = new Date().toISOString();
@@ -4791,6 +4807,8 @@ export function updateVoucher(company, voucherId, input) {
   else delete voucher.bill;
   if (checked.instrument) {
     voucher.instrument = checked.instrument;
+    if (checked.instruments.length > 1) voucher.instruments = checked.instruments;
+    else delete voucher.instruments;
     if (previousInstrumentStatus) voucher.instrument.status = previousInstrumentStatus;
     if (Array.isArray(previousInstrumentHistory)) voucher.instrument.statusHistory = previousInstrumentHistory;
   } else delete voucher.instrument;

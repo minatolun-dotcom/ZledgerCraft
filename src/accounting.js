@@ -777,10 +777,17 @@ export function postDatedRegister(company, filters = {}) {
   }
 
   const rows = (company.vouchers ?? [])
-    .filter((voucher) => voucher.instrument)
-    .filter((voucher) => voucher.instrument.date >= from && voucher.instrument.date <= to)
-    .map((voucher) => {
-      const instrument = voucher.instrument;
+    .flatMap((voucher) => {
+      const instruments = Array.isArray(voucher.instruments) && voucher.instruments.length
+        ? voucher.instruments
+        : voucher.instrument
+          ? [voucher.instrument]
+          : [];
+      return instruments
+        .filter((instrument) => instrument.date >= from && instrument.date <= to)
+        .map((instrument, instrumentIndex) => ({ voucher, instrument, instrumentIndex }));
+    })
+    .map(({ voucher, instrument, instrumentIndex }) => {
       const bank = company.ledgers.find((ledger) => ledger.id === instrument.bankLedgerId);
       const partyLine = partyLineForVoucher(company, voucher);
       const manualStatus = ['Cleared', 'Stopped', 'Cancelled'].includes(instrument.status)
@@ -808,7 +815,8 @@ export function postDatedRegister(company, filters = {}) {
         kind: instrument.kind,
         number: instrument.number,
         instrumentDate: instrument.date,
-        amount: round2(voucher.total),
+        instrumentIndex,
+        amount: round2(instrument.amount ?? voucher.total),
         status,
         manualStatus,
         statusHistory: Array.isArray(instrument.statusHistory) ? instrument.statusHistory : [],

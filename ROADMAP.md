@@ -344,6 +344,15 @@ Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
 
+### 2026-11-21 — Phase 59: multiple instruments
+
+- Vouchers accept an allocated instrument array with bank, number, date and
+  amount; complete amount allocation is required when split.
+- Instrument totals must reconcile to the bank-line total, the first instrument
+  remains the compatible primary, and the register flattens every instrument.
+- Verification: two-instrument payment and register total/rows; full suite 346
+  tests (345 pass, 1 skipped); 1,241.2 kB build.
+
 ### 2026-11-21 — Phase 58: per-line TDS sections
 
 - Taxable purchase/sales lines can select their own TDS/TCS section or be marked

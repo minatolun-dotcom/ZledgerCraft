@@ -295,3 +295,26 @@ test('amount in words uses Indian numbering and paise', () => {
   assert.equal(amountInWords(100000), 'One Lakh Rupees Only');
   assert.equal(amountInWords(10000000), 'One Crore Rupees Only');
 });
+
+test('a voucher can carry multiple instruments with allocated amounts', () => {
+  const { company, bank, expense } = chequeFixture();
+  const created = addVoucher(company, {
+    type: 'Payment',
+    date: '2026-05-10',
+    instruments: [
+      { kind: 'Cheque', number: '7001', date: '2026-05-11', bankLedgerId: bank.id, amount: 100 },
+      { kind: 'DD', number: 'DD-2', date: '2026-05-12', bankLedgerId: bank.id, amount: 200 },
+    ],
+    lines: [
+      { ledgerId: expense.id, side: 'Dr', amount: 300 },
+      { ledgerId: bank.id, side: 'Cr', amount: 300 },
+    ],
+  });
+  assert.equal(created.ok, true, created.error);
+  assert.equal(created.voucher.instruments.length, 2);
+  assert.equal(created.voucher.instrument.number, '7001');
+  const register = postDatedRegister(company, { from: '2026-05-01', to: '2026-05-31', asOn: '2026-05-10' });
+  assert.equal(register.rows.length, 2);
+  assert.equal(register.total, 300);
+  assert.equal(register.rows.find((row) => row.number === 'DD-2').amount, 200);
+});

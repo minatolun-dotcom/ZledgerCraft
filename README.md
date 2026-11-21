@@ -523,12 +523,14 @@ disabled.
   voucher, and editing or deleting a matched voucher drops the stale match.
 - Cheque / DD register with period, as-on, status, bank, party text, exact party
   account and cheque-number range filters, post-dated/due/cleared status,
-  instrument detail, totals and drill-down. A cheque-book master records a bank,
-  prefix, number range and next number, rejects overlapping ranges and blocks
-  deletion while recorded instruments fall inside it. Cleared status comes from
-  Bank Reconciliation matches; an instrument can also be marked cleared, stopped
-  or cancelled manually and restored to automatic, with its recent status
-  changes shown in the row.
+  instrument detail, totals and drill-down. A voucher can store multiple allocated
+  cheque/DD instruments with their own bank, number, date and amount; the amounts
+  must reconcile to the bank-line total and each appears as its own register row.
+  A cheque-book master records a bank, prefix, number range and next number,
+  rejects overlapping ranges and blocks deletion while recorded instruments fall
+  inside it. Cleared status comes from Bank Reconciliation matches; an instrument
+  can also be marked cleared, stopped or cancelled manually and restored to
+  automatic, with its recent status changes shown in the row.
 - Instrument preview and print: cheque payments show bank, cheque number, date,
   payee, Indian-numbering amount in words, figures and A/c Payee crossing; DD
   payments get a DD advice, receipt instruments a deposit slip and contra

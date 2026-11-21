@@ -90,7 +90,13 @@ dev workflow. Set `ZL_AUTH=1` to require login on localhost as well.
 - `ZL_DATA_DIR=/path` moves `workspace.sqlite` and its auth/session tables.
 - `ZL_ALLOWED_IPS=192.168.1.0/24,127.0.0.1` restricts every HTTP request to
   these IPv4 addresses/CIDR ranges. Leave it unset to allow any client that can
-  reach the bound interface.
+  reach the bound interface. Forwarded client-IP headers are ignored unless a
+  trusted reverse proxy also sends `ZL_PROXY_SECRET`.
+- `ZL_PROXY_SECRET` is the shared secret used by a trusted reverse proxy (the
+  bundled Cloudflare Worker or your own) to assert the real client IP in
+  `X-ZL-Client-IP`. Set the same random value on the proxy and the app server.
+  Without it, only the direct socket address is used, so callers cannot spoof
+  the allowlist or the login lockout key.
 - `ZL_BACKUP_DIR=/path` moves server backups (default `data/backups`).
   `ZL_BACKUP_KEEP` controls retention (default 7) and `ZL_BACKUP_HOURS` controls
   the check interval (default 24). A daily SQLite or Postgres JSON backup is
@@ -165,8 +171,17 @@ The function is declared in `neon.ts`; its Web-Request adapter is
 `neon-function.mjs`. `cf-api-worker.mjs` and `wrangler.toml` forward
 `books.lengkhawm.online/api/*` while preserving cookies and setting the
 forwarded host/protocol headers plus the real client IP for shared rate limits.
-The Worker and Function are both optional for
-local/LAN use. Cloud infrastructure work and verification are recorded in
+The Worker strips any client-supplied trust headers and proves its identity with
+`ZL_PROXY_SECRET`; set that secret on both the Worker and the Function:
+
+```bash
+npx wrangler@latest secret put ZL_PROXY_SECRET
+```
+
+The same value must be present in `neon.ts`'s Function environment. Without it,
+allowlisted or proxied deployments fail closed instead of trusting spoofable
+headers. The Worker and Function are both optional for local/LAN use. Cloud
+infrastructure work and verification are recorded in
 [`docs/CLOUD_INTEGRATION_PLAN.md`](docs/CLOUD_INTEGRATION_PLAN.md).
 
 ## Optional cloud integrations
@@ -252,7 +267,8 @@ disabled.
 ```bash
 ZL_REPORT_SECRET=...           # stable HMAC key for report links
 ZL_REPORT_TTL_HOURS=168        # optional; 1–720
-ZL_SCHEDULER_SECRET=...        # optional manual scheduler credential (Bearer token)
+ZL_SCHEDULER_SECRET=...        # required to call /api/internal/scheduler
+ZL_PROXY_SECRET=...            # shared with the trusted reverse proxy
 ```
 
 **Read-only API**

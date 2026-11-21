@@ -473,3 +473,99 @@ can be picked up deliberately rather than being mistaken for passing coverage.
   behavior was not exercised because no certificate was available.
 - The full server-event chain test exercises create, MFA, backup, restore and
   clear; it does not simulate physical tampering with the SQLite file.
+
+## 2026-11-21 adversarial security audit
+
+Scope: black-box HTTP attacks against isolated local servers plus source review
+of the Node server, Cloudflare Worker, Neon Function adapter, auth, workspace,
+backup, report and static-file code. Production was not touched during the audit;
+the fixes were deployed afterward with explicit authorization (see the
+deployment record below).
+
+### Findings and remediation
+
+| ID | Severity | Finding | Evidence and status |
+| --- | --- | --- | --- |
+| SEC-01 | P1 | Client-supplied `X-ZL-Client-IP`, `X-Forwarded-For` or `CF-Connecting-IP` bypassed `ZL_ALLOWED_IPS` and the per-source login lockout. | Before: `/api/auth/me` returned 403 without a header and 200 with `X-ZL-Client-IP: 192.0.2.10`; rotating the header produced twelve `401` responses and no `429`. After: spoofed headers without `ZL_PROXY_SECRET` stay 403, and rotating headers over twelve bad logins produced `401 × 8` then `429 × 4`. **Fixed** by trusting forwarding headers only when the proxy proves a shared secret. |
+| SEC-02 | P1 | `POST /api/internal/scheduler` accepted any request carrying `X-Neon-Trigger-Invocation-Id`, so an unauthenticated caller could force backups and report sends. | Before: a forged header returned `200 {"ok":true}`. After: forged header 401; correct Bearer token and trigger path token 200; no configured secret always 401. **Fixed** with a required `ZL_SCHEDULER_SECRET`; the Neon trigger uses a path token because Neon rejects query strings in trigger paths. |
+| SEC-03 | P2 | The static server exposed server source, configuration, tests and `node_modules`. | Before: `/serve.mjs`, `/server-auth.js`, `/server-env.js`, `/package.json`, `/wrangler.toml`, `/tests/server-auth.test.mjs` and `/node_modules/pg/package.json` all returned 200. After: all return 403; app assets still return 200. **Fixed** with an explicit public-asset allowlist plus a real-path check. |
+| SEC-04 | P2 | `data/` was `755` and `workspace.sqlite`, `-wal` and `-shm` were `644`, exposing books, password hashes and MFA secrets to other local accounts. | Before: `755`/`644`. After: `700`/`600`. **Fixed** with a restrictive umask, startup chmod and private JSON writes. |
+| SEC-05 | P2 | Public signed-report HTML responses omitted the server security headers. | Invalid and valid report responses now carry CSP, `nosniff`, frame denial, referrer and permissions policies. **Fixed.** |
+| SEC-06 | P2 | Report-link HMAC keys silently fell back to `DATABASE_URL` or the owner password. A leaked report link could therefore be used as an offline password-guessing oracle, and key rotation was coupled to unrelated secrets. | `reportSecret()` now requires a dedicated `ZL_REPORT_SECRET`; a regression test asserts the fallback is gone. **Fixed.** |
+| SEC-07 | P3 | Authentication JSON bodies could consume up to the 20 MB workspace limit. | Auth endpoints now cap bodies at 64 KiB and reject an oversized declared `Content-Length` before reading. **Fixed.** |
+
+### Checks that did not find a vulnerability
+
+- **Stored/reflected XSS:** the hostile-data sweep seeded script and event-handler
+  payloads into user-controlled fields and visited all 32 screens. It found 35
+  checks with zero injected DOM nodes and zero script execution, both against the
+  Node server and the single-file `file://` build.
+- **CSV formula injection:** exported cells beginning with `=`, `+`, `-` or `@`
+  are prefixed with a single quote; the XLSX writer uses inline strings.
+- **SQL injection:** workspace, auth and audit queries use bound parameters and
+  reject unknown identifiers.
+- **Path traversal and symlink escape:** traversal is normalised, the public
+  allowlist is applied after normalisation, and the resolved real path must stay
+  inside an allowed public directory.
+- **Workspace authorisation:** non-owner reads and writes are company-scoped;
+  forged company ids and out-of-scope saves are rejected.
+- **Session and credential handling:** session tokens are hashed at rest,
+  cookies are `HttpOnly` and `SameSite=Strict`, sessions are revocable, TOTP
+  counters are single-use, and login/reset limits are stored server-side.
+- **Dependencies and secrets:** `npm audit --omit=dev` in the app and `npm audit`
+  in `tools/browser` reported 0 vulnerabilities. No `.env*` file is tracked, no
+  secret-like value was found in git history, and `.env.local`, `data/` and
+  `.neon` are ignored.
+
+### Residual risk and decisions
+
+- **Neon Auth email verification (needs a deployment decision).**
+  `ensureNeonUser()` links a Neon identity to an existing invited profile by
+  email, and `neonSignUp` creates an app session immediately. If the Neon Auth
+  project has `requireEmailVerification` disabled (the installed Neon defaults
+  do), an attacker who knows an invited email could sign up first and inherit
+  that role. Enable email verification in Neon Auth or delay profile linking
+  until the address is verified.
+- **Plain HTTP on a LAN.** Cookies omit `Secure` when the server is reached over
+  HTTP, which is expected but leaves passwords and books readable on the wire.
+  Use TLS or keep the port on a trusted private network.
+- **The Neon trigger carries the scheduler secret in its URL path.** The
+  invocation header is not an authentication signal. Keep function/URL logs
+  access-controlled, and rotate `ZL_SCHEDULER_SECRET` if they are exposed.
+- **No dedicated rate limit on `/api/reports/daily`.** A token must verify first
+  and report generation is cheap relative to the HMAC check, but a public
+  endpoint still benefits from edge rate limiting.
+- **Local no-auth mode is intentional.** Binding to `127.0.0.1` without
+  `ZL_AUTH=1` remains an unauthenticated local-development mode; do not
+  port-forward it.
+
+### Verification run
+
+- `node --test tests/`: 400 tests, 399 pass, 1 skip (the existing Postgres
+  test, skipped when `TEST_DATABASE_URL` is not set), 0 fail.
+- `tests/security-hardening.test.mjs`: proxy-secret, scheduler, static allowlist,
+  file-permission, report-header and auth-body regressions pass.
+- Manual probes against a fresh isolated server reproduced every before/after
+  result in the table above.
+- The Chromium browser suites, build and hostile-data XSS sweep were not rerun
+  in this pass; this change set does not touch the UI or accounting engine.
+
+### Production deployment and verification
+
+- Cloudflare Worker `zledgercraft-api` has an encrypted `ZL_PROXY_SECRET`
+  binding and runs version `54bbd846-fefb-4d44-a73a-9fa9018899e2` (deployed
+  2026-11-21 09:15 UTC).
+- Neon Function `zledgercraft` runs deployment **#35** (2026-11-21 09:16 UTC)
+  with both `ZL_PROXY_SECRET` and `ZL_SCHEDULER_SECRET` present.
+- The `daily-operations` trigger is enabled at `30 2 * * *`, next run
+  2026-11-22 02:30 UTC, and points at the path-token scheduler route.
+- `GET https://books.lengkhawm.online/api/auth/me` returned 200 with
+  `storage: "postgres"`, `neonAuth: true` and `postgres: true`.
+- `POST /api/internal/scheduler` returned 401 with no credential or a forged
+  Neon invocation header; a wrong path token returned 401; `GET` returned 405.
+- A valid scheduler invocation was deliberately not sent to production because
+  it would create a real backup and may send a report. Its authentication path
+  is covered by the regression tests.
+- The first trigger deployment printed the path token in deployment output. The
+  token was rotated immediately and the Function and trigger were redeployed;
+  the exposed value is no longer valid.

@@ -5,6 +5,7 @@ import {
   createReportToken,
   normalizeRecipients,
   reportHtml,
+  reportSecret,
   reportText,
   verifyReportToken,
 } from '../server-reports.js';
@@ -40,6 +41,11 @@ const state = {
     },
   ],
 };
+
+test('report links require a dedicated signing secret', () => {
+  assert.equal(reportSecret({ ZL_REPORT_SECRET: ' report-secret ' }), 'report-secret');
+  assert.equal(reportSecret({ DATABASE_URL: 'postgres://secret', ZL_OWNER_PASSWORD: 'owner-secret' }), '');
+});
 
 test('report links are signed, scoped and expire', () => {
   const token = createReportToken('test-secret', { now: 1_700_000_000_000, ttlMs: 60_000 });

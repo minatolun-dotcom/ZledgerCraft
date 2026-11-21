@@ -29,7 +29,10 @@ function sign(secret, payload) {
 }
 
 export function reportSecret(env = process.env) {
-  return text(env.ZL_REPORT_SECRET) || text(env.DATABASE_URL) || text(env.ZL_OWNER_PASSWORD);
+  // Report links need a dedicated HMAC key. Reusing the database URL or an
+  // owner password would let a leaked report link be attacked as a password
+  // oracle and would make signing-key rotation depend on unrelated secrets.
+  return text(env.ZL_REPORT_SECRET);
 }
 
 export function reportTtlMs(env = process.env) {

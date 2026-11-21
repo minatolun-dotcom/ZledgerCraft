@@ -204,6 +204,8 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         const path = new URL(preview.body.url).pathname + new URL(preview.body.url).search;
         const reportResponse = await fetch(`${base}${path}`);
         assert.equal(reportResponse.status, 200);
+        assert.equal(reportResponse.headers.get('x-content-type-options'), 'nosniff');
+        assert.match(reportResponse.headers.get('content-security-policy') ?? '', /default-src 'self'/);
         const html = await reportResponse.text();
         assert.match(html, /Report Books/);
         assert.match(html, /Sales this month/);
@@ -236,9 +238,13 @@ test('owner can configure, preview and send a signed daily report', { timeout: 3
         assert.equal(manuallyScheduled.status, 200);
         const manuallyScheduledBody = await manuallyScheduled.json();
         assert.equal(manuallyScheduledBody.report, 'already-sent');
-        const scheduled = await fetch(`${base}/api/internal/scheduler`, {
+        const forged = await fetch(`${base}/api/internal/scheduler`, {
           method: 'POST',
           headers: { 'x-neon-trigger-invocation-id': 'test-invocation' },
+        });
+        assert.equal(forged.status, 401);
+        const scheduled = await fetch(`${base}/api/internal/scheduler/scheduler-test-secret`, {
+          method: 'POST',
         });
         assert.equal(scheduled.status, 200);
         const scheduledBody = await scheduled.json();

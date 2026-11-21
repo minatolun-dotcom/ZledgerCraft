@@ -307,17 +307,22 @@ feature without breaking local development or the single-file build.
 - `ZL_BACKUP_PASSPHRASE` (optional; 12+ characters, encrypts new server/R2
   backup files with AES-256-GCM; keep it outside the backup destination)
 - `ZL_DISABLE_ENV_FILE=1` (optional; tests use this instead of `.env.local`)
-- `ZL_REPORT_SECRET` (required by `neon.ts` for the Function; otherwise signs
-  report links and falls back to `DATABASE_URL` or the owner password)
+- `ZL_REPORT_SECRET` (required by `neon.ts` for the Function; dedicated HMAC
+  key for report links)
 - `ZL_REPORT_TTL_HOURS` (optional; default 168, clamped to 1–720)
-- `ZL_SCHEDULER_SECRET` (required by `neon.ts` for the Function; lets a manual
-  caller authenticate to `/api/internal/scheduler` with `Authorization: Bearer`;
-  Neon trigger deliveries use `x-neon-trigger-invocation-id`)
+- `ZL_SCHEDULER_SECRET` (required by `neon.ts` for the Function; authenticates
+  `/api/internal/scheduler` with `Authorization: Bearer` or the path token used
+  by the Neon trigger)
+- `ZL_PROXY_SECRET` (required by `neon.ts` for the Function and by the Cloudflare
+  Worker; proves that `X-ZL-Client-IP` came from the trusted proxy)
 
 ### Cloudflare Worker
 
 - `wrangler.toml` route `books.lengkhawm.online/api/*`
 - `UPSTREAM` in `cf-api-worker.mjs` points at the deployed Neon Function URL
+- `npx wrangler secret put ZL_PROXY_SECRET` stores the same value used by the
+  Function environment; the Worker strips incoming trust headers and re-sends
+  only the Cloudflare-derived client IP with this proof
 
 ### Existing server
 
@@ -330,6 +335,9 @@ feature without breaking local development or the single-file build.
 
 ## Security decisions
 
+- Forwarding headers are untrusted input. The server only accepts a client IP from
+  the proxy when the shared `ZL_PROXY_SECRET` matches; the Worker removes any
+  caller-supplied `X-ZL-Client-IP` or `X-ZL-Proxy-Secret` first.
 - R2 credentials must be scoped to one bucket and stored as server secrets.
 - Backups are sensitive. R2 provides encryption at rest, but provider-side
   encryption is not a substitute for client-side encryption or an offline key.
@@ -554,9 +562,10 @@ and operate the current server with R2 and Resend enabled.
   and `POST /api/reports/send`.
 - Added the public signed report route at `/api/reports/daily`; no session is
   required, but the token must be valid and unexpired.
-- Added `/api/internal/scheduler`, guarded by the Neon trigger invocation
-  header or a `ZL_SCHEDULER_SECRET` Bearer token. It runs the daily backup check
-  and sends the report once per UTC day when enabled.
+- Added `/api/internal/scheduler`, guarded by `ZL_SCHEDULER_SECRET` (Bearer
+  token or the trigger's path token). The Neon trigger invocation header is not
+  trusted on its own. It runs the daily backup check and sends the report once
+  per UTC day when enabled.
 - Declared the `daily-operations` Neon Function Trigger at `30 2 * * *`; local
   servers use an hourly timer with the same due logic. No Cloudflare Worker
   cron builds a report.
@@ -637,3 +646,19 @@ and operate the current server with R2 and Resend enabled.
   files are cleaned up rather than listed or served.
 - `neon.ts` forwards `ZL_BACKUP_PASSPHRASE` when present. The live workspace
   itself remains unencrypted; this protects backup files and R2 objects only.
+
+### 2026-11-21 — Security-hardening deployment
+
+- Cloudflare Worker `zledgercraft-api` received `ZL_PROXY_SECRET` and version
+  `54bbd846-fefb-4d44-a73a-9fa9018899e2`; the Worker now strips client-supplied
+  trust headers and sends the Cloudflare client IP with the proxy proof.
+- Neon Function deployment #35 includes `ZL_PROXY_SECRET` and the rotated
+  `ZL_SCHEDULER_SECRET`.
+- Neon rejects query strings in function-trigger paths, so the
+  `daily-operations` trigger uses a path token instead of `?secret=`. The
+  trigger remains enabled for 02:30 UTC.
+- Production checks: `/api/auth/me` returned 200 with Postgres and Neon Auth
+  enabled; scheduler `GET` returned 405; unauthenticated, forged-header and
+  wrong-path-token scheduler `POST` requests returned 401.
+- The first trigger deployment printed the path token in tooling output; the
+  token was rotated immediately and the Function and trigger redeployed.

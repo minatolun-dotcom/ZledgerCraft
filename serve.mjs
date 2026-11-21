@@ -41,6 +41,10 @@ import {
 import { buildReportPdf } from './server-pdf.js';
 import { outstanding, trialBalance } from './src/accounting.js';
 
+// Keep server-created databases, WAL files and JSON snapshots private even on
+// hosts whose login umask is permissive.
+process.umask(0o077);
+
 const root = fileURLToPath(new URL('.', import.meta.url));
 const port = Number(process.env.PORT ?? 4173);
 const host = String(process.env.HOST || '127.0.0.1');
@@ -100,7 +104,9 @@ if (allowedNetworks.some((entry) => entry.invalid)) {
   process.exit(1);
 }
 const BODY_LIMIT = 20 * 1024 * 1024;
+const AUTH_BODY_LIMIT = 64 * 1024;
 const SESSION_COOKIE = 'zl_session';
+const proxySecret = String(process.env.ZL_PROXY_SECRET || '').trim();
 const AUDIT_GENESIS = '0'.repeat(64);
 const r2Config = r2Configuration(process.env);
 const emailConfig = emailConfiguration(process.env);
@@ -139,9 +145,24 @@ let selectServerEvents = null;
 let lastServerEvent = null;
 let upsertWorkspace = null;
 
+async function restrictDataPermissions() {
+  await chmod(dataDir, 0o700).catch(() => {});
+  for (const name of [
+    'workspace.sqlite',
+    'workspace.sqlite-wal',
+    'workspace.sqlite-shm',
+    'workspace.json',
+    'workspace.json.migrated',
+  ]) {
+    await chmod(join(dataDir, name), 0o600).catch(() => {});
+  }
+}
+
 if (DatabaseSync) {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(dataDir, { recursive: true, mode: 0o700 });
+  await restrictDataPermissions();
   db = new DatabaseSync(workspaceDbFile);
+  await restrictDataPermissions();
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
@@ -355,13 +376,29 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
+const PUBLIC_STATIC_FILES = new Set(['index.html', 'styles.css', '.nojekyll']);
+const PUBLIC_STATIC_DIRS = new Set(['src', 'brand', 'dist']);
+
+function isPublicStaticPath(pathname) {
+  const clean = normalize(String(pathname)).replace(/^[/\\]+/, '');
+  if (PUBLIC_STATIC_FILES.has(clean)) return true;
+  const parts = clean.split(/[\\/]+/);
+  return (
+    parts.length > 1 &&
+    PUBLIC_STATIC_DIRS.has(parts[0]) &&
+    parts.slice(1).every((part) => part && !part.startsWith('.'))
+  );
+}
+
 function resolvePath(urlPath) {
   const decoded = decodeURIComponent(urlPath.split('?')[0]);
   const pathname = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '');
-  const target = resolve(join(root, normalize(pathname)));
+  const clean = normalize(pathname).replace(/^[/\\]+/, '');
+  if (!isPublicStaticPath(clean)) return null;
+  const target = resolve(join(root, clean));
   const fromRoot = relative(root, target);
   if (fromRoot.startsWith('..') || isAbsolute(fromRoot)) return null;
-  if (fromRoot.split(sep).some((segment) => segment.startsWith('.'))) return null;
+  if (fromRoot !== '.nojekyll' && fromRoot.split(sep).some((segment) => segment.startsWith('.'))) return null;
   return target;
 }
 
@@ -561,17 +598,23 @@ async function companyScopeError(value) {
   return '';
 }
 
+function secureEquals(expected, supplied) {
+  const left = Buffer.from(String(expected));
+  const right = Buffer.from(String(supplied ?? ''));
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function trustedProxyIp(request) {
+  if (!proxySecret) return '';
+  const supplied = String(request.headers['x-zl-proxy-secret'] || '');
+  if (!secureEquals(proxySecret, supplied)) return '';
+  return String(request.headers['x-zl-client-ip'] || '').trim();
+}
+
 function clientIp(request) {
-  const forwarded = String(request.headers['x-forwarded-for'] || '')
-    .split(',')[0]
-    .trim();
-  return (
-    String(request.headers['x-zl-client-ip'] || '').trim() ||
-    forwarded ||
-    request.headers['cf-connecting-ip'] ||
-    request.socket.remoteAddress ||
-    'unknown'
-  );
+  // Forwarding headers are forgeable by any direct client. Only use them when
+  // the trusted reverse proxy proves it shares ZL_PROXY_SECRET.
+  return trustedProxyIp(request) || request.socket?.remoteAddress || 'unknown';
 }
 
 function allowedClient(address) {
@@ -632,15 +675,23 @@ async function uploadVerifiedBackup(name, target) {
   }
 }
 
-async function readBody(request) {
+async function readBody(request, limit = BODY_LIMIT) {
+  const declared = Number(request.headers['content-length']);
+  if (Number.isFinite(declared) && declared > limit) {
+    throw new Error('Request body is too large.');
+  }
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > BODY_LIMIT) throw new Error('Workspace body is too large.');
+    if (size > limit) throw new Error('Request body is too large.');
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+function readAuthBody(request) {
+  return readBody(request, AUTH_BODY_LIMIT);
 }
 
 async function readJsonEnvelope() {
@@ -902,6 +953,7 @@ async function createServerBackupOnce(reason = 'manual') {
   if (!workspaceStore) throw new Error('Server backups require a server workspace.');
   if (!postgresStore && (!db || !sqliteBackup)) throw new Error('Server backups require SQLite.');
   await mkdir(backupDir, { recursive: true, mode: 0o700 });
+  await chmod(backupDir, 0o700).catch(() => {});
   const base = `workspace-${backupStamp()}-${String(reason).replace(/[^a-z]/gi, '').toLowerCase() || 'manual'}`;
   const extension = postgresStore ? 'json' : 'sqlite';
   const encryptedSuffix = backupEncryptionPassphrase ? '.enc' : '';
@@ -1308,15 +1360,12 @@ async function runScheduledJobs() {
   };
 }
 
-function schedulerAuthorized(request) {
+function schedulerAuthorized(request, pathSecret = '') {
   const configured = String(process.env.ZL_SCHEDULER_SECRET || '');
-  const supplied = /^Bearer\s+(.+)$/i.exec(String(request.headers.authorization || ''))?.[1] || '';
-  if (configured && supplied) {
-    const expected = Buffer.from(configured);
-    const actual = Buffer.from(supplied);
-    if (expected.length === actual.length && timingSafeEqual(expected, actual)) return true;
-  }
-  return Boolean(request.headers['x-neon-trigger-invocation-id']);
+  if (!configured) return false;
+  const bearer = /^Bearer\s+(.+)$/i.exec(String(request.headers.authorization || ''))?.[1] || '';
+  const supplied = bearer || String(pathSecret || '');
+  return Boolean(supplied) && secureEquals(configured, supplied);
 }
 
 async function handleReportApi(request, response, url, pathname) {
@@ -1324,6 +1373,7 @@ async function handleReportApi(request, response, url, pathname) {
     const verified = verifyReportToken(signingSecret, url.searchParams.get('token') || '');
     if (!verified.ok) {
       response.writeHead(verified.reason === 'expired' ? 410 : 401, {
+        ...securityHeaders(),
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-store',
       });
@@ -1336,6 +1386,7 @@ async function handleReportApi(request, response, url, pathname) {
       const saved = await workspaceStore.read();
       const report = buildDailyReport(saved.state, { backup: await latestBackupForReport() });
       response.writeHead(200, {
+        ...securityHeaders(),
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-store',
       });
@@ -1656,10 +1707,12 @@ async function writeWorkspace(state, baseRev, user, leaseToken = '') {
   if (current.rev !== baseRev) {
     return { conflict: true, rev: current.rev, updatedAt: current.updatedAt };
   }
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(dataDir, { recursive: true, mode: 0o700 });
+  await chmod(dataDir, 0o700).catch(() => {});
   const temp = `${legacyWorkspaceFile}.tmp`;
   const saved = { version: 2, rev: baseRev + 1, updatedAt, state };
-  await writeFile(temp, JSON.stringify(saved), 'utf8');
+  await writeFile(temp, JSON.stringify(saved), { encoding: 'utf8', mode: 0o600 });
+  await chmod(temp, 0o600).catch(() => {});
   await rename(temp, legacyWorkspaceFile);
   return { conflict: false, rev: saved.rev, updatedAt };
 }
@@ -1702,7 +1755,7 @@ async function handleAuthApi(request, response, url) {
     }
     let body;
     try {
-      body = JSON.parse(await readBody(request));
+      body = JSON.parse(await readAuthBody(request));
     } catch {
       json(response, 400, { ok: false, error: 'Send a username or email address.' });
       return;
@@ -1754,7 +1807,7 @@ async function handleAuthApi(request, response, url) {
     }
     let body;
     try {
-      body = JSON.parse(await readBody(request));
+      body = JSON.parse(await readAuthBody(request));
     } catch {
       json(response, 400, { ok: false, error: 'Send a reset token and new password.' });
       return;
@@ -1790,7 +1843,7 @@ async function handleAuthApi(request, response, url) {
     }
     let body;
     try {
-      body = JSON.parse(await readBody(request));
+      body = JSON.parse(await readAuthBody(request));
     } catch {
       json(response, 400, { ok: false, error: 'Send a JSON username and password.' });
       return;
@@ -1943,7 +1996,7 @@ async function handleAuthApi(request, response, url) {
     }
     let body;
     try {
-      body = JSON.parse(await readBody(request));
+      body = JSON.parse(await readAuthBody(request));
     } catch {
       json(response, 400, { ok: false, error: 'Send a JSON email, password and name.' });
       return;
@@ -2015,7 +2068,7 @@ async function handleAuthApi(request, response, url) {
     }
     let body;
     try {
-      body = JSON.parse(await readBody(request));
+      body = JSON.parse(await readAuthBody(request));
     } catch {
       json(response, 400, { ok: false, error: 'Send the current and new password.' });
       return;
@@ -2228,7 +2281,7 @@ async function handleAuthApi(request, response, url) {
       return;
     }
     try {
-      const body = JSON.parse(await readBody(request));
+      const body = JSON.parse(await readAuthBody(request));
       let companyIds = null;
       if (body?.companyIds !== undefined && body?.companyIds !== null) {
         if (!Array.isArray(body.companyIds)) {
@@ -2321,7 +2374,7 @@ async function handleAuthApi(request, response, url) {
       return;
     }
     try {
-      const body = JSON.parse(await readBody(request));
+      const body = JSON.parse(await readAuthBody(request));
       if (!body || typeof body !== 'object') throw new Error('account');
       if (neonAuth) {
         if (!String(body.email ?? '').trim()) {
@@ -2369,7 +2422,7 @@ async function handleAuthApi(request, response, url) {
       return;
     }
     try {
-      const body = JSON.parse(await readBody(request));
+      const body = JSON.parse(await readAuthBody(request));
       if (!body || typeof body !== 'object') throw new Error('account');
       if (neonAuth && body.password) {
         json(response, 501, {
@@ -3242,8 +3295,12 @@ export async function requestHandler(request, response) {
     response.end('Bad request');
     return;
   }
-  if (pathname === '/api/internal/scheduler') {
-    if (request.method !== 'POST' || !schedulerAuthorized(request)) {
+  const schedulerPrefix = '/api/internal/scheduler/';
+  const schedulerPathSecret = decodedPath.startsWith(schedulerPrefix)
+    ? decodedPath.slice(schedulerPrefix.length)
+    : '';
+  if (pathname === '/api/internal/scheduler' || decodedPath.startsWith(schedulerPrefix)) {
+    if (request.method !== 'POST' || !schedulerAuthorized(request, schedulerPathSecret)) {
       json(response, request.method === 'POST' ? 401 : 405, {
         ok: false,
         error: 'Scheduler authorization is required.',
@@ -3315,7 +3372,11 @@ export async function requestHandler(request, response) {
     const info = await stat(target);
     const file = info.isDirectory() ? join(target, 'index.html') : target;
     const [realRoot, realTarget] = await Promise.all([realpath(root), realpath(file)]);
-    if (realTarget !== realRoot && !realTarget.startsWith(`${realRoot}${sep}`)) {
+    const realRelative = relative(realRoot, realTarget);
+    if (
+      realTarget !== realRoot &&
+      (realRelative.startsWith('..') || isAbsolute(realRelative) || !isPublicStaticPath(realRelative))
+    ) {
       response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
       response.end('Forbidden');
       return;

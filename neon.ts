@@ -1,5 +1,7 @@
 import { defineConfig } from "@neon/config/v1";
 
+const schedulerSecret = process.env.ZL_SCHEDULER_SECRET || '';
+
 export default defineConfig({
   // Declare your Neon services here
   auth: true,
@@ -14,6 +16,7 @@ export default defineConfig({
         ZL_PUBLIC_URL: { value: process.env.ZL_PUBLIC_URL, required: true },
         ZL_REPORT_SECRET: { value: process.env.ZL_REPORT_SECRET, required: true },
         ZL_SCHEDULER_SECRET: { value: process.env.ZL_SCHEDULER_SECRET, required: true },
+        ZL_PROXY_SECRET: { value: process.env.ZL_PROXY_SECRET, required: true },
         ...(process.env.ZL_BACKUP_PASSPHRASE
           ? { ZL_BACKUP_PASSPHRASE: { value: process.env.ZL_BACKUP_PASSPHRASE } }
           : {}),
@@ -34,7 +37,7 @@ export default defineConfig({
       type: 'schedule',
       function: 'zledgercraft',
       cron: '30 2 * * *',
-      functionPath: '/api/internal/scheduler',
+      functionPath: `/api/internal/scheduler/${encodeURIComponent(schedulerSecret)}`,
     },
   },
   // Branch policy: per-branch tuning

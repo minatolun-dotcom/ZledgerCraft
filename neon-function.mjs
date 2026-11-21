@@ -7,17 +7,13 @@ function nodeRequest(request, body) {
   const headers = {};
   for (const [name, value] of request.headers) headers[name.toLowerCase()] = value;
   const url = new URL(request.url);
-  const forwarded = String(headers['x-forwarded-for'] || '')
-    .split(',')[0]
-    .trim();
   return {
     method: request.method,
     url: `${url.pathname}${url.search}`,
     headers,
-    socket: {
-      remoteAddress:
-        headers['x-zl-client-ip'] || forwarded || headers['cf-connecting-ip'] || headers['x-real-ip'] || 'unknown',
-    },
+    // There is no TCP peer address here. A trusted reverse proxy must prove it
+    // knows ZL_PROXY_SECRET before requestHandler will use its client-IP header.
+    socket: { remoteAddress: 'unknown' },
     async *[Symbol.asyncIterator]() {
       if (body.length) yield body;
     },

@@ -3977,6 +3977,11 @@ export function gstLateFee(input = {}) {
   };
 }
 
+function ewayValidityDays(distance) {
+  const km = Number(distance);
+  return Number.isFinite(km) && km > 0 ? Math.max(1, Math.ceil(km / 200)) : 0;
+}
+
 function gstr2bNumberKey(value) {
   return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
@@ -5095,6 +5100,8 @@ export function ewayBillRegister(company, filters = {}) {
       const partBReady = Boolean(
         partB?.transporterName && partB?.distance > 0 && (partB?.vehicleNo || partB?.transporterId),
       );
+      const validityDays = ewayValidityDays(partB?.distance);
+      const validUntil = validityDays ? addIsoDays(document.date, validityDays) : '';
       const warnings = [];
       if (!partBReady) {
         warnings.push(
@@ -5106,6 +5113,9 @@ export function ewayBillRegister(company, filters = {}) {
       if (!seller.address || !seller.city || !seller.pin) warnings.push('Seller address or PIN is incomplete.');
       if (!buyer.address || !buyer.city || !buyer.pin) warnings.push('Buyer address or PIN is incomplete.');
       if (lines.some((line) => !line.hsn)) warnings.push('HSN / SAC is missing on one or more lines.');
+      if (validUntil && validUntil < new Date().toISOString().slice(0, 10)) {
+        warnings.push('The calculated e-way validity has expired; a fresh document may be needed.');
+      }
       return {
         ...document,
         voucherId: document.id,
@@ -5116,6 +5126,8 @@ export function ewayBillRegister(company, filters = {}) {
         warnings,
         partB,
         partBReady,
+        validityDays,
+        validUntil,
         ready: Boolean(
           seller.gstin && seller.address && seller.city && seller.pin &&
             buyer.address && buyer.city && buyer.pin && buyer.stateCode,

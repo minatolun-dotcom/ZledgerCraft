@@ -653,6 +653,7 @@ export function ewayBillScreen() {
         <td class="num">${money(row.taxable)}</td>
         <td class="num">${money(row.total)}</td>
         <td><span class="badge${row.ready ? '' : ' overdue'}">Part A ${row.ready ? 'ready' : 'review'}</span> <span class="badge${row.partBReady ? '' : ' overdue'}">Part B ${row.partBReady ? 'ready' : 'gap'}</span></td>
+        <td>${row.validityDays ? `<strong>${row.validityDays} day${row.validityDays === 1 ? '' : 's'}</strong><div class="muted small">to ${esc(dateLabel(row.validUntil))}</div>` : '<span class="muted">Add distance</span>'}</td>
         <td>${issueList(row.warnings)}</td>
         <td class="row-actions">
           <button class="btn small ghost" type="button" data-action="open-voucher" data-id="${esc(row.id)}">Open</button>
@@ -680,7 +681,7 @@ export function ewayBillScreen() {
     </div>
     ${report.rows.length
       ? `<div class="table-scroll" tabindex="0"><table class="data-table compact">
-          <thead><tr><th>Invoice</th><th>Consignee / destination</th><th class="num">Taxable</th><th class="num">Invoice total</th><th>Status</th><th>Notes</th><th></th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Consignee / destination</th><th class="num">Taxable</th><th class="num">Invoice total</th><th>Status</th><th>Validity</th><th>Notes</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table></div>`
       : `<p class="muted">No outward invoice at or above ${money(report.threshold)} in this period.</p>`}

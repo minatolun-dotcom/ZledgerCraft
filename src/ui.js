@@ -1576,7 +1576,7 @@ export function tdsVoucherBlock(active) {
         </label>
       </div>
       <div id="tds-summary" class="gst-summary"></div>
-      <p class="muted small">One section applies to the whole voucher and the deduction is balanced into the party/cash line on save. Choosing “No TDS/TCS” keeps any payable line already on the voucher as a manual entry. GST and TDS/TCS cannot be combined on the same voucher yet.</p>
+      <p class="muted small">One section applies to the whole voucher and the deduction is balanced into the party/cash line on save. Choosing “No TDS/TCS” keeps any payable line already on the voucher as a manual entry. GST and TDS/TCS can be combined: tax is computed on the taxable value, then TDS is deducted from the tax-inclusive party amount or TCS is added to it.</p>
     </div>`;
 }
 

@@ -259,6 +259,8 @@ test('e-way bill register uses the 50,000 threshold and saves Part B details', (
   assert.equal(payload.itemList[0].qtyUnit, 'NOS');
   assert.match(report.rows[0].warnings.join(' '), /Part B/);
   assert.equal(report.rows[0].partBReady, false);
+  assert.equal(report.rows[0].validityDays, 0);
+  assert.equal(report.rows[0].validUntil, '');
 
   const saved = setEwayPartB(company, large.id, {
     transporterName: ' Fast Freight ',
@@ -274,6 +276,8 @@ test('e-way bill register uses the 50,000 threshold and saves Part B details', (
 
   const withPartB = ewayBillRegister(company, { from: '2026-04-01', to: '2026-04-30' });
   assert.equal(withPartB.rows[0].partBReady, true);
+  assert.equal(withPartB.rows[0].validityDays, 1);
+  assert.equal(withPartB.rows[0].validUntil, '2026-04-09');
   assert.equal(withPartB.rows[0].warnings.some((warning) => /Part B/.test(warning)), false);
   const fullPayload = withPartB.rows[0].payload.BillLists[0];
   assert.equal(fullPayload.transporterName, 'Fast Freight');

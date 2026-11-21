@@ -4430,9 +4430,6 @@ export function validateVoucherInput(company, type, input, options = {}) {
     if (!['Purchase', 'Sales'].includes(type)) {
       return { ok: false, error: 'TDS is deducted on purchase vouchers and TCS is collected on sales vouchers.' };
     }
-    if (gst) {
-      return { ok: false, error: 'A voucher cannot carry both GST and TDS/TCS yet. Use separate vouchers or a journal.' };
-    }
     if (foreign) {
       return { ok: false, error: 'TDS/TCS is not available on foreign-currency vouchers yet.' };
     }
@@ -4467,15 +4464,19 @@ export function validateVoucherInput(company, type, input, options = {}) {
         error: `A ${kind} voucher needs exactly one ${balancingSide === 'Dr' ? 'debit' : 'credit'} line for the party, cash or bank. Merge split payments into one line.`,
       };
     }
-    const base = round2(
-      lines.filter((line) => line.side === goodsSide).reduce((sum, line) => sum + line.amount, 0),
+    const gstTaxIds = new Set(gst ? Object.values(gstTaxLedgers(company)).map((entry) => entry.id) : []);
+    const baseLines = lines.filter(
+      (line) => line.side === goodsSide && !gstTaxIds.has(line.ledgerId),
     );
+    const base = gst
+      ? gst.taxable
+      : round2(baseLines.reduce((sum, line) => sum + line.amount, 0));
     if (base <= 0) {
       return { ok: false, error: `Enter the amount on the ${goodsSide === 'Dr' ? 'debit' : 'credit'} side before applying ${kind}.` };
     }
     const sections = new Map();
     let amount = 0;
-    for (const line of lines.filter((entry) => entry.side === goodsSide)) {
+    for (const line of baseLines) {
       if (line.tdsSectionId === '__none__') continue;
       const section = line.tdsSectionId
         ? (company.tds.sections ?? []).find((entry) => entry.id === line.tdsSectionId)
@@ -4526,7 +4527,11 @@ export function validateVoucherInput(company, type, input, options = {}) {
       return { ok: false, error: 'PAN must be 10 characters: five letters, four digits and one letter.' };
     }
 
-    balancing[0].amount = kind === 'TDS' ? round2(base - amount) : round2(base + amount);
+    const gstGross = gst ? round2(gst.cgst + gst.sgst + gst.igst + gst.cess) : 0;
+    balancing[0].amount =
+      kind === 'TDS'
+        ? round2(base - amount + gstGross)
+        : round2(base + amount + gstGross);
     lines.push({ ledgerId: ledger.id, side: 'Cr', amount });
     const allocated = round2(
       (balancing[0].allocations ?? []).reduce((sum, allocation) => sum + allocation.amount, 0),

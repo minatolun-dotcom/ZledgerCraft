@@ -393,6 +393,50 @@ export let serverAuditChain = { ok: null, checked: 0 };
 export let serverAuditEvents = [];
 export let serverEventChain = { ok: null, checked: 0 };
 export let view = { screen: 'gateway' };
+export let navOpen = false;
+export let collapsedNavGroups = new Set();
+export let theme = 'light';
+const THEME_KEY = 'zledgercraft.theme';
+const NAV_GROUPS_KEY = 'zledgercraft.nav.groups';
+
+export function applyTheme(next = theme) {
+  theme = next === 'dark' ? 'dark' : 'light';
+  if (typeof document === 'undefined') return;
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#081f19' : '#0e3b31');
+}
+
+function initialTheme() {
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch {
+    // Storage can be unavailable in private or restricted contexts.
+  }
+  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
+    ? 'dark'
+    : 'light';
+}
+
+function loadCollapsedNavGroups() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(NAV_GROUPS_KEY) || '[]');
+    if (Array.isArray(stored)) collapsedNavGroups = new Set(stored.filter((id) => typeof id === 'string'));
+  } catch {
+    // A malformed preference should not block the app.
+  }
+}
+
+function saveCollapsedNavGroups() {
+  try {
+    localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify([...collapsedNavGroups]));
+  } catch {
+    // The current session still remembers the choice.
+  }
+}
+
 export let draft = null;
 export let flash = null;
 export let flashTimer = null;
@@ -1105,6 +1149,8 @@ export function balanceLabel(value) {
 }
 
 export function navigate(screen, extra = {}) {
+  navOpen = false;
+  expandGroupForScreen(screen);
   const keepLease =
     screen === 'voucherNew' &&
     activeLease?.recordType === 'voucher' &&
@@ -1898,9 +1944,20 @@ export function updateVoucherTotals() {
     ${itemTotal === null ? '' : `<span class="${Math.abs(round2((gstTaxableValue(form, active) ?? tdsBaseValue(form) ?? debit) - itemTotal)) < 0.01 ? 'flat' : 'off'}">Items <strong>${money(itemTotal)}</strong></span>`}`;
 }
 
+function themeIconHtml() {
+  return theme === 'dark'
+    ? `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`
+    : `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.5 14.4A8.5 8.5 0 0 1 9.6 3.5 8.5 8.5 0 1 0 20.5 14.4Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+}
+
 export function headerHtml(active) {
+  const themeLabel = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
   return `
     <header class="topbar">
+      <button class="icon-btn nav-toggle" type="button" data-action="toggle-nav"
+        aria-controls="app-sidebar" aria-expanded="${navOpen ? 'true' : 'false'}" aria-label="Open navigation">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 5h18M3 12h18M3 19h18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
       <div class="brand"><svg class="brand-mark" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M 82 40 H 174 A 20 20 0 0 1 194 60 V 196 A 20 20 0 0 1 174 216 H 82 A 20 20 0 0 1 62 196 V 60 A 20 20 0 0 1 82 40 Z M 76 67 H 180 V 93 L 110 163 H 180 V 189 H 76 V 163 L 146 93 H 76 Z"/></svg>Zledger<span>CRAFT</span></div>
       <div class="company-line">
         ${active
@@ -1918,6 +1975,10 @@ export function headerHtml(active) {
           : '<span class="label">No company open</span>'}
       </div>
       <div class="topbar-actions">
+        <button class="icon-btn theme-toggle" type="button" data-action="toggle-theme"
+          aria-label="${themeLabel}" title="${themeLabel}" aria-pressed="${theme === 'dark' ? 'true' : 'false'}">
+          ${themeIconHtml()}
+        </button>
         ${authRequired
           ? `<span class="user-badge" title="Signed-in server account"><strong>${esc(authUser?.name ?? 'Signed out')}</strong> · ${esc(roleLabel(authUser?.role))}</span>
              <button class="btn ghost" type="button" data-action="logout-server">Sign out</button>`
@@ -1932,64 +1993,132 @@ export function headerHtml(active) {
                </select>
              </label>`}
         <span class="today">${esc(dateLabel(todayIso()))}</span>
-        <button class="btn ghost" data-screen="companies" type="button">Company <kbd>F3</kbd></button>
+        <button class="btn ghost company-button" data-screen="companies" type="button">Company <kbd>F3</kbd></button>
       </div>
     </header>`;
 }
 
+const NAV_GROUPS = [
+  {
+    id: 'books',
+    label: 'Books',
+    items: [
+      ['gateway', 'Gateway', 'Esc'],
+      ['masters', 'Masters', 'K'],
+      ['vouchers', 'Vouchers', 'V'],
+      ['bulkVouchers', 'Bulk vouchers', ''],
+      ['daybook', 'Day Book', 'D'],
+      ['ledgerPick', 'Ledger', 'L'],
+      ['inventory', 'Inventory', 'I'],
+      ['orders', 'Orders', ''],
+      ['payroll', 'Payroll', ''],
+    ],
+  },
+  {
+    id: 'statements',
+    label: 'Financial statements',
+    items: [
+      ['trial', 'Trial Balance', 'T'],
+      ['pnl', 'Profit & Loss', 'P'],
+      ['balanceSheet', 'Balance Sheet', 'B'],
+      ['cashBank', 'Cash & Bank', 'C'],
+      ['cashFlow', 'Cash Flow', 'F'],
+      ['ratios', 'Ratios', 'Y'],
+      ['statistics', 'Statistics', 'S'],
+      ['groupSummary', 'Group Summary', 'G'],
+      ['yearComparison', 'Year comparison', ''],
+    ],
+  },
+  {
+    id: 'receivables',
+    label: 'Receivables & payables',
+    items: [
+      ['registers', 'Registers', 'R'],
+      ['outstanding', 'Outstanding', 'O'],
+      ['billRegister', 'Bill-wise register', ''],
+      ['partyStatement', 'Party statement', ''],
+      ['exceptions', 'Exception register', ''],
+    ],
+  },
+  {
+    id: 'tax',
+    label: 'Tax & compliance',
+    items: [
+      ['gst', 'GST returns', ''],
+      ['tds', 'TDS / TCS', ''],
+      ['einvoice', 'E-invoice', ''],
+      ['ewaybill', 'E-way bill', ''],
+      ['taxAudit', 'Tax audit', ''],
+      ['compliance', 'Compliance calendar', ''],
+    ],
+  },
+  {
+    id: 'operations',
+    label: 'Operations',
+    items: [
+      ['bankRecon', 'Bank Reconciliation', ''],
+      ['postDated', 'Cheque / DD Register', ''],
+      ['costCentres', 'Cost Centres', ''],
+      ['budgets', 'Budgets', ''],
+      ['forex', 'Forex Revaluation', ''],
+      ['audit', 'Audit trail', ''],
+      ['consolidation', 'Company consolidation', ''],
+    ],
+  },
+];
+
+const PARENT_SCREENS = {
+  voucherNew: 'vouchers',
+  voucherView: 'vouchers',
+  payrollRun: 'payroll',
+  ledger: 'ledgerPick',
+  chequePrint: 'postDated',
+};
+
+function groupIdForScreen(screen) {
+  const activeScreen = PARENT_SCREENS[screen] ?? screen;
+  return NAV_GROUPS.find((group) => group.items.some(([itemScreen]) => itemScreen === activeScreen))?.id ?? null;
+}
+
+function expandGroupForScreen(screen) {
+  const groupId = groupIdForScreen(screen);
+  if (groupId && collapsedNavGroups.delete(groupId)) saveCollapsedNavGroups();
+}
+
 export function asideHtml(active) {
-  const items = [
-    ['gateway', 'Gateway', 'Esc'],
-    ['masters', 'Masters', 'K'],
-    ['vouchers', 'Vouchers', 'V'],
-    ['bulkVouchers', 'Bulk vouchers', ''],
-    ['payroll', 'Payroll', ''],
-    ['daybook', 'Day Book', 'D'],
-    ['ledgerPick', 'Ledger', 'L'],
-    ['inventory', 'Inventory', 'I'],
-    ['orders', 'Orders', ''],
-  ];
-  const reports = [
-    ['trial', 'Trial Balance', 'T'],
-    ['pnl', 'Profit & Loss', 'P'],
-    ['balanceSheet', 'Balance Sheet', 'B'],
-    ['cashBank', 'Cash & Bank', 'C'],
-    ['bankRecon', 'Bank Reconciliation', ''],
-    ['postDated', 'Cheque / DD Register', ''],
-    ['costCentres', 'Cost Centres', ''],
-    ['budgets', 'Budgets', ''],
-    ['forex', 'Forex Revaluation', ''],
-    ['gst', 'GST returns', ''],
-    ['tds', 'TDS / TCS', ''],
-    ['einvoice', 'E-invoice', ''],
-    ['ewaybill', 'E-way bill', ''],
-    ['taxAudit', 'Tax audit', ''],
-    ['registers', 'Registers', 'R'],
-    ['outstanding', 'Outstanding', 'O'],
-    ['billRegister', 'Bill-wise register', ''],
-    ['partyStatement', 'Party statement', ''],
-    ['groupSummary', 'Group Summary', 'G'],
-    ['cashFlow', 'Cash Flow', 'F'],
-    ['ratios', 'Ratios', 'Y'],
-    ['statistics', 'Statistics', 'S'],
-    ['audit', 'Audit trail', ''],
-  ];
+  const activeScreen = PARENT_SCREENS[view.screen] ?? view.screen;
   const navButton = ([screen, label, key]) => `
-          <button type="button" class="nav-item ${view.screen === screen ? 'active' : ''}"
-            aria-current="${view.screen === screen ? 'page' : 'false'}"
+          <button type="button" class="nav-item ${activeScreen === screen ? 'active' : ''}"
+            aria-current="${activeScreen === screen ? 'page' : 'false'}"
             data-screen="${screen}">
             <span>${label}</span>${key ? `<kbd>${key}</kbd>` : ''}
           </button>`;
+  const navGroup = ({ id, label, items }) => {
+    const collapsed = collapsedNavGroups.has(id);
+    return `<div class="nav-group${collapsed ? ' collapsed' : ''}">
+      <button class="nav-heading nav-group-toggle" type="button" data-action="toggle-nav-group"
+        data-group="${id}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-controls="nav-group-${id}">
+        <span>${label}</span><span class="nav-group-count">${items.length}</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="nav-group-items" id="nav-group-${id}"${collapsed ? ' hidden' : ''}>${items.map(navButton).join('')}</div>
+    </div>`;
+  };
   const stats = active ? dashboard(active) : null;
   return `
-    <aside class="sidebar">
+    <aside class="sidebar" id="app-sidebar">
+      <div class="sidebar-head">
+        <span class="sidebar-title">Workspace</span>
+        <button class="icon-btn sidebar-close" type="button" data-action="toggle-nav" aria-label="Close navigation">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
       <nav aria-label="Primary">
-        ${items.map(navButton).join('')}
-        <p class="nav-heading">Reports</p>
-        ${reports.map(navButton).join('')}
+        ${NAV_GROUPS.map(navGroup).join('')}
       </nav>
       ${stats
         ? `<div class="side-stats">
+            <p class="side-stats-title">Books at a glance</p>
             <div><span>Cash</span><strong>${money(stats.cash)}</strong></div>
             <div><span>Bank</span><strong>${money(stats.bank)}</strong></div>
             <div><span>Vouchers</span><strong>${stats.vouchers}</strong></div>
@@ -2001,10 +2130,12 @@ export function asideHtml(active) {
 }
 
 export function footerHtml() {
-  const hints = [...HOTKEYS];
+  const visibleKeys = new Set(['Esc', 'K', 'V', 'D', 'L', 'T', 'P', 'B', 'I', 'Alt+F2']);
+  const hints = HOTKEYS.filter(([key]) => visibleKeys.has(key));
   if (view.screen === 'voucherNew') hints.push(['Alt+S', 'Save voucher']);
   return `<footer class="statusbar">
-    ${hints.map(([key, label]) => `<span class="hint"><kbd>${key}</kbd> ${label}</span>`).join('')}
+    <span class="status-mode">${workspaceMode ? 'Server books' : 'Browser books'}</span>
+    <span class="status-hints">${hints.map(([key, label]) => `<span class="hint"><kbd>${key}</kbd> ${label}</span>`).join('')}</span>
   </footer>`;
 }
 
@@ -2123,9 +2254,8 @@ export function reportPeriodLabel() {
 
 export function reportToolbarHtml() {
   if (!REPORT_SCREENS.has(view.screen) || !company()) return '';
-  const title = REPORT_TITLES[view.screen] ?? 'Report';
   return `<div class="report-toolbar">
-    <span class="muted">${esc(title)} · ${esc(reportPeriodLabel())}</span>
+    <span class="report-period">${esc(reportPeriodLabel())}</span>
     <div class="toolbar-actions">
       <button class="btn small ghost" type="button" data-action="print-report">Print</button>
       <button class="btn small ghost" type="button" data-action="export-xlsx">Export Excel</button>
@@ -2314,23 +2444,47 @@ export function render() {
   }
   const active = company();
   const wasSearch = view.screen === 'ledgerPick';
+  const hasVisibleH1 = VISIBLE_H1_SCREENS.has(view.screen);
   document.title = `${screenTitle()} · ZledgerCraft`;
   root.innerHTML = `
     <a class="skip-link" href="#main-content">Skip to main content</a>
-    <div class="app-shell">
+    <div class="app-shell${navOpen ? ' nav-open' : ''}">
       ${headerHtml(active)}
       ${asideHtml(active)}
+      <div class="nav-scrim" data-action="toggle-nav" aria-hidden="true"></div>
       <main id="main-content" class="main${view.screen === 'chequePrint' ? ' cheque-print' : ''}">
-        ${VISIBLE_H1_SCREENS.has(view.screen) ? '' : `<h1 class="sr-only">${esc(screenTitle())}</h1>`}
+        ${hasVisibleH1 ? reportToolbarHtml() : `<div class="screen-head"><div><h1 class="screen-title">${esc(screenTitle())}</h1></div>${reportToolbarHtml()}</div>`}
         ${flashHtml()}
         <div id="workspace-banner">${workspaceBannerHtml()}</div>
         ${roleBannerHtml()}
         ${printHeaderHtml()}
-        ${reportToolbarHtml()}
         ${screenHtml()}
       </main>
       ${footerHtml()}
     </div>`;
+  const reportCards = REPORT_SCREENS.has(view.screen);
+  for (const table of root.querySelectorAll('table.data-table')) {
+    let wrapper = table.closest('.table-scroll');
+    if (!wrapper) {
+      wrapper = document.createElement('div');
+      wrapper.className = 'table-scroll';
+      wrapper.tabIndex = 0;
+      table.parentElement.insertBefore(wrapper, table);
+      wrapper.appendChild(table);
+    }
+    if (!reportCards) continue;
+    const headerRow = table.tHead?.rows[table.tHead.rows.length - 1];
+    if (!headerRow || [...headerRow.cells].some((cell) => cell.colSpan > 1)) continue;
+    const labels = [...headerRow.cells].map((cell) => cell.textContent.replace(/\s+/g, ' ').trim());
+    table.classList.add('report-card-table');
+    wrapper.classList.add('report-card-scroll');
+    for (const row of table.querySelectorAll('tbody tr, tfoot tr')) {
+      for (const [index, cell] of [...row.cells].entries()) {
+        if (cell.colSpan > 1 || cell.dataset.label !== undefined) continue;
+        cell.dataset.label = labels[index] ?? '';
+      }
+    }
+  }
   const nav = root.querySelector('.sidebar nav');
   const activeNav = nav?.querySelector('.nav-item.active');
   if (nav && activeNav && nav.scrollWidth > nav.clientWidth + 1) {
@@ -4639,6 +4793,40 @@ async function handleClick(event) {
 
   const action = trigger.dataset.action;
   switch (action) {
+    case 'toggle-nav':
+      navOpen = !navOpen;
+      render();
+      break;
+    case 'toggle-nav-group': {
+      const groupId = trigger.dataset.group;
+      if (!groupId) break;
+      const sidebar = document.querySelector('.sidebar');
+      const scrollTop = sidebar?.scrollTop ?? 0;
+      if (collapsedNavGroups.has(groupId)) collapsedNavGroups.delete(groupId);
+      else collapsedNavGroups.add(groupId);
+      saveCollapsedNavGroups();
+      render();
+      const nextSidebar = document.querySelector('.sidebar');
+      if (nextSidebar) nextSidebar.scrollTop = scrollTop;
+      const nextToggle = document.querySelector(`[data-action="toggle-nav-group"][data-group="${groupId}"]`);
+      nextToggle?.focus();
+      break;
+    }
+    case 'toggle-theme': {
+      const next = theme === 'dark' ? 'light' : 'dark';
+      try {
+        localStorage.setItem(THEME_KEY, next);
+      } catch {
+        // The visual change still applies for this session.
+      }
+      applyTheme(next);
+      const label = next === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+      trigger.innerHTML = themeIconHtml();
+      trigger.setAttribute('aria-label', label);
+      trigger.setAttribute('title', label);
+      trigger.setAttribute('aria-pressed', next === 'dark' ? 'true' : 'false');
+      break;
+    }
     case 'bulk-add-row': {
       const tbody = document.querySelector('#bulk-voucher-form tbody');
       const last = tbody?.querySelector('tr.bulk-row:last-child');
@@ -7742,6 +7930,12 @@ export function handleKeydown(event) {
   }
 
   if (event.key === 'Escape') {
+    if (navOpen) {
+      event.preventDefault();
+      navOpen = false;
+      render();
+      return;
+    }
     if (view.screen !== 'gateway') {
       event.preventDefault();
       navigate('gateway');
@@ -7804,6 +7998,9 @@ export function handleKeydown(event) {
 }
 
 export async function startUI() {
+  applyTheme(initialTheme());
+  loadCollapsedNavGroups();
+  expandGroupForScreen(view.screen);
   const root = document.getElementById('app');
   if (!root) throw new Error('Missing #app root element');
   root.addEventListener('click', handleClick);

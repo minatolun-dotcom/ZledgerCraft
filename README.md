@@ -13,7 +13,9 @@ See [ROADMAP.md](ROADMAP.md) for the current stage and build order, and
 [KNOWN_LIMITS.md](KNOWN_LIMITS.md) for the persistent register of deferred
 product, storage, reporting and compliance limits. The register also records
 free/self-hosted options for the remaining production limits and a recommended
-order for tackling them.
+order for tackling them. The interface tokens and layout rules live in
+[DESIGN.md](DESIGN.md); the redesign findings and verification report are in
+[UI_AUDIT.md](UI_AUDIT.md).
 
 ## Run
 

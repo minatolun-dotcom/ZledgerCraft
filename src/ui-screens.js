@@ -331,42 +331,25 @@ export function gatewayScreen() {
           <button class="btn primary" type="button" data-screen="companies">Create a company <kbd>F3</kbd></button>
         </section>`}
     <div class="gateway-columns">
-      <section class="panel">
-        <h3>Masters &amp; reports</h3>
-        <div class="link-list">
+      <section class="panel quick-panel">
+        <div class="panel-head">
+          <div><h2>Quick access</h2><p class="muted">The working screens used most often.</p></div>
+          <button class="btn small ghost" type="button" data-screen="masters">All masters</button>
+        </div>
+        <div class="quick-grid">
           <button type="button" class="link-row" data-screen="masters"><span>Ledgers &amp; groups</span><kbd>K</kbd></button>
           <button type="button" class="link-row" data-screen="daybook"><span>Day Book</span><kbd>D</kbd></button>
           <button type="button" class="link-row" data-screen="ledgerPick"><span>Ledger vouchers</span><kbd>L</kbd></button>
           <button type="button" class="link-row" data-screen="inventory"><span>Stock summary</span><kbd>I</kbd></button>
           <button type="button" class="link-row" data-screen="trial"><span>Trial Balance</span><kbd>T</kbd></button>
           <button type="button" class="link-row" data-screen="pnl"><span>Profit &amp; Loss</span><kbd>P</kbd></button>
-          <button type="button" class="link-row" data-screen="balanceSheet"><span>Balance Sheet</span><kbd>B</kbd></button>
-          <button type="button" class="link-row" data-screen="cashBank"><span>Cash &amp; Bank Book</span><kbd>C</kbd></button>
-          <button type="button" class="link-row" data-screen="bankRecon"><span>Bank reconciliation</span><span class="muted small">Match</span></button>
-          <button type="button" class="link-row" data-screen="postDated"><span>Cheque / DD register</span><span class="muted small">Instruments</span></button>
-          <button type="button" class="link-row" data-screen="costCentres"><span>Cost centre summary</span><span class="muted small">Costs</span></button>
-          <button type="button" class="link-row" data-screen="budgets"><span>Budget vs Actual</span><span class="muted small">Plan</span></button>
-          <button type="button" class="link-row" data-screen="forex"><span>Forex Revaluation</span><span class="muted small">Currency</span></button>
           <button type="button" class="link-row" data-screen="gst"><span>GST returns</span><span class="muted small">Tax</span></button>
-          <button type="button" class="link-row" data-screen="compliance"><span>Compliance calendar</span><span class="muted small">Tasks</span></button>
-          <button type="button" class="link-row" data-screen="tds"><span>TDS / TCS register</span><span class="muted small">Tax</span></button>
-          <button type="button" class="link-row" data-screen="payroll"><span>Payroll &amp; payslips</span><span class="muted small">Salary</span></button>
-          <button type="button" class="link-row" data-screen="registers"><span>Sales &amp; purchase registers</span><kbd>R</kbd></button>
-          <button type="button" class="link-row" data-screen="outstanding"><span>Receivables &amp; payables</span><kbd>O</kbd></button>
-          <button type="button" class="link-row" data-screen="billRegister"><span>Bill-wise register</span><span class="muted small">Bills</span></button>
-          <button type="button" class="link-row" data-screen="exceptions"><span>Exception register</span><span class="muted small">Checks</span></button>
-          <button type="button" class="link-row" data-screen="partyStatement"><span>Party statement</span><span class="muted small">Account</span></button>
-          <button type="button" class="link-row" data-screen="groupSummary"><span>Group Summary</span><kbd>G</kbd></button>
-          <button type="button" class="link-row" data-screen="yearComparison"><span>Year comparison</span><span class="muted small">FY</span></button>
-          <button type="button" class="link-row" data-screen="consolidation"><span>Company consolidation</span><span class="muted small">Group</span></button>
-          <button type="button" class="link-row" data-screen="audit"><span>Audit trail</span><span class="muted small">Log</span></button>
-          <button type="button" class="link-row" data-screen="cashFlow"><span>Cash Flow</span><kbd>F</kbd></button>
-          <button type="button" class="link-row" data-screen="ratios"><span>Ratio Analysis</span><kbd>Y</kbd></button>
-          <button type="button" class="link-row" data-screen="statistics"><span>Statistics</span><kbd>S</kbd></button>
+          <button type="button" class="link-row" data-screen="backup"><span>Backup &amp; restore</span><span class="muted small">Data</span></button>
         </div>
+        <p class="panel-note">All reports and registers are in the sidebar, grouped by task.</p>
       </section>
       <section class="panel">
-        <h3>How it works</h3>
+        <div class="panel-head"><div><h2>How it works</h2><p class="muted">A short path from a blank book to a balanced trial balance.</p></div></div>
         <ol class="steps">
           <li>Create a company with its financial year.</li>
           <li>Add ledgers under the standard accounting groups.</li>

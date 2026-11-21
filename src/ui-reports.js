@@ -29,6 +29,7 @@ import {
   profitAndLoss,
   ratioAnalysis,
   statistics,
+  stockSummary,
   yearComparison,
   trialBalance,
   voucherRegister,
@@ -99,7 +100,7 @@ export function daybookScreen() {
       <button class="btn small ghost" type="button" data-action="new-voucher" data-type="Payment"${can('voucher.write') ? '' : ' disabled'}>New voucher <kbd>F5</kbd></button>
     </form>
     ${rows.length
-      ? `<div class="table-scroll" tabindex="0"><table class="data-table">
+      ? `<div class="table-scroll" tabindex="0"><table class="data-table daybook-table">
           <thead><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Particulars</th><th class="num">Amount</th></tr></thead>
           <tbody>${pageRows
             .map(

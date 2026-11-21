@@ -500,7 +500,11 @@ export function bankReconScreen() {
            <button class="btn small primary" type="button" data-action="recon-match" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Match</button>
            <button class="btn small" type="button" data-action="recon-adjust" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Adjust</button>`;
       }
+      const selectCell = canWrite
+        ? `<td class="recon-select-cell">${matchedIds.length ? '' : `<input type="checkbox" class="recon-bulk-line" value="${esc(line.id)}" data-amount="${line.amount}" aria-label="Select statement line ${esc(dateLabel(line.date))}">`}</td>`
+        : '';
       return `<tr class="${matchedIds.length ? '' : 'overdue-row'}">
+        ${selectCell}
         <td>${esc(dateLabel(line.date))}</td>
         <td>${esc(line.description || '—')}${line.reference ? ` <span class="muted small">${esc(line.reference)}</span>` : ''}</td>
         <td class="num ${line.amount < 0 ? 'neg' : ''}">${money(line.amount)}</td>
@@ -525,6 +529,14 @@ export function bankReconScreen() {
       </label>`,
     )
     .join('');
+  const bulkPanel = canWrite && unmatchedLines.length
+    ? panel(
+        'Bulk adjustments',
+        `<p class="muted small">Select unmatched statement lines in the table, choose an adjustment ledger above, then post. Each selected line receives its own Journal and match; if any line fails, nothing is posted.</p>
+        <p id="recon-bulk-summary" class="muted small">No lines selected.</p>
+        <div class="form-actions"><button class="btn small primary" type="button" data-action="recon-bulk-adjust">Post selected adjustments</button></div>`,
+      )
+    : '';
   const groupPanel = canWrite && unmatchedLines.length && report.unmatchedEntries.length >= 2
     ? panel(
         'Match several vouchers to one statement line',
@@ -559,7 +571,7 @@ export function bankReconScreen() {
           <select id="recon-adjust-ledger"><option value="">Choose ledger…</option>${adjustmentOptions}</select>
         </label>
       </div>
-      <p class="muted small">For an unmatched statement line, choose one voucher and press Match, or use the group panel to match several vouchers whose total equals the line. Adjust posts a Journal to the bank ledger and marks the line matched. Auto-match uses narration overlap first, then date and amount; it groups up to three vouchers only when no single voucher fits, and a tolerance allows small bank charges.</p>
+      <p class="muted small">For an unmatched statement line, choose one voucher and press Match, or use the group panel to match several vouchers whose total equals the line. Adjust posts a Journal to the bank ledger and marks the line matched; select several unmatched lines to post them together as an atomic batch. Auto-match uses narration overlap first, then date and amount; it groups up to three vouchers only when no single voucher fits, and a tolerance allows small bank charges.</p>
       <div class="ratio-grid">
         <div class="ratio-card"><span class="ratio-label">Matched</span><strong>${report.matchedCount} / ${report.lines.length}</strong><span class="muted small">${report.matchedPercent}% of statement lines${report.groupedCount ? ` · ${report.groupedCount} group${report.groupedCount === 1 ? '' : 's'}` : ''}</span></div>
         <div class="ratio-card"><span class="ratio-label">Statement unmatched</span><strong>${report.unmatchedCount}</strong><span class="muted small">${money(report.unmatchedStatementAmount)} value</span></div>
@@ -600,11 +612,12 @@ export function bankReconScreen() {
       'Statement lines',
       report.lines.length
         ? `<div class="table-scroll" tabindex="0"><table class="data-table compact recon-table">
-            <thead><tr><th>Date</th><th>Description</th><th class="num">Amount</th><th>Match</th></tr></thead>
+            <thead><tr>${canWrite ? '<th class="recon-select-cell"><input type="checkbox" id="recon-bulk-all" aria-label="Select all unmatched statement lines"></th>' : ''}<th>Date</th><th>Description</th><th class="num">Amount</th><th>Match</th></tr></thead>
             <tbody>${rows}</tbody>
           </table></div>`
         : '<p class="muted">No statement imported yet. Paste or choose a CSV above.</p>',
     )}
+    ${bulkPanel}
     ${groupPanel}
     ${panel(
       `Unmatched bank entries <span class="count">${report.unmatchedEntries.length}</span>`,

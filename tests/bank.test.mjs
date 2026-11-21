@@ -17,6 +17,7 @@ import {
   advanceChequeBook,
   updateChequeBook,
   postBankAdjustment,
+  postBankAdjustments,
   saveBankStatement,
   setBankGroupMatch,
   setBankMatch,
@@ -317,6 +318,36 @@ test('unmatched statement lines can be posted as bank adjustments', () => {
   assert.equal(bankReconciliation(company, bank.id).matchedCount, 1);
   assert.equal(postBankAdjustment(company, bank.id, lines[0].id, rent.id).ok, false);
   assert.equal(postBankAdjustment(company, bank.id, lines[1].id, bank.id).ok, false);
+});
+
+test('bulk bank adjustments post atomically and match every selected line', () => {
+  const { company, bank, rent } = bankFixture();
+  saveBankStatement(company, bank.id, [
+    { date: '2026-04-14', description: 'Bank charge', amount: -50 },
+    { date: '2026-04-15', description: 'Interest credit', amount: 25 },
+    { date: '2026-04-16', description: 'Card fee', amount: -75 },
+  ]);
+  const lines = company.bankReconciliations[bank.id].statement.lines;
+  const before = company.vouchers.length;
+
+  const posted = postBankAdjustments(company, bank.id, [lines[0].id, lines[1].id], rent.id);
+  assert.equal(posted.ok, true, posted.error);
+  assert.equal(posted.count, 2);
+  assert.equal(posted.vouchers.length, 2);
+  assert.equal(company.vouchers.length, before + 2);
+  assert.ok(posted.vouchers.every((voucher) => voucher.type === 'Journal'));
+  assert.equal(company.bankReconciliations[bank.id].matches[lines[0].id], posted.vouchers[0].id);
+  assert.equal(company.bankReconciliations[bank.id].matches[lines[1].id], posted.vouchers[1].id);
+  assert.equal(bankReconciliation(company, bank.id).matchedCount, 2);
+
+  const blocked = postBankAdjustments(company, bank.id, [lines[2].id, lines[0].id], rent.id);
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /already matched/i);
+  assert.equal(company.vouchers.length, before + 2, 'a failed batch must not post any voucher');
+  assert.equal(company.bankReconciliations[bank.id].matches[lines[2].id], undefined);
+
+  assert.equal(postBankAdjustments(company, bank.id, [], rent.id).ok, false);
+  assert.equal(postBankAdjustments(company, bank.id, [lines[2].id], bank.id).ok, false);
 });
 
 test('a manual match requires the exact signed bank amount and is exclusive', () => {

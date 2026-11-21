@@ -38,6 +38,9 @@ SQLite/Postgres workspace mirror and node:test regression suites.
   vouchers with an exact signed total, auto-match groups up to three after
   one-to-one fails, and grouped matches survive backups and clear every
   instrument in the group.
+- Atomic bulk bank adjustments: selected unmatched statement lines post one
+  Journal each against a shared adjustment ledger, with no voucher or match
+  committed if any line fails.
 - Optional quarterly budget phasing with elapsed-quarter budget-to-date.
 - Alternate-unit master, line conversion and amount-preserving valuation.
 - Full test suite and release verification recorded below.
@@ -50,10 +53,10 @@ remains 11. A future alternate-unit/WIP/currency model will need schema v12.
 
 ## Verification
 
-- Full suite: 393 tests (392 pass, 1 skipped), 0 failures.
-- Build: 1,424.8 kB.
+- Full suite: 394 tests (393 pass, 1 skipped), 0 failures.
+- Build: 1,430.8 kB.
 - Targeted suites: GST, GSTR-2B, GSTR-9, late fee, TDS returns, inventory, bank, budgets, currency, bulk vouchers, payroll.
-- Latest deployment: https://8665218e.zledgercraft.pages.dev (HTTP 200); custom domain https://zledgercraft.pages.dev/ also HTTP 200.
+- Latest deployment: https://c1b84a6b.zledgercraft.pages.dev (HTTP 200); custom domain https://zledgercraft.pages.dev/ also HTTP 200.
 - Projects 1–7 are complete. Project 8’s local work is complete; its parked
   external dependencies are excluded from the active backlog.
 

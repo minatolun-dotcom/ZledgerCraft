@@ -1203,6 +1203,17 @@ kbd {
   min-width: 720px;
 }
 
+.recon-select-cell {
+  width: 2.25rem;
+  text-align: center;
+}
+
+.recon-select-cell input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent);
+}
+
 .recon-match-cell {
   min-width: 300px;
 }
@@ -3300,6 +3311,47 @@ function postBankAdjustment(company, ledgerId, lineId, offsetLedgerId) {
   config.matches[lineId] = posted.voucher.id;
   posted.voucher.bankAdjustmentLineId = lineId;
   return { ok: true, voucher: posted.voucher, line, offset };
+}
+
+/** Posts one adjustment Journal per selected line, or none if any line fails. */
+function postBankAdjustments(company, ledgerId, lineIds = [], offsetLedgerId) {
+  const config = company.bankReconciliations?.[ledgerId];
+  if (!config) return { ok: false, error: 'Import a bank statement first.' };
+  if (!isBankLedger(company, ledgerId)) return { ok: false, error: 'Choose a bank ledger.' };
+  const ids = [...new Set((Array.isArray(lineIds) ? lineIds : []).map((id) => String(id ?? '')).filter(Boolean))];
+  if (!ids.length) return { ok: false, error: 'Choose at least one unmatched statement line.' };
+  if (ids.length > 100) return { ok: false, error: 'Post at most 100 bank adjustments in one batch.' };
+  const offset = (company.ledgers ?? []).find((ledger) => ledger.id === offsetLedgerId);
+  if (!offset) return { ok: false, error: 'Choose an adjustment ledger.' };
+  if (offset.id === ledgerId) return { ok: false, error: 'The adjustment ledger cannot be the bank ledger itself.' };
+  const lines = new Map(config.statement.lines.map((line) => [line.id, line]));
+  for (const [index, lineId] of ids.entries()) {
+    const line = lines.get(lineId);
+    if (!line) return { ok: false, error: `Statement line ${index + 1} was not found.` };
+    if (config.matches[lineId]) {
+      return { ok: false, error: `Statement line ${index + 1} is already matched. Unmatch it first.` };
+    }
+    if (!Number.isFinite(Number(line.amount)) || Math.abs(Number(line.amount)) <= 0) {
+      return { ok: false, error: `Statement line ${index + 1} has no amount to post.` };
+    }
+  }
+  let clone;
+  try {
+    clone = structuredClone(company);
+  } catch {
+    return { ok: false, error: 'This company could not be copied for batch validation.' };
+  }
+  const vouchers = [];
+  for (const [index, lineId] of ids.entries()) {
+    const posted = postBankAdjustment(clone, ledgerId, lineId, offset.id);
+    if (!posted.ok) {
+      return { ok: false, error: `Statement line ${index + 1}: ${posted.error}` };
+    }
+    vouchers.push(posted.voucher);
+  }
+  for (const key of Object.keys(company)) delete company[key];
+  Object.assign(company, clone);
+  return { ok: true, count: ids.length, vouchers, offset };
 }
 
 function unsetBankMatch(company, ledgerId, lineId) {
@@ -26510,7 +26562,11 @@ function bankReconScreen() {
            <button class="btn small primary" type="button" data-action="recon-match" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Match</button>
            <button class="btn small" type="button" data-action="recon-adjust" data-line="${esc(line.id)}"${canWrite ? '' : ' disabled'}>Adjust</button>`;
       }
+      const selectCell = canWrite
+        ? `<td class="recon-select-cell">${matchedIds.length ? '' : `<input type="checkbox" class="recon-bulk-line" value="${esc(line.id)}" data-amount="${line.amount}" aria-label="Select statement line ${esc(dateLabel(line.date))}">`}</td>`
+        : '';
       return `<tr class="${matchedIds.length ? '' : 'overdue-row'}">
+        ${selectCell}
         <td>${esc(dateLabel(line.date))}</td>
         <td>${esc(line.description || '—')}${line.reference ? ` <span class="muted small">${esc(line.reference)}</span>` : ''}</td>
         <td class="num ${line.amount < 0 ? 'neg' : ''}">${money(line.amount)}</td>
@@ -26535,6 +26591,14 @@ function bankReconScreen() {
       </label>`,
     )
     .join('');
+  const bulkPanel = canWrite && unmatchedLines.length
+    ? panel(
+        'Bulk adjustments',
+        `<p class="muted small">Select unmatched statement lines in the table, choose an adjustment ledger above, then post. Each selected line receives its own Journal and match; if any line fails, nothing is posted.</p>
+        <p id="recon-bulk-summary" class="muted small">No lines selected.</p>
+        <div class="form-actions"><button class="btn small primary" type="button" data-action="recon-bulk-adjust">Post selected adjustments</button></div>`,
+      )
+    : '';
   const groupPanel = canWrite && unmatchedLines.length && report.unmatchedEntries.length >= 2
     ? panel(
         'Match several vouchers to one statement line',
@@ -26569,7 +26633,7 @@ function bankReconScreen() {
           <select id="recon-adjust-ledger"><option value="">Choose ledger…</option>${adjustmentOptions}</select>
         </label>
       </div>
-      <p class="muted small">For an unmatched statement line, choose one voucher and press Match, or use the group panel to match several vouchers whose total equals the line. Adjust posts a Journal to the bank ledger and marks the line matched. Auto-match uses narration overlap first, then date and amount; it groups up to three vouchers only when no single voucher fits, and a tolerance allows small bank charges.</p>
+      <p class="muted small">For an unmatched statement line, choose one voucher and press Match, or use the group panel to match several vouchers whose total equals the line. Adjust posts a Journal to the bank ledger and marks the line matched; select several unmatched lines to post them together as an atomic batch. Auto-match uses narration overlap first, then date and amount; it groups up to three vouchers only when no single voucher fits, and a tolerance allows small bank charges.</p>
       <div class="ratio-grid">
         <div class="ratio-card"><span class="ratio-label">Matched</span><strong>${report.matchedCount} / ${report.lines.length}</strong><span class="muted small">${report.matchedPercent}% of statement lines${report.groupedCount ? ` · ${report.groupedCount} group${report.groupedCount === 1 ? '' : 's'}` : ''}</span></div>
         <div class="ratio-card"><span class="ratio-label">Statement unmatched</span><strong>${report.unmatchedCount}</strong><span class="muted small">${money(report.unmatchedStatementAmount)} value</span></div>
@@ -26610,11 +26674,12 @@ function bankReconScreen() {
       'Statement lines',
       report.lines.length
         ? `<div class="table-scroll" tabindex="0"><table class="data-table compact recon-table">
-            <thead><tr><th>Date</th><th>Description</th><th class="num">Amount</th><th>Match</th></tr></thead>
+            <thead><tr>${canWrite ? '<th class="recon-select-cell"><input type="checkbox" id="recon-bulk-all" aria-label="Select all unmatched statement lines"></th>' : ''}<th>Date</th><th>Description</th><th class="num">Amount</th><th>Match</th></tr></thead>
             <tbody>${rows}</tbody>
           </table></div>`
         : '<p class="muted">No statement imported yet. Paste or choose a CSV above.</p>',
     )}
+    ${bulkPanel}
     ${groupPanel}
     ${panel(
       `Unmatched bank entries <span class="count">${report.unmatchedEntries.length}</span>`,
@@ -31764,6 +31829,52 @@ async function handleClick(event) {
       break;
     }
 
+    case 'recon-bulk-adjust': {
+      if (!can('recon.write')) {
+        requirePermission('recon.write');
+        break;
+      }
+      const active = company();
+      const ledgerId = selectedBankLedgerId();
+      const offsetLedgerId = document.getElementById('recon-adjust-ledger')?.value ?? '';
+      const lineIds = [...document.querySelectorAll('input.recon-bulk-line:checked')].map(
+        (input) => input.value,
+      );
+      if (!active || !ledgerId) break;
+      if (!lineIds.length) {
+        setFlash('Select at least one unmatched statement line.', 'warn');
+        render();
+        break;
+      }
+      if (!offsetLedgerId) {
+        setFlash('Choose an adjustment ledger first.', 'warn');
+        render();
+        break;
+      }
+      if (
+        !window.confirm(
+          `Post ${lineIds.length} bank adjustment${lineIds.length === 1 ? '' : 's'}, one Journal per statement line?`,
+        )
+      ) {
+        break;
+      }
+      const result = postBankAdjustments(active, ledgerId, lineIds, offsetLedgerId);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit(
+        'bankRecon.bulkAdjust',
+        `Posted ${result.count} bank adjustment${result.count === 1 ? '' : 's'} against ${result.offset.name}.`,
+        active,
+        ledgerId,
+      );
+      persist();
+      setFlash(`Posted ${result.count} bank adjustment${result.count === 1 ? '' : 's'}.`);
+      navigate('bankRecon', { bankLedgerId: ledgerId });
+      break;
+    }
     case 'recon-match': {
       if (!can('recon.write')) {
         requirePermission('recon.write');
@@ -33800,6 +33911,28 @@ function handleChange(event) {
       })
       .catch(() => setFlash('Could not read that CSV file.', 'warn'));
     target.value = '';
+    return;
+  }
+
+  if (target.matches?.('#recon-bulk-all, input.recon-bulk-line')) {
+    if (target.id === 'recon-bulk-all') {
+      for (const input of document.querySelectorAll('input.recon-bulk-line')) input.checked = target.checked;
+    }
+    const boxes = [...document.querySelectorAll('input.recon-bulk-line')];
+    const selected = boxes.filter((input) => input.checked);
+    const selectAll = document.getElementById('recon-bulk-all');
+    if (selectAll && target.id !== 'recon-bulk-all') {
+      selectAll.checked = boxes.length > 0 && selected.length === boxes.length;
+      selectAll.indeterminate = selected.length > 0 && selected.length < boxes.length;
+    }
+    const gross = round2(selected.reduce((sum, input) => sum + Math.abs(Number(input.dataset.amount || 0)), 0));
+    const summary = document.getElementById('recon-bulk-summary');
+    if (summary) {
+      summary.textContent = selected.length
+        ? `${selected.length} line${selected.length === 1 ? '' : 's'} selected · ${money(gross)} gross value.`
+        : 'No lines selected.';
+      summary.className = 'muted small';
+    }
     return;
   }
 

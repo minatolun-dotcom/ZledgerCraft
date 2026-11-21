@@ -113,6 +113,7 @@ import {
   payrollLedgers,
   payrollMonthEnd,
   postBankAdjustment,
+  postBankAdjustments,
   postDueRecurringVouchers,
   postForexRevaluation,
   postForexSettlement,
@@ -5412,6 +5413,52 @@ async function handleClick(event) {
       break;
     }
 
+    case 'recon-bulk-adjust': {
+      if (!can('recon.write')) {
+        requirePermission('recon.write');
+        break;
+      }
+      const active = company();
+      const ledgerId = selectedBankLedgerId();
+      const offsetLedgerId = document.getElementById('recon-adjust-ledger')?.value ?? '';
+      const lineIds = [...document.querySelectorAll('input.recon-bulk-line:checked')].map(
+        (input) => input.value,
+      );
+      if (!active || !ledgerId) break;
+      if (!lineIds.length) {
+        setFlash('Select at least one unmatched statement line.', 'warn');
+        render();
+        break;
+      }
+      if (!offsetLedgerId) {
+        setFlash('Choose an adjustment ledger first.', 'warn');
+        render();
+        break;
+      }
+      if (
+        !window.confirm(
+          `Post ${lineIds.length} bank adjustment${lineIds.length === 1 ? '' : 's'}, one Journal per statement line?`,
+        )
+      ) {
+        break;
+      }
+      const result = postBankAdjustments(active, ledgerId, lineIds, offsetLedgerId);
+      if (!result.ok) {
+        setFlash(result.error, 'warn');
+        render();
+        break;
+      }
+      logAudit(
+        'bankRecon.bulkAdjust',
+        `Posted ${result.count} bank adjustment${result.count === 1 ? '' : 's'} against ${result.offset.name}.`,
+        active,
+        ledgerId,
+      );
+      persist();
+      setFlash(`Posted ${result.count} bank adjustment${result.count === 1 ? '' : 's'}.`);
+      navigate('bankRecon', { bankLedgerId: ledgerId });
+      break;
+    }
     case 'recon-match': {
       if (!can('recon.write')) {
         requirePermission('recon.write');
@@ -7448,6 +7495,28 @@ export function handleChange(event) {
       })
       .catch(() => setFlash('Could not read that CSV file.', 'warn'));
     target.value = '';
+    return;
+  }
+
+  if (target.matches?.('#recon-bulk-all, input.recon-bulk-line')) {
+    if (target.id === 'recon-bulk-all') {
+      for (const input of document.querySelectorAll('input.recon-bulk-line')) input.checked = target.checked;
+    }
+    const boxes = [...document.querySelectorAll('input.recon-bulk-line')];
+    const selected = boxes.filter((input) => input.checked);
+    const selectAll = document.getElementById('recon-bulk-all');
+    if (selectAll && target.id !== 'recon-bulk-all') {
+      selectAll.checked = boxes.length > 0 && selected.length === boxes.length;
+      selectAll.indeterminate = selected.length > 0 && selected.length < boxes.length;
+    }
+    const gross = round2(selected.reduce((sum, input) => sum + Math.abs(Number(input.dataset.amount || 0)), 0));
+    const summary = document.getElementById('recon-bulk-summary');
+    if (summary) {
+      summary.textContent = selected.length
+        ? `${selected.length} line${selected.length === 1 ? '' : 's'} selected · ${money(gross)} gross value.`
+        : 'No lines selected.';
+      summary.className = 'muted small';
+    }
     return;
   }
 

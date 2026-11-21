@@ -114,8 +114,9 @@ Working now:
   imported yet.
 - Bank reconciliation: CSV statement import, signed auto-matching within seven
   days, one-to-one manual match/unmatch, manual many-to-one voucher groups,
-  bounded automatic groups, unmatched book entries and statement lines, book
-  balance and audit events. Matching never changes a voucher.
+  bounded automatic groups, single or atomic bulk adjustment posting, unmatched
+  book entries and statement lines, book balance and audit events. Matching
+  never changes a voucher.
 - Cheque/DD details on payment, receipt and contra vouchers, a post-dated/due/
   cleared register with reconciliation-aware status, and a printable cheque
   preview with Indian-numbering amount words.
@@ -184,8 +185,8 @@ Why it is not production-ready: browser mode still lives in one browser's local
 storage with unprotected access-control profiles, the app audit trail is not
 tamper-proof, the live workspace is not encrypted, and LAN mode is one
 same-machine SQLite server with voucher leases but no field-level history. Bank
-reconciliation has no one-to-many voucher splitting or bulk adjustments,
-payroll has no statutory return files, and inventory lacks FIFO/expiry costing,
+reconciliation has no one-to-many voucher splitting, payroll has no statutory
+return files, and inventory lacks FIFO/expiry costing,
 batch-tracked BOM components, partial-completion WIP and several automatic
 stock journals. Mobile use, report layout, import recovery and large-workspace
 performance are also deliberately limited. The full deferred list is in
@@ -223,7 +224,7 @@ Status: **Done**, **Partial**, **Missing**.
 
 | Feature | Status |
 | --- | --- |
-| Bank reconciliation, statement import and auto-match | Done (Stage 2, CSV import and manual/auto matching) |
+| Bank reconciliation, statement import and auto-match | Done (Stage 2; CSV, OFX, QIF and MT940 import, manual/auto matching, many-to-one groups and atomic bulk adjustments) |
 | Cheque/DD details, cheque printing, post-dated cheques | Done (Stage 2; cheque preview/print, DD details and post-dated status) |
 | Cheque and post-dated registers | Done (Stage 2; period/as-on/status filters and bank-reconciliation clearing) |
 | Payment reminders and credit limits | Missing |
@@ -300,7 +301,7 @@ Status: **Done**, **Partial**, **Missing**.
 | Core accounting | 90–95% of intended scope |
 | Multi-FY and reporting | 65–70% |
 | Inventory | 55–60% |
-| Banking/treasury | 30% |
+| Banking/treasury | 33% |
 | Taxation/statutory | 35–40% |
 | Payroll | 25–30% |
 | Security/platform | 55% |
@@ -346,6 +347,17 @@ Deferred limits and their IDs are in [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 Phase numbers below are a sequential work log, not a plan of 17+ items. The
 plan is the four stages in **Build order** above; phases record increments
 inside those stages.
+
+### 2026-11-21 — Phase 73: atomic bulk bank adjustments
+
+- Selected unmatched statement lines can post together against one adjustment
+  ledger. Each line receives its own Journal and match, so the one-line-to-one-
+  voucher reconciliation model is preserved.
+- The batch validates on a company copy and commits only if every line posts.
+  A failing line leaves all vouchers, matches and counters unchanged.
+- The reconciliation table adds unmatched-line checkboxes, select-all and a
+  live selected-count/gross-value summary; one audit event records the batch.
+- Verification: 394 tests (393 pass, 1 skipped); 1,430.8 kB build.
 
 ### 2026-11-21 — Phase 67: local statutory depth and GST/TDS coexistence
 

@@ -770,6 +770,47 @@ export function postBankAdjustment(company, ledgerId, lineId, offsetLedgerId) {
   return { ok: true, voucher: posted.voucher, line, offset };
 }
 
+/** Posts one adjustment Journal per selected line, or none if any line fails. */
+export function postBankAdjustments(company, ledgerId, lineIds = [], offsetLedgerId) {
+  const config = company.bankReconciliations?.[ledgerId];
+  if (!config) return { ok: false, error: 'Import a bank statement first.' };
+  if (!isBankLedger(company, ledgerId)) return { ok: false, error: 'Choose a bank ledger.' };
+  const ids = [...new Set((Array.isArray(lineIds) ? lineIds : []).map((id) => String(id ?? '')).filter(Boolean))];
+  if (!ids.length) return { ok: false, error: 'Choose at least one unmatched statement line.' };
+  if (ids.length > 100) return { ok: false, error: 'Post at most 100 bank adjustments in one batch.' };
+  const offset = (company.ledgers ?? []).find((ledger) => ledger.id === offsetLedgerId);
+  if (!offset) return { ok: false, error: 'Choose an adjustment ledger.' };
+  if (offset.id === ledgerId) return { ok: false, error: 'The adjustment ledger cannot be the bank ledger itself.' };
+  const lines = new Map(config.statement.lines.map((line) => [line.id, line]));
+  for (const [index, lineId] of ids.entries()) {
+    const line = lines.get(lineId);
+    if (!line) return { ok: false, error: `Statement line ${index + 1} was not found.` };
+    if (config.matches[lineId]) {
+      return { ok: false, error: `Statement line ${index + 1} is already matched. Unmatch it first.` };
+    }
+    if (!Number.isFinite(Number(line.amount)) || Math.abs(Number(line.amount)) <= 0) {
+      return { ok: false, error: `Statement line ${index + 1} has no amount to post.` };
+    }
+  }
+  let clone;
+  try {
+    clone = structuredClone(company);
+  } catch {
+    return { ok: false, error: 'This company could not be copied for batch validation.' };
+  }
+  const vouchers = [];
+  for (const [index, lineId] of ids.entries()) {
+    const posted = postBankAdjustment(clone, ledgerId, lineId, offset.id);
+    if (!posted.ok) {
+      return { ok: false, error: `Statement line ${index + 1}: ${posted.error}` };
+    }
+    vouchers.push(posted.voucher);
+  }
+  for (const key of Object.keys(company)) delete company[key];
+  Object.assign(company, clone);
+  return { ok: true, count: ids.length, vouchers, offset };
+}
+
 export function unsetBankMatch(company, ledgerId, lineId) {
   const config = company.bankReconciliations?.[ledgerId];
   if (!config?.matches?.[lineId]) return { ok: false, error: 'That line is not matched.' };

@@ -1190,6 +1190,17 @@ kbd {
   min-width: 720px;
 }
 
+.recon-select-cell {
+  width: 2.25rem;
+  text-align: center;
+}
+
+.recon-select-cell input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent);
+}
+
 .recon-match-cell {
   min-width: 300px;
 }

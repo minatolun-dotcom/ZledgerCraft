@@ -1697,14 +1697,22 @@ export function budgetVsActual(company, filters = {}) {
       const phases = Array.isArray(budget.phases) && budget.phases.length === 4
         ? budget.phases.map((value) => round2(value))
         : null;
+      const monthlyPhases = Array.isArray(budget.monthlyPhases) && budget.monthlyPhases.length === 12
+        ? budget.monthlyPhases.map((value) => round2(value))
+        : null;
       let phaseBudgetToDate = null;
-      if (phases) {
+      if (phases || monthlyPhases) {
         const monthOffset =
           (Number(asOn.slice(0, 4)) - Number(year.start.slice(0, 4))) * 12 +
           Number(asOn.slice(5, 7)) -
           Number(year.start.slice(5, 7));
-        const quarter = Math.min(3, Math.max(0, Math.floor(monthOffset / 3)));
-        phaseBudgetToDate = round2(phases.slice(0, quarter + 1).reduce((sum, value) => sum + value, 0));
+        const monthsElapsed = Math.min(11, Math.max(0, monthOffset)) + 1;
+        if (monthlyPhases) {
+          phaseBudgetToDate = round2(monthlyPhases.slice(0, monthsElapsed).reduce((sum, value) => sum + value, 0));
+        } else {
+          const quarter = Math.min(3, Math.max(0, Math.floor(monthOffset / 3)));
+          phaseBudgetToDate = round2(phases.slice(0, quarter + 1).reduce((sum, value) => sum + value, 0));
+        }
       }
       return {
         budgetId: budget.id,
@@ -1715,6 +1723,7 @@ export function budgetVsActual(company, filters = {}) {
         nature,
         amount: round2(budget.amount),
         phases,
+        monthlyPhases,
         phaseBudgetToDate,
         actual,
         variance: round2(budget.amount - actual),

@@ -560,8 +560,8 @@ disabled.
 - Budget vs Actual by ledger, group, cost centre or cost category for a
   financial year and as-on date: budget, actual, variance, used percentage,
   over-budget status and Print/CSV. A budget may carry an optional four-quarter
-  phasing that must total its annual amount, and the report shows the phasing
-  and budget-to-date for the elapsed quarter. Actuals default to period voucher
+  or twelve-month phasing that must total its annual amount, and the report
+  shows the phasing and budget-to-date for the elapsed quarter or month. Actuals default to period voucher
   movement with an optional include-openings view for ledger and group budgets;
   a category budget and a budget for one of its centres are both shown without
   double-counting the totals.
@@ -838,7 +838,7 @@ Deliberately not covered (each is a specialist area, and some are statutory):
 | Bank reconciliation and statement import | Covered — CSV, OFX, QIF and MT940 statement import, optional opening/closing balance validation, auto/manual matching, adjustment posting and book balance; no Excel or live bank feeds |
 | Cheque/DD details, instrument printing and post-dated registers | Covered — instrument fields on cash/bank vouchers, cheque-book ranges with next numbers, cheque/DD advice, receipt deposit-slip and contra advice previews, a reconciliation-aware Cheque / DD register and manual cleared/stopped/cancelled flags; no multiple instruments per voucher, automatic number allocation, magnetic-ink cheque stationery presets or bank-issued advice formats |
 | Cost centres and cost-category reports | Covered — categories, renaming and moving centres, one centre per voucher line, summary, break-up and an unallocated-line reconciliation; no merging categories or split allocations |
-| Annual budgets and budget-vs-actual | Covered — ledger/group budgets, period actuals, variance, over-budget status and a short amount history; no phased revision workflow, approval or cost-centre budgets |
+| Annual budgets and budget-vs-actual | Covered — ledger/group and cost-centre/category budgets, period actuals, variance, over-budget status, a short amount history and quarterly or monthly phasing; no phased revision workflow or approval |
 | Multi-currency and interest calculation | Partial — foreign currency masters, dated rates, foreign voucher entry with INR posting, currency ledger balances, FIFO settlement matching, postable realised and unrealised forex differences, and postable simple overdue interest; no per-ledger currency, foreign openings/inventory, manual foreign bill allocation, interest compounding or reminders that post charges |
 | Multiple financial years per company, year-end closing and carry-forward | Covered — year selector, close/reopen and automatic next year; no closing journal is written because balances are cumulative |
 | Bill-wise entry and allocation | Covered — bill refs, due dates, explicit/FIFO settlements, ageing, bill-wise register and party statement with bill detail; no bill-wise opening allocation or bill interest |

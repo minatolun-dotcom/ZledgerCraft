@@ -674,7 +674,7 @@ export function budgetMastersPanel(active) {
         <td><strong>${esc(budget.name)}</strong></td>
         <td>${esc(target?.name ?? 'Missing target')}</td>
         <td class="muted">${budget.targetType === 'group' ? 'Group' : budget.targetType === 'costCentre' ? 'Cost centre' : budget.targetType === 'costCategory' ? 'Cost category' : 'Ledger'} · ${esc(year ? dateLabel(year.start) : 'Missing year')}</td>
-        <td class="num">${money(budget.amount)}${budget.phases ? `<div class="muted small">${budget.phases.map((value) => money(value)).join(' · ')}</div>` : ''}</td>
+        <td class="num">${money(budget.amount)}${budget.phases ? `<div class="muted small">${budget.phases.map((value) => money(value)).join(' · ')}</div>` : ''}${budget.monthlyPhases ? '<div class="muted small">Monthly phasing · 12 amounts</div>' : ''}</td>
         <td class="row-actions">
           <button class="btn small" type="button" data-action="edit-budget" data-id="${esc(budget.id)}">Edit</button>
           <button class="btn small ghost" type="button" data-action="duplicate-budget" data-id="${esc(budget.id)}">Duplicate next year</button>
@@ -713,6 +713,12 @@ export function budgetMastersPanel(active) {
           <input name="q4" inputmode="decimal" placeholder="Q4" aria-label="Q4 budget" value="${esc(editing?.phases?.[3] ?? '')}">
         </div>
       </div>
+      <details class="field"><summary>Monthly phasing (optional)</summary>
+        <p class="muted small">Enter all twelve amounts. Use either quarterly or monthly phasing, not both.</p>
+        <div class="inline-form">
+          ${Array.from({ length: 12 }, (_, index) => `<input name="m${index + 1}" inputmode="decimal" placeholder="M${index + 1}" aria-label="Month ${index + 1} budget" value="${esc(editing?.monthlyPhases?.[index] ?? '')}">`).join('')}
+        </div>
+      </details>
       <div class="field form-actions">
         <button class="btn primary" type="submit">${editing ? 'Save budget' : 'Add budget'}</button>
         ${editing ? '<button class="btn ghost" type="button" data-action="cancel-budget-edit">Cancel</button>' : ''}

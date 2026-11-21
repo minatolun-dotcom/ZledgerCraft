@@ -3466,6 +3466,14 @@ export function normalizeBudgets(company) {
         ) < 0.01
           ? { phases: budget.phases.map((value) => parseAmount(value)) }
           : {}),
+        ...(Array.isArray(budget.monthlyPhases) &&
+        budget.monthlyPhases.length === 12 &&
+        budget.monthlyPhases.every((value) => parseAmount(value) !== null && parseAmount(value) >= 0) &&
+        Math.abs(
+          budget.monthlyPhases.reduce((sum, value) => sum + (parseAmount(value) ?? 0), 0) - amount,
+        ) < 0.01
+          ? { monthlyPhases: budget.monthlyPhases.map((value) => parseAmount(value)) }
+          : {}),
         createdAt: budget.createdAt ? String(budget.createdAt) : new Date().toISOString(),
         ...(Array.isArray(budget.history) && budget.history.length
           ? {
@@ -3495,11 +3503,32 @@ export function normalizeBudgets(company) {
 }
 
 function normaliseBudgetPhases(input, amount) {
-  const supplied = input.phases ?? [input.q1, input.q2, input.q3, input.q4];
-  const raw = Array.isArray(supplied) ? supplied : [];
-  if (raw.every((value) => String(value ?? '').trim() === '')) return { ok: true, phases: null };
-  if (raw.length !== 4) return { ok: false, error: 'Budget phasing needs all four quarterly amounts.' };
-  const phases = raw.map((value) => parseAmount(value));
+  const quarterlySupplied = input.phases ?? [input.q1, input.q2, input.q3, input.q4];
+  const quarterlyRaw = Array.isArray(quarterlySupplied) ? quarterlySupplied : [];
+  const monthlySupplied = input.monthlyPhases ?? input.months;
+  const monthlyRaw = Array.isArray(monthlySupplied) ? monthlySupplied : [];
+  const hasQuarterly = quarterlyRaw.some((value) => String(value ?? '').trim() !== '');
+  const hasMonthly = monthlyRaw.some((value) => String(value ?? '').trim() !== '');
+  if (!hasQuarterly && !hasMonthly) return { ok: true, phases: null, monthlyPhases: null };
+  if (hasQuarterly && hasMonthly) {
+    return { ok: false, error: 'Use either quarterly or monthly budget phasing, not both.' };
+  }
+  if (hasMonthly) {
+    if (monthlyRaw.length !== 12) {
+      return { ok: false, error: 'Monthly budget phasing needs all twelve monthly amounts.' };
+    }
+    const monthlyPhases = monthlyRaw.map((value) => parseAmount(value));
+    if (monthlyPhases.some((value) => value === null || value < 0)) {
+      return { ok: false, error: 'Monthly budget amounts must be zero or more.' };
+    }
+    const total = round2(monthlyPhases.reduce((sum, value) => sum + value, 0));
+    if (Math.abs(total - amount) >= 0.01) {
+      return { ok: false, error: `Monthly phasing totals ${total}, not the budget amount ${amount}.` };
+    }
+    return { ok: true, phases: null, monthlyPhases };
+  }
+  if (quarterlyRaw.length !== 4) return { ok: false, error: 'Budget phasing needs all four quarterly amounts.' };
+  const phases = quarterlyRaw.map((value) => parseAmount(value));
   if (phases.some((value) => value === null || value < 0)) {
     return { ok: false, error: 'Quarterly budget amounts must be zero or more.' };
   }
@@ -3507,7 +3536,7 @@ function normaliseBudgetPhases(input, amount) {
   if (Math.abs(total - amount) >= 0.01) {
     return { ok: false, error: `Quarterly phasing totals ${total}, not the budget amount ${amount}.` };
   }
-  return { ok: true, phases };
+  return { ok: true, phases, monthlyPhases: null };
 }
 
 export function addBudget(company, input = {}) {
@@ -3538,6 +3567,7 @@ export function addBudget(company, input = {}) {
     yearId: year.id,
     amount,
     ...(phased.phases ? { phases: phased.phases } : {}),
+    ...(phased.monthlyPhases ? { monthlyPhases: phased.monthlyPhases } : {}),
     createdAt: new Date().toISOString(),
   };
   company.budgets.push(budget);
@@ -3559,10 +3589,13 @@ export function updateBudget(company, budgetId, input = {}) {
   const name = String(input.name ?? '').trim() || budget.name;
   if (name.length > 80) return { ok: false, error: 'Budget name must be 80 characters or fewer.' };
   const phasesSupplied =
-    input.phases !== undefined || [input.q1, input.q2, input.q3, input.q4].some((value) => value !== undefined);
+    input.phases !== undefined ||
+    input.monthlyPhases !== undefined ||
+    input.months !== undefined ||
+    [input.q1, input.q2, input.q3, input.q4].some((value) => value !== undefined);
   const phased = phasesSupplied
     ? normaliseBudgetPhases(input, amount)
-    : { ok: true, phases: budget.phases ?? null };
+    : { ok: true, phases: budget.phases ?? null, monthlyPhases: budget.monthlyPhases ?? null };
   if (!phased.ok) return phased;
   if (
     (company.budgets ?? []).some(
@@ -3596,6 +3629,8 @@ export function updateBudget(company, budgetId, input = {}) {
   budget.amount = amount;
   if (phased.phases) budget.phases = phased.phases;
   else delete budget.phases;
+  if (phased.monthlyPhases) budget.monthlyPhases = phased.monthlyPhases;
+  else delete budget.monthlyPhases;
   budget.updatedAt = new Date().toISOString();
   return { ok: true, budget };
 }
@@ -3645,6 +3680,7 @@ export function duplicateBudget(company, budgetId, input = {}) {
     yearId: targetYear.id,
     amount: source.amount,
     ...(source.phases ? { phases: [...source.phases] } : {}),
+    ...(source.monthlyPhases ? { monthlyPhases: [...source.monthlyPhases] } : {}),
     createdAt: new Date().toISOString(),
   };
   company.budgets = company.budgets ?? [];

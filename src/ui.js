@@ -3269,6 +3269,7 @@ export async function handleSubmit(event) {
     const data = new FormData(form);
     const [targetType, ...targetParts] = String(data.get('target') ?? '').split(':');
     const phases = ['q1', 'q2', 'q3', 'q4'].map((key) => data.get(key));
+    const monthlyPhases = Array.from({ length: 12 }, (_, index) => data.get(`m${index + 1}`));
     const payload = {
       name: data.get('name'),
       targetType,
@@ -3276,6 +3277,7 @@ export async function handleSubmit(event) {
       yearId: data.get('yearId'),
       amount: data.get('amount'),
       ...(phases.some((value) => String(value ?? '').trim()) ? { phases } : {}),
+      ...(monthlyPhases.some((value) => String(value ?? '').trim()) ? { monthlyPhases } : {}),
     };
     const editingBudgetId = view.editingBudgetId;
     const result = editingBudgetId

@@ -112,6 +112,42 @@ test('budgets validate targets, years, amounts and duplicates', () => {
   assert.equal(badPhases.ok, false);
   assert.match(badPhases.error, /totals/i);
 
+  const monthly = addBudget(company, {
+    name: 'Monthly bank plan',
+    targetType: 'ledger',
+    targetId: findLedgerByName(company, 'Bank').id,
+    yearId: yearId(company),
+    amount: 1200,
+    monthlyPhases: Array(12).fill(100),
+  });
+  assert.equal(monthly.ok, true, monthly.error);
+  assert.deepEqual(monthly.budget.monthlyPhases, Array(12).fill(100));
+  const monthlyReport = budgetVsActual(company, { yearId: yearId(company), asOn: '2026-07-01' });
+  const monthlyRow = monthlyReport.rows.find((row) => row.name === 'Monthly bank plan');
+  assert.deepEqual(monthlyRow.monthlyPhases, Array(12).fill(100));
+  assert.equal(monthlyRow.phaseBudgetToDate, 400);
+  const mixedPhasing = addBudget(company, {
+    name: 'Mixed phasing',
+    targetType: 'ledger',
+    targetId: findLedgerByName(company, 'Cash').id,
+    yearId: yearId(company),
+    amount: 100,
+    phases: [25, 25, 25, 25],
+    monthlyPhases: Array(12).fill(8.34),
+  });
+  assert.equal(mixedPhasing.ok, false);
+  assert.match(mixedPhasing.error, /either quarterly or monthly/i);
+  const badMonthly = addBudget(company, {
+    name: 'Bad monthly',
+    targetType: 'ledger',
+    targetId: findLedgerByName(company, 'Capital').id,
+    yearId: yearId(company),
+    amount: 100,
+    monthlyPhases: Array(12).fill(10),
+  });
+  assert.equal(badMonthly.ok, false);
+  assert.match(badMonthly.error, /Monthly phasing totals/i);
+
   const duplicateName = addBudget(company, {
     name: 'rent plan',
     targetType: 'ledger',

@@ -368,6 +368,14 @@ inside those stages.
 - Corrected stale register entries: per-line GST is resolved; GST filing
   history and local statutory gaps are stated separately.
 
+### 2026-11-21 — Phase 68: monthly budget phasing
+
+- A budget can now carry either four quarterly amounts or twelve monthly
+  amounts, and both must total the annual budget.
+- Budget vs Actual exposes the monthly split and measures budget-to-date by the
+  elapsed month; mixed quarterly and monthly phasing is rejected.
+- Verification: 383 tests (382 pass, 1 skipped); 1,386.2 kB build.
+
 ### 2026-11-21 — Phase 67: e-invoice notes and mixed-rate lines
 
 - E-invoice drafts now cover outward credit and debit notes as CRN/DBN

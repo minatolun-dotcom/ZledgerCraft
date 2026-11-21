@@ -40,7 +40,7 @@ feature slice, L needs a data-model or workflow change.
 | GST model depth | Export/SEZ/zero-rated, bill-to/ship-to, composition, separate RCM payable, GST openings, CDNR matching, split balancing lines | KL-74, KL-75, KL-78, KL-79, KL-86, KL-96 | L |
 | E-invoice/e-way local quality | Discounts and charges in the draft, multi-vehicle data and portal-format validation | KL-94, KL-95, KL-98 | M |
 | Forex depth | Per-ledger currency, foreign openings, foreign stock/bill allocation, revaluation reversal and history | KL-64, KL-66, KL-67, KL-69 | L |
-| Cost and budget depth | Multiple cost centres per line, cost-centre openings, monthly budget phasing, revision workflow, arbitrary multi-centre budgets | KL-21–KL-24, KL-31, KL-60, KL-62, KL-63 | M–L |
+| Cost and budget depth | Multiple cost centres per line, cost-centre openings, phased revision workflow, arbitrary multi-centre budgets | KL-21–KL-24, KL-31, KL-60, KL-62, KL-63 | M–L |
 | Inventory and manufacturing | FIFO/expiry batch costing, batch-tracked BOM components, production edit/reversal, multi-godown production, automatic stock-adjustment journals, by-products/rework, godown valuation layers | KL-41, KL-44, KL-45, KL-101, KL-103–KL-107 | L |
 | Banking depth | Many-to-one statement matching, bulk adjustments, full instrument lifecycle, cheque/stationery alignment | KL-33, KL-34, KL-37–KL-40 | M |
 | Import and restore | Partial/dry-run imports, GST/TDS/cost-centre/currency columns, period-only restore, broader Tally XML and Excel coverage | KL-14–KL-18, KL-109–KL-112 | M–L |
@@ -92,7 +92,7 @@ feature slice, L needs a data-model or workflow change.
 | ID | Limit | Current behaviour / consequence |
 | --- | --- | --- |
 | KL-20 | Resolved — multi-currency added 2026-11-18 | INR remains the base currency, with voucher-level foreign currency and a Forex Revaluation report. Remaining currency gaps are KL-64–KL-69. |
-| KL-21 | Budgets support optional quarterly phasing | One budget per ledger/group per financial year, with an optional four-quarter split that must add up to the annual amount. Budget vs Actual exposes the phasing and budget-to-date for the elapsed quarter. There is no monthly phasing, revision workflow, approval, locking or carry-forward. |
+| KL-21 | Budgets support optional quarterly or monthly phasing | One budget per ledger/group per financial year, with either a four-quarter split or a twelve-month split that must add up to the annual amount. Budget vs Actual exposes the phasing and budget-to-date for the elapsed quarter or month. There is no phased revision workflow, approval, locking or carry-forward. |
 | KL-22 | Cost centres are single-allocation per line | Each voucher line can carry one cost centre; there is no split across multiple centres or percentage allocation. |
 | KL-23 | Unallocated cost is reconciled | Cost-centre rows still include only allocated lines, and the summary now shows unallocated debit, credit and net totals plus a ledger-wise unallocated table for the same period. There is no automatic allocation or per-voucher reconciliation between the two views. |
 | KL-24 | No opening-adjusted cost-centre closing or payroll/stock budget | Cost reports include a category P&L and a ledger-wise movement break-up for each centre, both limited to tagged lines. Cost-centre opening balances are not modelled, so there is no opening-adjusted trial balance/closing; untagged income/expense allocation and payroll/stock budget by centre are also absent. |
